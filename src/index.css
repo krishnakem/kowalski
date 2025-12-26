@@ -26,9 +26,9 @@
     --muted: 45 10% 88%;
     --muted-foreground: 240 4% 45%;
     
-    /* Soft Cornflower Blue - #5A72A0 */
-    --accent: 220 28% 49%;
-    --accent-foreground: 0 0% 100%;
+    /* Accent matches ink for 2-color system */
+    --accent: 240 6% 12%;
+    --accent-foreground: 45 30% 97%;
     
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
@@ -36,7 +36,7 @@
     /* Hairline dividers */
     --border: 0 0% 90%;
     --input: 240 6% 12%;
-    --ring: 220 28% 49%;
+    --ring: 240 6% 12%;
     
     --radius: 0rem;
   }
@@ -61,15 +61,15 @@
     --muted: 45 10% 88%;
     --muted-foreground: 240 4% 45%;
     
-    --accent: 220 28% 49%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 240 6% 12%;
+    --accent-foreground: 45 30% 97%;
     
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
     
     --border: 0 0% 90%;
     --input: 240 6% 12%;
-    --ring: 220 28% 49%;
+    --ring: 240 6% 12%;
   }
 }
 
