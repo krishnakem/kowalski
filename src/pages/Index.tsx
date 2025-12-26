@@ -1,12 +1,57 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import ZeroStateScreen from "@/components/screens/ZeroStateScreen";
+import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
+import GazetteScreen from "@/components/screens/GazetteScreen";
+
+type Screen = "zero" | "agent" | "gazette";
 
 const Index = () => {
+  const [currentScreen, setCurrentScreen] = useState<Screen>("zero");
+
+  const handleContinue = () => setCurrentScreen("agent");
+  const handleAgentComplete = () => setCurrentScreen("gazette");
+  const handleClose = () => setCurrentScreen("zero");
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
+    <div className="min-h-screen bg-background overflow-hidden">
+      <AnimatePresence mode="wait">
+        {currentScreen === "zero" && (
+          <motion.div
+            key="zero"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <ZeroStateScreen onContinue={handleContinue} />
+          </motion.div>
+        )}
+
+        {currentScreen === "agent" && (
+          <motion.div
+            key="agent"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <AgentActiveScreen onComplete={handleAgentComplete} />
+          </motion.div>
+        )}
+
+        {currentScreen === "gazette" && (
+          <motion.div
+            key="gazette"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <GazetteScreen onClose={handleClose} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
