@@ -1,15 +1,15 @@
 import { motion } from "framer-motion";
-import { CheckCircle2, X } from "lucide-react";
+import { PixelFloppy, PixelPin, PixelClose } from "../icons/PixelIcons";
 
 interface GazetteScreenProps {
   onClose: () => void;
 }
 
 const circleUpdates = [
-  { name: "Sarah", update: "got engaged in Kyoto", avatar: "S" },
-  { name: "Mike", update: "posted 3 photos from the launch", avatar: "M" },
-  { name: "Elena", update: "started a new role at Stripe", avatar: "E" },
-  { name: "James", update: "is traveling through Portugal", avatar: "J" },
+  { name: "Sarah", update: "got engaged in Kyoto" },
+  { name: "Mike", update: "posted 3 photos from the launch" },
+  { name: "Elena", update: "started a new role at Stripe" },
+  { name: "James", update: "is traveling through Portugal" },
 ];
 
 const worldUpdates = [
@@ -30,64 +30,89 @@ const worldUpdates = [
 const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
   const today = new Date();
   const dayName = today.toLocaleDateString("en-US", { weekday: "long" });
-  const fullDate = today.toLocaleDateString("en-US", { 
-    month: "long", 
-    day: "numeric",
-    year: "numeric"
+  const monthDay = today.toLocaleDateString("en-US", { 
+    month: "short", 
+    day: "numeric"
   });
 
+  // Get first letter for drop cap
+  const firstUpdate = worldUpdates[0];
+  const firstLetter = firstUpdate.summary.charAt(0);
+  const restOfFirst = firstUpdate.summary.slice(1);
+
   return (
-    <div className="min-h-screen flex flex-col items-center py-16 px-6">
+    <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background">
       <motion.article
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8 }}
         className="max-w-[650px] w-full"
       >
-        {/* Header */}
+        {/* Masthead */}
         <motion.header
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.2, duration: 0.6 }}
-          className="text-center mb-16 pb-8 border-b border-border/10"
+          className="text-center mb-12"
         >
-          <h1 className="text-4xl md:text-5xl font-serif text-foreground mb-4">
+          <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
             The {dayName} Brief
           </h1>
-          <p className="text-muted-foreground text-sm font-sans tracking-wide">
-            {fullDate} • 3 min read • Sunnyvale
-          </p>
+          <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-sans">
+            <PixelPin size={14} />
+            <span>{monthDay} • Sunnyvale</span>
+          </div>
         </motion.header>
+
+        {/* Divider */}
+        <div className="divider mb-12" />
+
+        {/* Lead Story with Drop Cap */}
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4, duration: 0.6 }}
+          className="mb-12"
+        >
+          <p className="text-xs text-accent font-sans tracking-widest uppercase mb-3">
+            {firstUpdate.source}
+          </p>
+          <p className="text-foreground font-sans leading-relaxed text-lg">
+            <span className="float-left text-7xl font-serif leading-none mr-3 mt-1 text-foreground">
+              {firstLetter}
+            </span>
+            {restOfFirst}
+          </p>
+        </motion.section>
+
+        {/* Divider */}
+        <div className="divider mb-12" />
 
         {/* The Circle Section */}
         <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.6 }}
-          className="mb-16"
+          transition={{ delay: 0.5, duration: 0.6 }}
+          className="mb-12"
         >
-          <h2 className="text-2xl font-serif text-foreground mb-6 flex items-center gap-3">
-            <span className="w-8 h-px bg-border/20" />
+          <h2 className="text-2xl font-serif text-foreground mb-2">
             The Circle
           </h2>
           <p className="text-muted-foreground text-sm mb-6 font-sans">
             Updates from people you care about
           </p>
 
-          <ul className="space-y-4">
+          <ul className="space-y-3">
             {circleUpdates.map((item, index) => (
               <motion.li
                 key={index}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.5 + index * 0.1, duration: 0.4 }}
-                className="flex items-center gap-4 py-3"
+                transition={{ delay: 0.6 + index * 0.1, duration: 0.4 }}
+                className="flex items-start gap-3 text-foreground font-sans"
               >
-                <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center 
-                                text-xs font-sans text-muted-foreground grayscale">
-                  {item.avatar}
-                </div>
-                <p className="text-foreground font-sans">
+                <span className="text-accent mt-0.5">•</span>
+                <p>
                   <span className="font-medium">{item.name}</span>
                   <span className="text-muted-foreground"> {item.update}</span>
                 </p>
@@ -96,15 +121,17 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
           </ul>
         </motion.section>
 
+        {/* Divider */}
+        <div className="divider mb-12" />
+
         {/* The World Section */}
         <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.8, duration: 0.6 }}
-          className="mb-16"
+          className="mb-12"
         >
-          <h2 className="text-2xl font-serif text-foreground mb-6 flex items-center gap-3">
-            <span className="w-8 h-px bg-border/20" />
+          <h2 className="text-2xl font-serif text-foreground mb-2">
             The World
           </h2>
           <p className="text-muted-foreground text-sm mb-6 font-sans">
@@ -112,18 +139,17 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
           </p>
 
           <div className="space-y-8">
-            {worldUpdates.map((item, index) => (
+            {worldUpdates.slice(1).map((item, index) => (
               <motion.div
                 key={index}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.9 + index * 0.15, duration: 0.4 }}
-                className="pb-6 border-b border-border/5 last:border-0"
               >
-                <p className="text-xs text-accent/80 font-sans tracking-wider uppercase mb-2">
+                <p className="text-xs text-accent font-sans tracking-widest uppercase mb-2">
                   {item.source}
                 </p>
-                <p className="text-foreground/90 font-sans leading-relaxed">
+                <p className="text-foreground font-sans leading-relaxed">
                   {item.summary}
                 </p>
               </motion.div>
@@ -131,23 +157,22 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
           </div>
         </motion.section>
 
+        {/* Divider */}
+        <div className="divider mb-12" />
+
         {/* Footer - All Caught Up */}
         <motion.footer
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 1.4, duration: 0.6 }}
-          className="text-center pt-12 border-t border-border/10"
+          transition={{ delay: 1.2, duration: 0.6 }}
+          className="text-center"
         >
-          <div className="flex flex-col items-center gap-6">
-            <CheckCircle2 
-              size={32} 
-              strokeWidth={1} 
-              className="text-accent/60" 
-            />
-            <p className="text-xl font-serif text-foreground/80 italic">
+          <div className="flex flex-col items-center gap-4">
+            <PixelFloppy size={32} />
+            <p className="text-xl font-serif text-foreground italic">
               You are all caught up.
             </p>
-            <p className="text-muted-foreground/50 text-sm font-sans">
+            <p className="text-muted-foreground text-sm font-sans">
               Go do something meaningful.
             </p>
 
@@ -155,13 +180,9 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={onClose}
-              className="mt-8 group inline-flex items-center gap-3 px-8 py-4 
-                         border border-border/20 rounded-xl
-                         text-foreground/80 font-sans text-sm tracking-widest uppercase
-                         hover:border-accent/30 hover:bg-accent/5
-                         transition-all duration-300"
+              className="mt-6 btn-ghost flex items-center gap-3"
             >
-              <X size={16} strokeWidth={1.5} />
+              <PixelClose size={16} />
               <span>Close App</span>
             </motion.button>
           </div>

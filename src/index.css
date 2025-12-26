@@ -2,81 +2,80 @@
 @tailwind components;
 @tailwind utilities;
 
-/* The Morning Gazette — Intellectual Dark Mode / Blueprint Aesthetic */
+/* The Morning Gazette — Calm Cream & Ink Editorial Design System */
 
 @layer base {
   :root {
-    /* Deep Space / Blueprint Palette */
-    --background: 240 15% 4%;
-    --foreground: 220 20% 94%;
+    /* The Paper - Warm Alabaster */
+    --background: 45 30% 97%;
+    --foreground: 240 6% 12%;
     
-    --card: 240 12% 6%;
-    --card-foreground: 220 20% 94%;
+    --card: 45 25% 95%;
+    --card-foreground: 240 6% 12%;
     
-    --popover: 240 12% 6%;
-    --popover-foreground: 220 20% 94%;
+    --popover: 45 25% 95%;
+    --popover-foreground: 240 6% 12%;
     
-    --primary: 220 20% 94%;
-    --primary-foreground: 240 15% 4%;
+    /* Primary is our ink color */
+    --primary: 240 6% 12%;
+    --primary-foreground: 45 30% 97%;
     
-    --secondary: 240 10% 10%;
-    --secondary-foreground: 220 20% 94%;
+    --secondary: 45 15% 92%;
+    --secondary-foreground: 240 6% 12%;
     
-    --muted: 240 10% 14%;
-    --muted-foreground: 220 15% 55%;
+    --muted: 45 10% 88%;
+    --muted-foreground: 240 4% 45%;
     
-    /* Dusty Indigo Blue - #818CF8 */
-    --accent: 235 89% 74%;
-    --accent-foreground: 240 15% 4%;
+    /* Soft Cornflower Blue - #5A72A0 */
+    --accent: 220 28% 49%;
+    --accent-foreground: 0 0% 100%;
     
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 220 20% 94%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
     
-    --border: 220 20% 94%;
-    --input: 240 10% 14%;
-    --ring: 235 89% 74%;
+    /* Hairline dividers */
+    --border: 0 0% 90%;
+    --input: 240 6% 12%;
+    --ring: 220 28% 49%;
     
-    --radius: 0.75rem;
-    
-    /* Indigo Glow */
-    --glow-indigo: 235 89% 74%;
-    --glow-soft: 235 60% 65%;
+    --radius: 0rem;
   }
 
   .dark {
-    --background: 240 15% 4%;
-    --foreground: 220 20% 94%;
+    /* Keep same for this design - it's meant to be light/paper-like */
+    --background: 45 30% 97%;
+    --foreground: 240 6% 12%;
     
-    --card: 240 12% 6%;
-    --card-foreground: 220 20% 94%;
+    --card: 45 25% 95%;
+    --card-foreground: 240 6% 12%;
     
-    --popover: 240 12% 6%;
-    --popover-foreground: 220 20% 94%;
+    --popover: 45 25% 95%;
+    --popover-foreground: 240 6% 12%;
     
-    --primary: 220 20% 94%;
-    --primary-foreground: 240 15% 4%;
+    --primary: 240 6% 12%;
+    --primary-foreground: 45 30% 97%;
     
-    --secondary: 240 10% 10%;
-    --secondary-foreground: 220 20% 94%;
+    --secondary: 45 15% 92%;
+    --secondary-foreground: 240 6% 12%;
     
-    --muted: 240 10% 14%;
-    --muted-foreground: 220 15% 55%;
+    --muted: 45 10% 88%;
+    --muted-foreground: 240 4% 45%;
     
-    --accent: 235 89% 74%;
-    --accent-foreground: 240 15% 4%;
+    --accent: 220 28% 49%;
+    --accent-foreground: 0 0% 100%;
     
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 220 20% 94%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
     
-    --border: 220 20% 94%;
-    --input: 240 10% 14%;
-    --ring: 235 89% 74%;
+    --border: 0 0% 90%;
+    --input: 240 6% 12%;
+    --ring: 220 28% 49%;
   }
 }
 
 @layer base {
   * {
-    @apply border-border/10;
+    @apply border-border;
   }
 
   body {
@@ -89,40 +88,78 @@
 }
 
 @layer utilities {
-  .glass {
-    @apply bg-card/60 backdrop-blur-xl border border-border/10;
+  /* Paper texture effect */
+  .paper {
+    background-color: hsl(var(--background));
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    background-blend-mode: overlay;
   }
   
-  .text-cream {
-    color: hsl(220 20% 94%);
+  /* Underline input style - like filling out a paper form */
+  .input-underline {
+    @apply bg-transparent border-0 border-b-2 border-foreground/20 
+           focus:border-accent focus:outline-none 
+           py-3 px-1 transition-colors duration-200;
   }
   
-  .glow-indigo {
-    box-shadow: 0 0 40px hsl(235 89% 74% / 0.15);
+  /* Dotted input for contract-like feel */
+  .input-dotted {
+    @apply bg-transparent border-0 border-b-2 border-dashed border-foreground/30 
+           focus:border-accent focus:border-solid focus:outline-none 
+           py-3 px-1 transition-all duration-200;
   }
   
-  .glow-pulse {
-    animation: glow-pulse 2s ease-in-out infinite;
+  /* Sharp button style */
+  .btn-sharp {
+    @apply bg-accent text-accent-foreground px-6 py-3 
+           font-sans text-sm tracking-wide uppercase
+           hover:bg-accent/90 transition-colors duration-200;
   }
   
-  @keyframes glow-pulse {
-    0%, 100% {
-      box-shadow: 0 0 20px hsl(235 89% 74% / 0.2), 0 0 40px hsl(235 89% 74% / 0.1);
-    }
-    50% {
-      box-shadow: 0 0 30px hsl(235 89% 74% / 0.4), 0 0 60px hsl(235 89% 74% / 0.2);
-    }
+  /* Ghost button */
+  .btn-ghost {
+    @apply bg-transparent text-foreground px-6 py-3 border-2 border-foreground/20
+           font-sans text-sm tracking-wide uppercase
+           hover:border-accent hover:text-accent transition-colors duration-200;
   }
   
-  .typewriter {
-    overflow: hidden;
-    border-right: 2px solid hsl(235 89% 74%);
-    animation: typewriter-blink 0.7s step-end infinite;
+  /* Hairline divider */
+  .divider {
+    @apply border-t border-border;
   }
   
-  @keyframes typewriter-blink {
-    50% {
-      border-color: transparent;
-    }
+  /* Drop cap for editorial feel */
+  .drop-cap::first-letter {
+    @apply float-left text-6xl font-serif leading-none mr-3 mt-1;
+  }
+  
+  /* Pixel art rendering */
+  .pixel-art {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+}
+
+@layer components {
+  /* Terminal/Log styling */
+  .terminal {
+    @apply bg-card border border-border p-4 font-mono text-sm;
+  }
+  
+  .terminal-line {
+    @apply text-muted-foreground;
+  }
+  
+  .terminal-line-active {
+    @apply text-foreground;
+  }
+  
+  /* Section styling */
+  .gazette-section {
+    @apply pb-8 mb-8 border-b border-border;
+  }
+  
+  .gazette-section:last-child {
+    @apply border-b-0;
   }
 }

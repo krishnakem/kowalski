@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Instagram, Eye, EyeOff, ArrowRight, Clock, Check, Sun, Moon } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
+import { 
+  PixelSun, 
+  PixelMoon, 
+  PixelCamera, 
+  PixelCheck, 
+  PixelArrow 
+} from "../icons/PixelIcons";
 
 interface ZeroStateScreenProps {
   onContinue: () => void;
@@ -26,7 +33,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const handleInstagramConnect = () => {
     setIsConnecting(true);
-    // Simulate connection
     setTimeout(() => {
       setIsConnecting(false);
       setIsConnected(true);
@@ -35,7 +41,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6">
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background">
       <AnimatePresence mode="wait">
         {step === "settings" && (
           <motion.div
@@ -53,15 +59,18 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               transition={{ delay: 0.1, duration: 0.6 }}
               className="text-center"
             >
-              <h1 className="text-4xl md:text-5xl font-serif text-foreground leading-tight mb-4">
+              <h1 className="text-5xl md:text-6xl font-serif text-foreground leading-tight mb-4">
                 Reclaim Your
                 <br />
                 <span className="italic">Attention.</span>
               </h1>
               <p className="text-muted-foreground text-sm font-sans">
-                Set up your daily digest preferences
+                Configure your daily digest preferences
               </p>
             </motion.div>
+
+            {/* Divider */}
+            <div className="divider" />
 
             {/* Digest Count Selection */}
             <motion.div
@@ -73,32 +82,32 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <label className="text-xs text-muted-foreground font-sans tracking-widest uppercase">
                 Daily Digests
               </label>
-              <div className="flex gap-3">
+              <div className="flex gap-4">
                 <button
                   onClick={() => setDigestCount(1)}
-                  className={`flex-1 py-4 px-4 rounded-xl border transition-all duration-300 
+                  className={`flex-1 py-4 px-4 border-2 transition-all duration-200 
                     ${digestCount === 1 
-                      ? "border-accent/50 bg-accent/5 text-foreground" 
-                      : "border-border/10 text-muted-foreground hover:border-border/20"
+                      ? "border-accent bg-accent/5 text-foreground" 
+                      : "border-border text-muted-foreground hover:border-foreground/30"
                     }`}
                 >
                   <div className="flex items-center justify-center gap-3">
-                    <Sun size={18} strokeWidth={1.5} />
+                    <PixelSun size={20} color={digestCount === 1 ? "blue" : "charcoal"} />
                     <span className="font-sans text-sm">Once a day</span>
                   </div>
                 </button>
                 <button
                   onClick={() => setDigestCount(2)}
-                  className={`flex-1 py-4 px-4 rounded-xl border transition-all duration-300 
+                  className={`flex-1 py-4 px-4 border-2 transition-all duration-200 
                     ${digestCount === 2 
-                      ? "border-accent/50 bg-accent/5 text-foreground" 
-                      : "border-border/10 text-muted-foreground hover:border-border/20"
+                      ? "border-accent bg-accent/5 text-foreground" 
+                      : "border-border text-muted-foreground hover:border-foreground/30"
                     }`}
                 >
                   <div className="flex items-center justify-center gap-3">
                     <div className="flex -space-x-1">
-                      <Sun size={16} strokeWidth={1.5} />
-                      <Moon size={16} strokeWidth={1.5} />
+                      <PixelSun size={18} color={digestCount === 2 ? "blue" : "charcoal"} />
+                      <PixelMoon size={18} color={digestCount === 2 ? "blue" : "charcoal"} />
                     </div>
                     <span className="font-sans text-sm">Twice a day</span>
                   </div>
@@ -116,23 +125,20 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <label className="text-xs text-muted-foreground font-sans tracking-widest uppercase">
                 Delivery Time{digestCount === 2 ? "s" : ""}
               </label>
-              <div className={`grid gap-4 ${digestCount === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+              <div className={`grid gap-6 ${digestCount === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
                 <div className="relative">
-                  <Clock 
-                    size={16} 
-                    className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50" 
-                  />
-                  <input
-                    type="time"
-                    value={morningTime}
-                    onChange={(e) => setMorningTime(e.target.value)}
-                    className="w-full bg-secondary/30 border border-border/10 rounded-xl py-4 px-4 pl-11
-                               text-foreground font-sans text-sm
-                               focus:outline-none focus:border-accent/40 transition-colors
-                               [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-50"
-                  />
+                  <div className="flex items-center gap-3">
+                    <PixelSun size={20} />
+                    <input
+                      type="time"
+                      value={morningTime}
+                      onChange={(e) => setMorningTime(e.target.value)}
+                      className="flex-1 input-underline text-foreground font-mono text-lg
+                                [&::-webkit-calendar-picker-indicator]:opacity-50"
+                    />
+                  </div>
                   {digestCount === 2 && (
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-muted-foreground/50">
+                    <span className="absolute -bottom-5 left-9 text-xs text-muted-foreground">
                       Morning
                     </span>
                   )}
@@ -145,20 +151,17 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     transition={{ duration: 0.3 }}
                     className="relative"
                   >
-                    <Clock 
-                      size={16} 
-                      className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50" 
-                    />
-                    <input
-                      type="time"
-                      value={eveningTime}
-                      onChange={(e) => setEveningTime(e.target.value)}
-                      className="w-full bg-secondary/30 border border-border/10 rounded-xl py-4 px-4 pl-11
-                                 text-foreground font-sans text-sm
-                                 focus:outline-none focus:border-accent/40 transition-colors
-                                 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-50"
-                    />
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-muted-foreground/50">
+                    <div className="flex items-center gap-3">
+                      <PixelMoon size={20} />
+                      <input
+                        type="time"
+                        value={eveningTime}
+                        onChange={(e) => setEveningTime(e.target.value)}
+                        className="flex-1 input-underline text-foreground font-mono text-lg
+                                  [&::-webkit-calendar-picker-indicator]:opacity-50"
+                      />
+                    </div>
+                    <span className="absolute -bottom-5 left-9 text-xs text-muted-foreground">
                       Evening
                     </span>
                   </motion.div>
@@ -166,12 +169,12 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               </div>
             </motion.div>
 
-            {/* API Key Input */}
+            {/* API Key Input - Contract/dotted style */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.4, duration: 0.5 }}
-              className="space-y-4"
+              className="space-y-4 pt-4"
             >
               <label className="text-xs text-muted-foreground font-sans tracking-widest uppercase">
                 OpenAI API Key
@@ -181,20 +184,19 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   type={showKey ? "text" : "password"}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-..."
-                  className="w-full bg-transparent border-b border-border/20 focus:border-accent/60 
-                             py-3 px-1 pr-10 text-foreground placeholder:text-muted-foreground/30
-                             focus:outline-none transition-colors duration-300 font-mono text-sm"
+                  placeholder="sk-................................................"
+                  className="w-full input-dotted text-foreground placeholder:text-foreground/20
+                             font-mono text-sm tracking-wider pr-10"
                 />
                 <button
                   onClick={() => setShowKey(!showKey)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50 
+                  className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-muted-foreground 
                              hover:text-foreground transition-colors"
                 >
-                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {showKey ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
-              <p className="text-xs text-muted-foreground/40 font-sans">
+              <p className="text-xs text-muted-foreground font-sans">
                 Your key stays local. We never store it.
               </p>
             </motion.div>
@@ -206,18 +208,11 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               transition={{ delay: 0.5, duration: 0.5 }}
               onClick={handleSettingsContinue}
               disabled={!apiKey}
-              className="w-full group inline-flex items-center justify-center gap-3 px-8 py-4 
-                         border border-border/20 rounded-xl
-                         text-foreground font-sans text-sm tracking-widest uppercase
-                         hover:border-accent/40 hover:bg-accent/5 
-                         disabled:opacity-30 disabled:cursor-not-allowed
-                         transition-all duration-300"
+              className="w-full btn-sharp flex items-center justify-center gap-3
+                        disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <span>Continue</span>
-              <ArrowRight 
-                size={16} 
-                className="transform group-hover:translate-x-1 transition-transform" 
-              />
+              <PixelArrow size={18} color="blue" className="invert" />
             </motion.button>
           </motion.div>
         )}
@@ -229,19 +224,19 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.6, ease: "easeOut" }}
-            className="max-w-md w-full text-center space-y-12"
+            className="max-w-md w-full text-center space-y-10"
           >
-            {/* Instagram Icon */}
+            {/* Camera Icon */}
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.1, duration: 0.5 }}
               className="flex justify-center"
             >
-              <div className={`w-24 h-24 rounded-2xl flex items-center justify-center transition-all duration-500
+              <div className={`w-28 h-28 border-2 flex items-center justify-center transition-all duration-500
                 ${isConnected 
-                  ? "bg-accent/20 border border-accent/40" 
-                  : "bg-secondary border border-border/10"
+                  ? "border-accent bg-accent/10" 
+                  : "border-foreground/20 bg-card"
                 }`}
               >
                 {isConnected ? (
@@ -250,10 +245,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", stiffness: 200 }}
                   >
-                    <Check size={36} className="text-accent" strokeWidth={1.5} />
+                    <PixelCheck size={48} color="blue" />
                   </motion.div>
                 ) : (
-                  <Instagram size={36} className="text-foreground/60" strokeWidth={1.5} />
+                  <PixelCamera size={48} />
                 )}
               </div>
             </motion.div>
@@ -265,8 +260,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               transition={{ delay: 0.2, duration: 0.5 }}
               className="space-y-4"
             >
-              <h2 className="text-3xl font-serif text-foreground">
-                {isConnected ? "Connected" : "Connect Instagram"}
+              <h2 className="text-4xl font-serif text-foreground">
+                {isConnected ? "Connected" : "Connect Camera"}
               </h2>
               <p className="text-muted-foreground text-sm font-sans max-w-xs mx-auto leading-relaxed">
                 {isConnected 
@@ -282,22 +277,25 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.3, duration: 0.5 }}
-                className="space-y-3"
+                className="space-y-3 text-left"
               >
-                <div className="glass rounded-xl p-4 text-left">
-                  <p className="text-xs text-muted-foreground font-sans leading-relaxed">
-                    <span className="text-accent">•</span> Runs silently in the background
+                <div className="border border-border p-4 bg-card">
+                  <p className="text-sm text-foreground font-sans">
+                    <span className="text-accent mr-2">•</span>
+                    Runs silently in the background
                   </p>
                 </div>
-                <div className="glass rounded-xl p-4 text-left">
-                  <p className="text-xs text-muted-foreground font-sans leading-relaxed">
-                    <span className="text-accent">•</span> Blocks ads and irrelevant content
+                <div className="border border-border p-4 bg-card">
+                  <p className="text-sm text-foreground font-sans">
+                    <span className="text-accent mr-2">•</span>
+                    Blocks ads and irrelevant content
                   </p>
                 </div>
-                <div className="glass rounded-xl p-4 text-left">
-                  <p className="text-xs text-muted-foreground font-sans leading-relaxed">
-                    <span className="text-accent">•</span> Delivers your digest at{" "}
-                    <span className="text-foreground/80 font-mono">
+                <div className="border border-border p-4 bg-card">
+                  <p className="text-sm text-foreground font-sans">
+                    <span className="text-accent mr-2">•</span>
+                    Delivers your digest at{" "}
+                    <span className="font-mono text-accent">
                       {morningTime}
                       {digestCount === 2 && ` & ${eveningTime}`}
                     </span>
@@ -314,22 +312,19 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 transition={{ delay: 0.4, duration: 0.5 }}
                 onClick={handleInstagramConnect}
                 disabled={isConnecting}
-                className="w-full group inline-flex items-center justify-center gap-3 px-8 py-4 
-                           bg-foreground text-background rounded-xl
-                           font-sans text-sm tracking-widest uppercase
-                           hover:bg-foreground/90
-                           disabled:opacity-70
-                           transition-all duration-300"
+                className="w-full btn-sharp flex items-center justify-center gap-3
+                          disabled:opacity-70"
               >
                 {isConnecting ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-accent-foreground/30 border-t-accent-foreground animate-spin" />
                     <span>Connecting...</span>
                   </>
                 ) : (
                   <>
-                    <Instagram size={16} />
-                    <span>Connect Instagram</span>
+                    <PixelCamera size={18} className="invert" />
+                    <span>Connect Camera</span>
+                    <PixelArrow size={18} className="invert" />
                   </>
                 )}
               </motion.button>
