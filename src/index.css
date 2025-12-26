@@ -2,74 +2,75 @@
 @tailwind components;
 @tailwind utilities;
 
-/* The Morning Gazette — Dark Academia Design System */
+/* The Morning Gazette — Intellectual Dark Mode / Blueprint Aesthetic */
 
 @layer base {
   :root {
-    /* Dark Academia Palette */
-    --background: 240 10% 3.9%;
-    --foreground: 40 20% 94%;
+    /* Deep Space / Blueprint Palette */
+    --background: 240 15% 4%;
+    --foreground: 220 20% 94%;
     
-    --card: 240 10% 5%;
-    --card-foreground: 40 20% 94%;
+    --card: 240 12% 6%;
+    --card-foreground: 220 20% 94%;
     
-    --popover: 240 10% 5%;
-    --popover-foreground: 40 20% 94%;
+    --popover: 240 12% 6%;
+    --popover-foreground: 220 20% 94%;
     
-    --primary: 40 20% 94%;
-    --primary-foreground: 240 10% 3.9%;
+    --primary: 220 20% 94%;
+    --primary-foreground: 240 15% 4%;
     
-    --secondary: 240 5% 12%;
-    --secondary-foreground: 40 20% 94%;
+    --secondary: 240 10% 10%;
+    --secondary-foreground: 220 20% 94%;
     
-    --muted: 240 5% 15%;
-    --muted-foreground: 40 10% 60%;
+    --muted: 240 10% 14%;
+    --muted-foreground: 220 15% 55%;
     
-    --accent: 35 90% 55%;
-    --accent-foreground: 240 10% 3.9%;
+    /* Dusty Indigo Blue - #818CF8 */
+    --accent: 235 89% 74%;
+    --accent-foreground: 240 15% 4%;
     
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 40 20% 94%;
+    --destructive-foreground: 220 20% 94%;
     
-    --border: 0 0% 100%;
-    --input: 240 5% 15%;
-    --ring: 35 90% 55%;
+    --border: 220 20% 94%;
+    --input: 240 10% 14%;
+    --ring: 235 89% 74%;
     
     --radius: 0.75rem;
     
-    /* Agent Glow */
-    --glow-amber: 35 90% 55%;
-    --glow-soft: 35 60% 45%;
+    /* Indigo Glow */
+    --glow-indigo: 235 89% 74%;
+    --glow-soft: 235 60% 65%;
   }
 
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 40 20% 94%;
+    --background: 240 15% 4%;
+    --foreground: 220 20% 94%;
     
-    --card: 240 10% 5%;
-    --card-foreground: 40 20% 94%;
+    --card: 240 12% 6%;
+    --card-foreground: 220 20% 94%;
     
-    --popover: 240 10% 5%;
-    --popover-foreground: 40 20% 94%;
+    --popover: 240 12% 6%;
+    --popover-foreground: 220 20% 94%;
     
-    --primary: 40 20% 94%;
-    --primary-foreground: 240 10% 3.9%;
+    --primary: 220 20% 94%;
+    --primary-foreground: 240 15% 4%;
     
-    --secondary: 240 5% 12%;
-    --secondary-foreground: 40 20% 94%;
+    --secondary: 240 10% 10%;
+    --secondary-foreground: 220 20% 94%;
     
-    --muted: 240 5% 15%;
-    --muted-foreground: 40 10% 60%;
+    --muted: 240 10% 14%;
+    --muted-foreground: 220 15% 55%;
     
-    --accent: 35 90% 55%;
-    --accent-foreground: 240 10% 3.9%;
+    --accent: 235 89% 74%;
+    --accent-foreground: 240 15% 4%;
     
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 40 20% 94%;
+    --destructive-foreground: 220 20% 94%;
     
-    --border: 0 0% 100%;
-    --input: 240 5% 15%;
-    --ring: 35 90% 55%;
+    --border: 220 20% 94%;
+    --input: 240 10% 14%;
+    --ring: 235 89% 74%;
   }
 }
 
@@ -93,11 +94,11 @@
   }
   
   .text-cream {
-    color: hsl(40 20% 94%);
+    color: hsl(220 20% 94%);
   }
   
-  .glow-amber {
-    box-shadow: 0 0 40px hsl(35 90% 55% / 0.15);
+  .glow-indigo {
+    box-shadow: 0 0 40px hsl(235 89% 74% / 0.15);
   }
   
   .glow-pulse {
@@ -106,16 +107,16 @@
   
   @keyframes glow-pulse {
     0%, 100% {
-      box-shadow: 0 0 20px hsl(35 90% 55% / 0.2), 0 0 40px hsl(35 90% 55% / 0.1);
+      box-shadow: 0 0 20px hsl(235 89% 74% / 0.2), 0 0 40px hsl(235 89% 74% / 0.1);
     }
     50% {
-      box-shadow: 0 0 30px hsl(35 90% 55% / 0.4), 0 0 60px hsl(35 90% 55% / 0.2);
+      box-shadow: 0 0 30px hsl(235 89% 74% / 0.4), 0 0 60px hsl(235 89% 74% / 0.2);
     }
   }
   
   .typewriter {
     overflow: hidden;
-    border-right: 2px solid hsl(35 90% 55%);
+    border-right: 2px solid hsl(235 89% 74%);
     animation: typewriter-blink 0.7s step-end infinite;
   }
   
