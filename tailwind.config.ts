@@ -52,6 +52,9 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        ink: "#1C1C1E",
+        paper: "#F9F8F5",
+        cornflower: "#5A72A0",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -75,15 +78,13 @@ export default {
           from: { opacity: "0", transform: "translateY(20px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
-        "pulse-glow": {
-          "0%, 100%": { 
-            boxShadow: "0 0 20px hsl(235 89% 74% / 0.2), 0 0 40px hsl(235 89% 74% / 0.1)",
-            transform: "scale(1)"
-          },
-          "50%": { 
-            boxShadow: "0 0 40px hsl(235 89% 74% / 0.4), 0 0 80px hsl(235 89% 74% / 0.2)",
-            transform: "scale(1.02)"
-          },
+        "blink": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0" },
+        },
+        "scan": {
+          "0%, 100%": { transform: "translateY(-2px)" },
+          "50%": { transform: "translateY(2px)" },
         },
       },
       animation: {
@@ -91,7 +92,8 @@ export default {
         "accordion-up": "accordion-up 0.2s ease-out",
         "fade-in": "fade-in 0.6s ease-out forwards",
         "fade-in-up": "fade-in-up 0.8s ease-out forwards",
-        "pulse-glow": "pulse-glow 2s ease-in-out infinite",
+        "blink": "blink 1s step-end infinite",
+        "scan": "scan 2s ease-in-out infinite",
       },
     },
   },
