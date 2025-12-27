@@ -4,7 +4,8 @@ import { Eye, EyeOff } from "lucide-react";
 import { 
   PixelSun, 
   PixelMoon, 
-  PixelArrow 
+  PixelArrow,
+  WavingPenguin
 } from "../icons/PixelIcons";
 
 interface ZeroStateScreenProps {
@@ -83,7 +84,21 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background">
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
+      {/* Waving Penguin in bottom left - only on hook step */}
+      <AnimatePresence>
+        {step === "hook" && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            className="fixed bottom-8 left-8"
+          >
+            <WavingPenguin size={80} />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence mode="wait">
         {/* Step 1: The Hook */}
         {step === "hook" && (
