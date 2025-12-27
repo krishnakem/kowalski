@@ -177,65 +177,65 @@ export const AnimatedPixelEye = ({ className, size = 64 }: PixelIconProps) => (
   </motion.div>
 );
 
-// Animated Penguin typing on computer
+// Animated Penguin typing on Macintosh-style laptop at a table
 export const AnimatedPixelPenguin = ({ className, size = 160 }: { className?: string; size?: number }) => (
   <div className={className}>
     <svg width={size} height={size} viewBox="0 0 64 64" style={{ imageRendering: "pixelated" }}>
-      {/* Computer/Monitor */}
-      <rect x="8" y="38" width="28" height="20" fill="#1C1C1E" />
-      <rect x="10" y="40" width="24" height="14" fill="#F9F8F5" />
-      <rect x="18" y="58" width="8" height="2" fill="#1C1C1E" />
-      <rect x="14" y="60" width="16" height="2" fill="#1C1C1E" />
+      {/* Table */}
+      <rect x="0" y="52" width="64" height="4" fill="#1C1C1E" />
+      <rect x="4" y="56" width="4" height="8" fill="#1C1C1E" />
+      <rect x="56" y="56" width="4" height="8" fill="#1C1C1E" />
+      
+      {/* Macintosh-style laptop base */}
+      <rect x="6" y="46" width="26" height="6" fill="#1C1C1E" />
+      <rect x="8" y="47" width="22" height="4" fill="#F9F8F5" opacity="0.2" />
+      
+      {/* Macintosh-style laptop screen (iconic shape) */}
+      <rect x="8" y="26" width="22" height="20" fill="#1C1C1E" />
+      <rect x="10" y="28" width="18" height="14" fill="#F9F8F5" />
+      {/* Screen bezel detail */}
+      <rect x="17" y="43" width="4" height="2" fill="#F9F8F5" opacity="0.3" />
       
       {/* Screen content - blinking cursor */}
       <motion.rect
-        x="12" y="42" width="4" height="2"
+        x="12" y="30" width="3" height="2"
         fill="#1C1C1E"
         animate={{ opacity: [1, 0, 1] }}
         transition={{ duration: 0.8, repeat: Infinity }}
       />
-      <rect x="12" y="46" width="16" height="1" fill="#1C1C1E" opacity="0.3" />
-      <rect x="12" y="49" width="12" height="1" fill="#1C1C1E" opacity="0.3" />
-      
-      {/* Keyboard */}
-      <rect x="8" y="56" width="28" height="4" fill="#1C1C1E" />
-      <rect x="10" y="57" width="2" height="2" fill="#F9F8F5" opacity="0.3" />
-      <rect x="14" y="57" width="2" height="2" fill="#F9F8F5" opacity="0.3" />
-      <rect x="18" y="57" width="2" height="2" fill="#F9F8F5" opacity="0.3" />
-      <rect x="22" y="57" width="2" height="2" fill="#F9F8F5" opacity="0.3" />
-      <rect x="26" y="57" width="2" height="2" fill="#F9F8F5" opacity="0.3" />
-      <rect x="30" y="57" width="2" height="2" fill="#F9F8F5" opacity="0.3" />
+      <rect x="12" y="34" width="12" height="1" fill="#1C1C1E" opacity="0.3" />
+      <rect x="12" y="37" width="8" height="1" fill="#1C1C1E" opacity="0.3" />
       
       {/* Penguin Body */}
-      <rect x="38" y="24" width="16" height="20" fill="#1C1C1E" />
-      <rect x="40" y="28" width="12" height="12" fill="#F9F8F5" />
+      <rect x="38" y="28" width="14" height="18" fill="#1C1C1E" />
+      <rect x="40" y="32" width="10" height="10" fill="#F9F8F5" />
       
       {/* Penguin Head */}
-      <rect x="40" y="12" width="12" height="12" fill="#1C1C1E" />
+      <rect x="40" y="16" width="10" height="12" fill="#1C1C1E" />
       
       {/* Eyes */}
-      <rect x="42" y="16" width="2" height="2" fill="#F9F8F5" />
-      <rect x="48" y="16" width="2" height="2" fill="#F9F8F5" />
+      <rect x="42" y="20" width="2" height="2" fill="#F9F8F5" />
+      <rect x="46" y="20" width="2" height="2" fill="#F9F8F5" />
       
-      {/* Beak */}
-      <rect x="45" y="20" width="4" height="2" fill="#E8A838" />
-      <rect x="46" y="22" width="2" height="1" fill="#E8A838" />
+      {/* Beak - charcoal outline style */}
+      <rect x="44" y="24" width="4" height="2" fill="#F9F8F5" />
+      <rect x="45" y="24" width="2" height="2" fill="#1C1C1E" />
       
-      {/* Feet */}
-      <rect x="40" y="44" width="4" height="2" fill="#E8A838" />
-      <rect x="48" y="44" width="4" height="2" fill="#E8A838" />
+      {/* Feet on table */}
+      <rect x="40" y="46" width="4" height="6" fill="#1C1C1E" />
+      <rect x="48" y="46" width="4" height="6" fill="#1C1C1E" />
       
       {/* Typing arm/flipper - animated */}
       <motion.g
-        animate={{ y: [0, 2, 0] }}
-        transition={{ duration: 0.3, repeat: Infinity, ease: "easeInOut" }}
+        animate={{ y: [0, 1, 0] }}
+        transition={{ duration: 0.25, repeat: Infinity, ease: "easeInOut" }}
       >
-        <rect x="36" y="32" width="4" height="8" fill="#1C1C1E" />
-        <rect x="32" y="38" width="6" height="4" fill="#1C1C1E" />
+        <rect x="36" y="34" width="4" height="6" fill="#1C1C1E" />
+        <rect x="30" y="40" width="8" height="4" fill="#1C1C1E" />
       </motion.g>
       
-      {/* Static arm */}
-      <rect x="52" y="30" width="4" height="10" fill="#1C1C1E" />
+      {/* Static arm resting */}
+      <rect x="50" y="34" width="4" height="8" fill="#1C1C1E" />
     </svg>
   </div>
 );
