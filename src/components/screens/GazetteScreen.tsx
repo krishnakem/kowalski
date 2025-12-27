@@ -58,7 +58,7 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
           <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
             The {dayName} Brief
           </h1>
-          <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-sans">
+          <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic">
             <PixelPin size={14} />
             <span>{monthDay} • Sunnyvale</span>
           </div>
@@ -169,7 +169,7 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
         >
           <div className="flex flex-col items-center gap-4">
             <PixelFloppy size={32} />
-            <p className="text-xl font-serif text-foreground italic">
+            <p className="text-xl font-serif text-foreground italic tracking-tight">
               You are all caught up.
             </p>
             <p className="text-muted-foreground text-sm font-sans">
