@@ -43,7 +43,7 @@ const TypewriterText = ({
   }, [text, speed, onComplete]);
 
   return (
-    <span className="font-mono text-foreground">
+    <span className="font-serif text-foreground">
       {displayedText}
       {!isComplete && (
         <motion.span
@@ -212,7 +212,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="sk-..."
                   className="w-full input-dotted text-foreground placeholder:text-foreground/30
-                             font-mono text-lg tracking-wider pr-12 py-4"
+                             font-sans text-lg tracking-wider pr-12 py-4"
                 />
                 <button
                   onClick={() => setShowKey(!showKey)}
