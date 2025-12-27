@@ -265,8 +265,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               </h2>
               <p className="text-muted-foreground text-sm font-sans max-w-xs mx-auto leading-relaxed">
                 {isConnected 
-                  ? "Your Vision Agent is now ready to work in the background."
-                  : "Allow the Vision Agent to browse your feed silently throughout the day and surface what matters."
+                  ? "Kowalski is now ready to work in the background."
+                  : "Allow Kowalski to browse your feed silently throughout the day and surface what matters."
                 }
               </p>
             </motion.div>
