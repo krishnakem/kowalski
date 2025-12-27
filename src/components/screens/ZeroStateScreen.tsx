@@ -261,7 +261,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               className="space-y-4"
             >
               <h2 className="text-4xl font-serif text-foreground">
-                {isConnected ? "Connected" : "Connect Camera"}
+                {isConnected ? "Connected" : "Connect Instagram"}
               </h2>
               <p className="text-muted-foreground text-sm font-sans max-w-xs mx-auto leading-relaxed">
                 {isConnected 
@@ -323,7 +323,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 ) : (
                   <>
                     <PixelCamera size={18} className="invert" />
-                    <span>Connect Camera</span>
+                    <span>Connect Instagram</span>
                     <PixelArrow size={18} className="invert" />
                   </>
                 )}
