@@ -92,7 +92,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     }`}
                 >
                   <div className="flex items-center justify-center gap-3">
-                    <PixelSun size={20} color="orange" />
+                    <PixelSun size={20} color={digestCount === 1 ? "orange" : "charcoal"} />
                     <span className="font-sans text-sm">Once a day</span>
                   </div>
                 </button>
@@ -106,8 +106,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 >
                   <div className="flex items-center justify-center gap-3">
                     <div className="flex -space-x-1">
-                      <PixelSun size={18} color="orange" />
-                      <PixelMoon size={18} color="yellow" />
+                      <PixelSun size={18} color={digestCount === 2 ? "orange" : "charcoal"} />
+                      <PixelMoon size={18} color={digestCount === 2 ? "yellow" : "charcoal"} />
                     </div>
                     <span className="font-sans text-sm">Twice a day</span>
                   </div>
