@@ -68,7 +68,7 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
         transition={{ delay: 0.3 }}
         className="text-muted-foreground text-sm font-sans tracking-widest uppercase mb-8"
       >
-        Vision Agent Active
+        Kowalski Active
       </motion.p>
 
       {/* Progress Bar */}
