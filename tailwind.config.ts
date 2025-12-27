@@ -15,7 +15,7 @@ export default {
     extend: {
       fontFamily: {
         serif: ['Instrument Serif', 'Georgia', 'serif'],
-        sans: ['Geist', 'system-ui', 'sans-serif'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
       },
       colors: {
