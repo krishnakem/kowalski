@@ -92,7 +92,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     }`}
                 >
                   <div className="flex items-center justify-center gap-3">
-                    <PixelSun size={20} color={digestCount === 1 ? "blue" : "charcoal"} />
+                    <PixelSun size={20} color="orange" />
                     <span className="font-sans text-sm">Once a day</span>
                   </div>
                 </button>
@@ -106,8 +106,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 >
                   <div className="flex items-center justify-center gap-3">
                     <div className="flex -space-x-1">
-                      <PixelSun size={18} color={digestCount === 2 ? "blue" : "charcoal"} />
-                      <PixelMoon size={18} color={digestCount === 2 ? "blue" : "charcoal"} />
+                      <PixelSun size={18} color="orange" />
+                      <PixelMoon size={18} color="yellow" />
                     </div>
                     <span className="font-sans text-sm">Twice a day</span>
                   </div>
@@ -128,7 +128,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <div className={`grid gap-6 ${digestCount === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
                 <div className="relative">
                   <div className="flex items-center gap-3">
-                    <PixelSun size={20} />
+                    <PixelSun size={20} color="orange" />
                     <input
                       type="time"
                       value={morningTime}
@@ -152,7 +152,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     className="relative"
                   >
                     <div className="flex items-center gap-3">
-                      <PixelMoon size={20} />
+                      <PixelMoon size={20} color="yellow" />
                       <input
                         type="time"
                         value={eveningTime}
