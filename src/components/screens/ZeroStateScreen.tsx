@@ -15,6 +15,12 @@ interface ZeroStateScreenProps {
 type DigestCount = 1 | 2;
 type Step = "hook" | "routine" | "key";
 
+const TIME_OPTIONS = [
+  "6:00 AM", "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
+  "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", 
+  "8:00 PM", "9:00 PM", "10:00 PM"
+];
+
 const TypewriterText = ({ 
   text, 
   onComplete,
@@ -65,9 +71,11 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [step, setStep] = useState<Step>("hook");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
-  const [digestCount, setDigestCount] = useState<DigestCount>(1);
+  const [digestCount, setDigestCount] = useState<DigestCount | null>(null);
   const [typingComplete, setTypingComplete] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const [morningTime, setMorningTime] = useState("8:00 AM");
+  const [eveningTime, setEveningTime] = useState("6:00 PM");
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -87,7 +95,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const handleRoutineSelect = (count: DigestCount) => {
     setDigestCount(count);
-    setTimeout(() => setStep("key"), 300);
+  };
+
+  const handleRoutineContinue = () => {
+    setStep("key");
   };
 
   const handleInitialize = () => {
@@ -190,8 +201,12 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 whileHover={{ y: -4, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}
                 transition={{ duration: 0.2 }}
                 onClick={() => handleRoutineSelect(1)}
-                className="aspect-square border-2 border-foreground/20 p-8 flex flex-col items-center justify-center gap-6
-                           hover:border-foreground transition-colors duration-200 bg-card"
+                className={`aspect-square border-2 p-8 flex flex-col items-center justify-center gap-6
+                           transition-colors duration-200 bg-card ${
+                             digestCount === 1 
+                               ? "border-foreground" 
+                               : "border-foreground/20 hover:border-foreground"
+                           }`}
               >
                 <PixelSun size={48} color="charcoal" />
                 <span className="font-sans text-foreground text-lg">Once a day</span>
@@ -202,8 +217,12 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 whileHover={{ y: -4, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}
                 transition={{ duration: 0.2 }}
                 onClick={() => handleRoutineSelect(2)}
-                className="aspect-square border-2 border-foreground/20 p-8 flex flex-col items-center justify-center gap-6
-                           hover:border-foreground transition-colors duration-200 bg-card"
+                className={`aspect-square border-2 p-8 flex flex-col items-center justify-center gap-6
+                           transition-colors duration-200 bg-card ${
+                             digestCount === 2 
+                               ? "border-foreground" 
+                               : "border-foreground/20 hover:border-foreground"
+                           }`}
               >
                 <div className="flex items-center gap-2">
                   <PixelSun size={40} color="charcoal" />
@@ -212,6 +231,81 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 <span className="font-sans text-foreground text-lg">Twice a day</span>
               </motion.button>
             </motion.div>
+
+            {/* Time Preference Section */}
+            <AnimatePresence>
+              {digestCount && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-8"
+                >
+                  <div className="space-y-6">
+                    {/* Morning/Single Time */}
+                    <div className="flex flex-col items-center gap-3">
+                      <label className="text-sm text-muted-foreground font-sans flex items-center gap-2">
+                        <PixelSun size={16} color="charcoal" />
+                        {digestCount === 1 ? "Delivery time" : "Morning digest"}
+                      </label>
+                      <select
+                        value={morningTime}
+                        onChange={(e) => setMorningTime(e.target.value)}
+                        className="bg-transparent border-2 border-foreground/20 px-6 py-3 font-sans text-foreground 
+                                   focus:border-foreground outline-none transition-colors cursor-pointer"
+                      >
+                        {TIME_OPTIONS.map((time) => (
+                          <option key={time} value={time} className="bg-background">
+                            {time}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Evening Time (only for twice a day) */}
+                    {digestCount === 2 && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex flex-col items-center gap-3"
+                      >
+                        <label className="text-sm text-muted-foreground font-sans flex items-center gap-2">
+                          <PixelMoon size={16} color="charcoal" />
+                          Evening digest
+                        </label>
+                        <select
+                          value={eveningTime}
+                          onChange={(e) => setEveningTime(e.target.value)}
+                          className="bg-transparent border-2 border-foreground/20 px-6 py-3 font-sans text-foreground 
+                                     focus:border-foreground outline-none transition-colors cursor-pointer"
+                        >
+                          {TIME_OPTIONS.map((time) => (
+                            <option key={time} value={time} className="bg-background">
+                              {time}
+                            </option>
+                          ))}
+                        </select>
+                      </motion.div>
+                    )}
+                  </div>
+
+                  {/* Continue Button */}
+                  <motion.button
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.2 }}
+                    onClick={handleRoutineContinue}
+                    className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
+                               text-foreground font-sans text-sm tracking-wider uppercase
+                               hover:bg-foreground hover:text-background transition-all duration-200"
+                  >
+                    <span>Continue</span>
+                    <PixelArrow size={16} color="charcoal" />
+                  </motion.button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
 
