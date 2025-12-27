@@ -245,7 +245,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", stiffness: 200 }}
                   >
-                    <PixelCheck size={48} color="blue" />
+                    <PixelCheck size={48} color="charcoal" />
                   </motion.div>
                 ) : (
                   <PixelInstagram size={48} />
