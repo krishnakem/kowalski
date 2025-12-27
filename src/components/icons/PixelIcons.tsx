@@ -45,18 +45,17 @@ export const PixelMoon = ({ className, size = 24, color = "charcoal" }: PixelIco
   </svg>
 );
 
-export const PixelCamera = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelInstagram = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
-    <rect x="3" y="7" width="18" height="12" fill={getColor(color)} />
-    <rect x="5" y="9" width="14" height="8" fill="#F9F8F5" />
-    <rect x="8" y="4" width="8" height="3" fill={getColor(color)} />
-    <rect x="9" y="11" width="6" height="2" fill={getColor(color)} />
-    <rect x="11" y="9" width="2" height="6" fill={getColor(color)} />
-    <rect x="9" y="9" width="2" height="2" fill={getColor(color)} />
-    <rect x="13" y="9" width="2" height="2" fill={getColor(color)} />
-    <rect x="9" y="13" width="2" height="2" fill={getColor(color)} />
-    <rect x="13" y="13" width="2" height="2" fill={getColor(color)} />
-    <rect x="17" y="9" width="2" height="2" fill={getColor(color)} />
+    {/* Outer rounded square */}
+    <rect x="4" y="4" width="16" height="16" fill={getColor(color)} />
+    <rect x="6" y="6" width="12" height="12" fill="#F9F8F5" />
+    {/* Inner circle (lens) */}
+    <rect x="9" y="9" width="6" height="6" fill={getColor(color)} />
+    <rect x="10" y="10" width="4" height="4" fill="#F9F8F5" />
+    <rect x="11" y="11" width="2" height="2" fill={getColor(color)} />
+    {/* Flash dot */}
+    <rect x="16" y="6" width="2" height="2" fill={getColor(color)} />
   </svg>
 );
 

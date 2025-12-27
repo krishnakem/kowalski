@@ -4,7 +4,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { 
   PixelSun, 
   PixelMoon, 
-  PixelCamera, 
+  PixelInstagram, 
   PixelCheck, 
   PixelArrow 
 } from "../icons/PixelIcons";
@@ -248,7 +248,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     <PixelCheck size={48} color="blue" />
                   </motion.div>
                 ) : (
-                  <PixelCamera size={48} />
+                  <PixelInstagram size={48} />
                 )}
               </div>
             </motion.div>
@@ -322,7 +322,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   </>
                 ) : (
                   <>
-                    <PixelCamera size={18} className="invert" />
+                    <PixelInstagram size={18} className="invert" />
                     <span>Connect Instagram</span>
                     <PixelArrow size={18} className="invert" />
                   </>
