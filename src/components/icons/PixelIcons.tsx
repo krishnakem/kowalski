@@ -3,12 +3,18 @@ import { motion } from "framer-motion";
 interface PixelIconProps {
   className?: string;
   size?: number;
-  color?: "charcoal" | "blue";
+  color?: "charcoal" | "blue" | "orange" | "yellow";
 }
 
 // 24x24 pixel grid icons rendered as SVG
-const getColor = (color: "charcoal" | "blue" = "charcoal") => 
-  color === "blue" ? "#5A72A0" : "#1C1C1E";
+const getColor = (color: "charcoal" | "blue" | "orange" | "yellow" = "charcoal") => {
+  switch (color) {
+    case "blue": return "#5A72A0";
+    case "orange": return "#D4854A";
+    case "yellow": return "#C9B463";
+    default: return "#1C1C1E";
+  }
+};
 
 export const PixelSun = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
