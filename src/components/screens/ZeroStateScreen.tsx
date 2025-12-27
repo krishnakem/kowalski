@@ -271,39 +271,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               </p>
             </motion.div>
 
-            {/* Info Cards */}
-            {!isConnected && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.3, duration: 0.5 }}
-                className="space-y-3 text-left"
-              >
-                <div className="border border-border p-4 bg-card">
-                  <p className="text-sm text-foreground font-sans">
-                    <span className="text-accent mr-2">•</span>
-                    Runs silently in the background
-                  </p>
-                </div>
-                <div className="border border-border p-4 bg-card">
-                  <p className="text-sm text-foreground font-sans">
-                    <span className="text-accent mr-2">•</span>
-                    Blocks ads and irrelevant content
-                  </p>
-                </div>
-                <div className="border border-border p-4 bg-card">
-                  <p className="text-sm text-foreground font-sans">
-                    <span className="text-accent mr-2">•</span>
-                    Delivers your digest at{" "}
-                    <span className="font-mono text-accent">
-                      {morningTime}
-                      {digestCount === 2 && ` & ${eveningTime}`}
-                    </span>
-                  </p>
-                </div>
-              </motion.div>
-            )}
-
             {/* Connect Button */}
             {!isConnected && (
               <motion.button
