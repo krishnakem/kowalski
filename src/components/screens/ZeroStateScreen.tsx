@@ -93,7 +93,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
           >
             <div className="text-2xl md:text-3xl leading-relaxed">
               <TypewriterText 
-                text="The internet is noisy. Let's filter the signal."
+                text="Social Media is addictive. Let Kowalski do the scrolling for you."
                 onComplete={() => setTypingComplete(true)}
                 speed={30}
               />
