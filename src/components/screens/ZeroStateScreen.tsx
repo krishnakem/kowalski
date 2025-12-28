@@ -349,7 +349,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 Bring Your Own Key.
               </h2>
               <p className="text-muted-foreground text-sm font-sans leading-relaxed max-w-sm mx-auto">
-                Kowalski runs entirely on your local machine. Enter your OpenAI key to start the analysis.
+                Kowalski uses your LLM to create it's analysis.
               </p>
             </motion.div>
 
