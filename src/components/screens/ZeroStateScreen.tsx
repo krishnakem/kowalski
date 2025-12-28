@@ -166,19 +166,27 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-lg w-full text-center space-y-12"
           >
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-              className="text-5xl leading-relaxed space-y-2"
-            >
-              <div className="font-serif text-foreground">Social Media is a drug.</div>
-              <TypewriterText 
-                text="Kowalski gets high for you."
-                onComplete={() => setTypingComplete(true)}
-                speed={30}
-              />
-            </motion.div>
+            <div className="text-5xl leading-relaxed space-y-2">
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.7, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                className="font-serif text-foreground"
+              >
+                Social Media is a drug.
+              </motion.div>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.4, delay: 0.6 }}
+              >
+                <TypewriterText 
+                  text="Kowalski gets high for you."
+                  onComplete={() => setTypingComplete(true)}
+                  speed={30}
+                />
+              </motion.div>
+            </div>
 
             <AnimatePresence>
               {typingComplete && (
