@@ -1,5 +1,8 @@
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { Settings } from "lucide-react";
 import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
+import { Button } from "@/components/ui/button";
 
 interface GazetteScreenProps {
   onClose: () => void;
@@ -28,6 +31,7 @@ const worldUpdates = [
 ];
 
 const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
+  const navigate = useNavigate();
   const today = new Date();
   const dayName = today.toLocaleDateString("en-US", { weekday: "long" });
   const monthDay = today.toLocaleDateString("en-US", { 
@@ -41,7 +45,24 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
   const restOfFirst = firstUpdate.summary.slice(1);
 
   return (
-    <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background">
+    <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background relative">
+      {/* Settings Button */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 1, duration: 0.5 }}
+        className="absolute top-6 right-6"
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate("/settings")}
+          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+        >
+          <Settings className="w-5 h-5" />
+        </Button>
+      </motion.div>
+
       <motion.article
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
