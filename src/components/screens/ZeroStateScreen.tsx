@@ -82,6 +82,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [eveningTime, setEveningTime] = useState("6:00 PM");
   const [instagramPhase, setInstagramPhase] = useState<InstagramPhase>("trigger");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [usageCap, setUsageCap] = useState(10);
 
   // Smooth penguin animation using springs
   const mouseX = useMotionValue(0);
@@ -114,6 +115,14 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const handleInitialize = () => {
     if (apiKey) {
+      // Save settings to localStorage
+      localStorage.setItem('kowalski_settings', JSON.stringify({
+        apiKey,
+        usageCap,
+        digestCount,
+        morningTime,
+        eveningTime,
+      }));
       setStep("instagram");
     }
   };
@@ -375,6 +384,46 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 >
                   {showKey ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
+              </div>
+            </motion.div>
+
+            {/* Safety Limit Slider */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.25, duration: 0.4 }}
+              className="space-y-4 pt-2"
+            >
+              <label className="block text-xs text-muted-foreground font-sans text-center">
+                Monthly Usage Cap: <span className="text-foreground">${usageCap}</span>
+              </label>
+              <div className="relative px-1">
+                <input
+                  type="range"
+                  min={5}
+                  max={15}
+                  value={usageCap}
+                  onChange={(e) => setUsageCap(Number(e.target.value))}
+                  className="w-full h-0.5 bg-transparent appearance-none cursor-pointer
+                             [&::-webkit-slider-runnable-track]:h-0.5 
+                             [&::-webkit-slider-runnable-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
+                             [&::-webkit-slider-thumb]:appearance-none 
+                             [&::-webkit-slider-thumb]:w-4 
+                             [&::-webkit-slider-thumb]:h-4 
+                             [&::-webkit-slider-thumb]:rounded-full 
+                             [&::-webkit-slider-thumb]:bg-foreground 
+                             [&::-webkit-slider-thumb]:-mt-[7px]
+                             [&::-webkit-slider-thumb]:cursor-pointer
+                             [&::-moz-range-track]:h-0.5 
+                             [&::-moz-range-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
+                             [&::-moz-range-thumb]:appearance-none 
+                             [&::-moz-range-thumb]:w-4 
+                             [&::-moz-range-thumb]:h-4 
+                             [&::-moz-range-thumb]:rounded-full 
+                             [&::-moz-range-thumb]:bg-foreground 
+                             [&::-moz-range-thumb]:border-0
+                             [&::-moz-range-thumb]:cursor-pointer"
+                />
               </div>
             </motion.div>
 
