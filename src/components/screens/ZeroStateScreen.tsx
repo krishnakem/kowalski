@@ -349,7 +349,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 Enter your OpenAI API Key
               </h2>
               <p className="text-muted-foreground text-sm font-sans leading-relaxed max-w-sm mx-auto">
-                Private by design. Your data is processed by your personal OpenAI account and is stored locally on your device.
+                Kowalski is private by design. Your data is processed by your personal OpenAI account and is stored locally on your device.
               </p>
             </motion.div>
 
