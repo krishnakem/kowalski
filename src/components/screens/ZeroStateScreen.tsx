@@ -395,11 +395,11 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               className="space-y-4 pt-2"
             >
               <div className="text-center space-y-1">
-                <label className="block text-xs font-sans">
+                <label className="block text-sm font-sans">
                   <span className="font-semibold text-foreground">Monthly Usage Cap:</span>{" "}
                   <span className="text-foreground">${usageCap}</span>
                 </label>
-                <p className="text-xs text-muted-foreground font-sans">
+                <p className="text-sm text-muted-foreground font-sans">
                   Kowalski will stop processing requests once this limit is reached
                 </p>
               </div>
