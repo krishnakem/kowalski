@@ -162,7 +162,7 @@ const Settings = () => {
               type="button"
               variant="ghost"
               size="icon"
-              className="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-foreground"
+              className="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-muted-foreground hover:bg-transparent"
               onClick={() => setShowApiKey(!showApiKey)}
             >
               {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
