@@ -162,25 +162,30 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             key="hook"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-lg w-full text-center space-y-12"
           >
-            <div className="text-5xl leading-relaxed space-y-2">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+              className="text-5xl leading-relaxed space-y-2"
+            >
               <div className="font-serif text-foreground">Social Media is a drug.</div>
               <TypewriterText 
                 text="Kowalski gets high for you."
                 onComplete={() => setTypingComplete(true)}
                 speed={30}
               />
-            </div>
+            </motion.div>
 
             <AnimatePresence>
               {typingComplete && (
                 <motion.button
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 15 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.4, delay: 0.2 }}
+                  transition={{ duration: 0.5, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
                   onClick={handleBegin}
                   className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
                              text-foreground font-sans text-sm tracking-wider uppercase
@@ -198,25 +203,25 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
         {step === "routine" && (
           <motion.div
             key="routine"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-xl w-full text-center space-y-12"
           >
             <motion.h2
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1, duration: 0.4 }}
+              transition={{ delay: 0.15, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               className="text-5xl font-serif text-foreground"
             >
               When do you want your briefing?
             </motion.h2>
 
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.2, duration: 0.4 }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               className="grid grid-cols-2 gap-6"
             >
               {/* Card A: Once a day */}
@@ -336,17 +341,17 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
         {step === "key" && (
           <motion.div
             key="key"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-md w-full space-y-12"
           >
             {/* Headline */}
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1, duration: 0.4 }}
+              transition={{ delay: 0.15, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               className="text-center space-y-4"
             >
               <h2 className="text-5xl font-serif text-foreground">
@@ -359,9 +364,9 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
             {/* API Key Input */}
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.2, duration: 0.4 }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               className="space-y-2"
             >
               <div className="relative">
@@ -384,9 +389,9 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
             {/* Safety Limit Slider */}
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.25, duration: 0.4 }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.35, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               className="space-y-4 pt-2"
             >
               <div className="text-center space-y-1">
@@ -459,26 +464,40 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.4 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-sm w-full"
           >
             {/* Trigger Card */}
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1, duration: 0.4 }}
+              transition={{ delay: 0.15, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               className="bg-background border-2 border-foreground rounded-3xl p-12 flex flex-col items-center gap-12"
             >
-              <Instagram className="w-16 h-16 text-foreground" strokeWidth={1.5} />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.3, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <Instagram className="w-16 h-16 text-foreground" strokeWidth={1.5} />
+              </motion.div>
               
-              <div className="text-center space-y-4">
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                className="text-center space-y-4"
+              >
                 <h2 className="text-5xl font-serif text-foreground">Connect Instagram</h2>
                 <p className="text-muted-foreground text-sm font-sans">
                   Kowalski interacts with Instagram in a local sandbox. Your credentials never leave your device.
                 </p>
-              </div>
+              </motion.div>
               
-              <button
+              <motion.button
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
                 onClick={handleConnectClick}
                 className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
                            text-foreground font-sans text-sm tracking-wider uppercase
@@ -486,7 +505,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               >
                 Connect Account
                 <PixelArrow size={16} color="charcoal" />
-              </button>
+              </motion.button>
             </motion.div>
 
             {/* Browser View Dialog */}
