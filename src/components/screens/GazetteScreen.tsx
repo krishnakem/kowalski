@@ -55,8 +55,8 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
           transition={{ delay: 0.2, duration: 0.6 }}
           className="text-center mb-12"
         >
-          <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
-            The {dayName} Brief
+        <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
+            The {dayName} Analysis
           </h1>
           <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic">
             <PixelPin size={14} />
