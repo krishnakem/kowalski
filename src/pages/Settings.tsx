@@ -157,22 +157,21 @@ const Settings = () => {
         <div className="space-y-3">
           <Label className="text-xl font-serif">OpenAI API Key</Label>
           <div className="relative">
-            <Input
+            <input
               type={showApiKey ? "text" : "password"}
               value={settings.apiKey}
               onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
               placeholder="sk-..."
-              className="pr-10"
+              className="w-full input-dotted text-foreground placeholder:text-foreground/30
+                         font-sans text-lg tracking-wider pr-12 py-4"
             />
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-muted-foreground hover:bg-transparent"
               onClick={() => setShowApiKey(!showApiKey)}
+              className="absolute right-0 top-1/2 -translate-y-1/2 p-3 text-muted-foreground transition-colors"
             >
-              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </Button>
+              {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button>
           </div>
           <p className="text-sm text-muted-foreground">
             Your API key is stored locally and never sent to our servers.
