@@ -416,7 +416,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <div className="text-center space-y-2">
                 <h2 className="text-2xl font-serif text-foreground">Connect Instagram</h2>
                 <p className="text-muted-foreground text-sm font-sans">
-                  Link your account for personalized insights
+                  Your data is stored locally on your machine
                 </p>
               </div>
               
