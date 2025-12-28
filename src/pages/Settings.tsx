@@ -223,14 +223,27 @@ const Settings = () => {
           </div>
         </div>
 
-        <button
-          onClick={handleSave}
-          className="w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground 
-                     text-foreground font-sans text-sm tracking-wider uppercase
-                     hover:bg-foreground hover:text-background transition-all duration-200"
-        >
-          Save Settings
-        </button>
+        <div className="space-y-3">
+          <button
+            onClick={handleSave}
+            className="w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground 
+                       text-foreground font-sans text-sm tracking-wider uppercase
+                       hover:bg-foreground hover:text-background transition-all duration-200"
+          >
+            Save Settings
+          </button>
+          <button
+            onClick={() => {
+              setSettings(DEFAULT_SETTINGS);
+              toast.success("Settings reset to defaults");
+            }}
+            className="w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground/20 
+                       text-muted-foreground font-sans text-sm tracking-wider uppercase
+                       hover:border-foreground hover:text-foreground transition-all duration-200"
+          >
+            Reset to Defaults
+          </button>
+        </div>
       </div>
     </div>
   );
