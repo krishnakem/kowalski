@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { PixelFloppy, PixelPin, PixelClose } from "../icons/PixelIcons";
+import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
 
 interface GazetteScreenProps {
   onClose: () => void;
@@ -168,7 +168,7 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
           className="text-center"
         >
           <div className="flex flex-col items-center gap-4">
-            <PixelFloppy size={32} />
+            <WavingPenguin size={48} />
             <p className="text-xl font-serif text-foreground italic tracking-tight">
               You are all caught up.
             </p>
