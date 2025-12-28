@@ -545,7 +545,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
             {/* Browser View Dialog */}
             <Dialog open={dialogOpen} onOpenChange={() => {}}>
-              <DialogContent className="bg-background border-0 rounded-3xl p-0 max-w-md overflow-hidden [&>button]:hidden">
+              <DialogContent className="bg-background border-0 rounded-3xl p-0 max-w-md overflow-hidden [&>button]:hidden" overlayClassName="bg-background">
                 <AnimatePresence mode="wait">
                   {instagramPhase === "connecting" && (
                     <motion.div
