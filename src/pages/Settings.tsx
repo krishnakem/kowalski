@@ -127,10 +127,11 @@ const Settings = () => {
           <select
             value={settings.morningTime}
             onChange={(e) => setSettings({ ...settings, morningTime: e.target.value })}
-            className="w-full bg-background border border-border rounded-md px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full bg-background border-2 border-foreground/20 px-6 py-3 font-sans text-foreground 
+                       focus:border-foreground outline-none transition-colors cursor-pointer"
           >
             {TIME_OPTIONS.map((time) => (
-              <option key={time} value={time}>
+              <option key={time} value={time} className="bg-background">
                 {time}
               </option>
             ))}
@@ -144,10 +145,11 @@ const Settings = () => {
             <select
               value={settings.eveningTime}
               onChange={(e) => setSettings({ ...settings, eveningTime: e.target.value })}
-              className="w-full bg-background border border-border rounded-md px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full bg-background border-2 border-foreground/20 px-6 py-3 font-sans text-foreground 
+                         focus:border-foreground outline-none transition-colors cursor-pointer"
             >
               {TIME_OPTIONS.map((time) => (
-                <option key={time} value={time}>
+                <option key={time} value={time} className="bg-background">
                   {time}
                 </option>
               ))}
