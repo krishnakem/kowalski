@@ -69,13 +69,14 @@ const TypewriterText = ({
   return (
     <span className="font-serif text-foreground">
       {displayedText}
-      {!isComplete && (
-        <motion.span
-          animate={{ opacity: [1, 0] }}
-          transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
-          className="inline-block w-3 h-6 bg-foreground ml-1 align-middle"
-        />
-      )}
+      <motion.span
+        animate={{ opacity: isComplete ? 0 : [1, 0] }}
+        transition={isComplete 
+          ? { duration: 0.3 } 
+          : { duration: 0.5, repeat: Infinity, repeatType: "reverse" }
+        }
+        className="inline-block w-3 h-6 bg-foreground ml-1 align-middle"
+      />
     </span>
   );
 };
