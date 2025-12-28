@@ -199,9 +199,9 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             <AnimatePresence>
               {typingComplete && (
                 <motion.button
-                  initial={{ opacity: 0, y: 15 }}
+                  initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  transition={{ duration: 0.6, delay: 2, ease: [0.22, 1, 0.36, 1] }}
                   onClick={handleBegin}
                   className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
                              text-foreground font-sans text-sm tracking-wider uppercase
