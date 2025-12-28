@@ -4,7 +4,7 @@ import { Settings } from "lucide-react";
 import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 
-interface AnalysisScreenProps {
+interface GazetteScreenProps {
   onClose: () => void;
 }
 
@@ -30,7 +30,7 @@ const worldUpdates = [
   },
 ];
 
-const AnalysisScreen = ({ onClose }: AnalysisScreenProps) => {
+const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
   const navigate = useNavigate();
   const today = new Date();
   const dayName = today.toLocaleDateString("en-US", { weekday: "long" });
@@ -213,4 +213,4 @@ const AnalysisScreen = ({ onClose }: AnalysisScreenProps) => {
   );
 };
 
-export default AnalysisScreen;
+export default GazetteScreen;

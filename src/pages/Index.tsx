@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import ZeroStateScreen from "@/components/screens/ZeroStateScreen";
 import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
-import AnalysisScreen from "@/components/screens/AnalysisScreen";
+import GazetteScreen from "@/components/screens/GazetteScreen";
 
 type Screen = "zero" | "agent" | "gazette";
 
@@ -58,7 +58,7 @@ const Index = () => {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <AnalysisScreen onClose={handleClose} />
+            <GazetteScreen onClose={handleClose} />
           </motion.div>
         )}
       </AnimatePresence>
