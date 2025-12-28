@@ -57,7 +57,7 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
         <p className="text-foreground font-sans text-lg leading-relaxed">
           Kowalski is working on curating your analysis.
           <br />
-          <span className="text-muted-foreground">We'll let you know when it's ready.</span>
+          <span className="text-foreground">We'll let you know when it's ready.</span>
         </p>
       </motion.div>
     </div>
