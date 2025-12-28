@@ -1,19 +1,24 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Instagram, Check } from "lucide-react";
 import { 
   PixelSun, 
   PixelMoon, 
   PixelArrow,
   WavingPenguin
 } from "../icons/PixelIcons";
+import {
+  Dialog,
+  DialogContent,
+} from "@/components/ui/dialog";
 
 interface ZeroStateScreenProps {
   onContinue: () => void;
 }
 
 type DigestCount = 1 | 2;
-type Step = "hook" | "routine" | "key";
+type Step = "hook" | "routine" | "key" | "instagram";
+type InstagramPhase = "trigger" | "connecting" | "success";
 
 const TIME_OPTIONS = [
   "6:00 AM", "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
@@ -75,6 +80,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [typingComplete, setTypingComplete] = useState(false);
   const [morningTime, setMorningTime] = useState("8:00 AM");
   const [eveningTime, setEveningTime] = useState("6:00 PM");
+  const [instagramPhase, setInstagramPhase] = useState<InstagramPhase>("trigger");
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   // Smooth penguin animation using springs
   const mouseX = useMotionValue(0);
@@ -107,8 +114,24 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const handleInitialize = () => {
     if (apiKey) {
-      onContinue();
+      setStep("instagram");
     }
+  };
+
+  const handleConnectClick = () => {
+    setDialogOpen(true);
+    setInstagramPhase("connecting");
+    
+    // Simulate login with 3 second timer
+    setTimeout(() => {
+      setInstagramPhase("success");
+      
+      // Auto-close after 1 second and proceed
+      setTimeout(() => {
+        setDialogOpen(false);
+        onContinue();
+      }, 1000);
+    }, 3000);
   };
 
   return (
@@ -368,6 +391,114 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             >
               Initialize
             </motion.button>
+          </motion.div>
+        )}
+
+        {/* Step 4: Instagram Connect */}
+        {step === "instagram" && (
+          <motion.div
+            key="instagram"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.4 }}
+            className="max-w-sm w-full"
+          >
+            {/* Trigger Card */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.4 }}
+              className="bg-background border-2 border-foreground rounded-3xl p-12 flex flex-col items-center gap-8"
+            >
+              <Instagram className="w-16 h-16 text-foreground" strokeWidth={1.5} />
+              
+              <div className="text-center space-y-2">
+                <h2 className="text-2xl font-serif text-foreground">Connect Instagram</h2>
+                <p className="text-muted-foreground text-sm font-sans">
+                  Link your account for personalized insights
+                </p>
+              </div>
+              
+              <button
+                onClick={handleConnectClick}
+                className="px-8 py-4 border-2 border-foreground rounded-3xl
+                           text-foreground font-sans text-sm tracking-wider uppercase
+                           hover:bg-foreground hover:text-background transition-all duration-200"
+              >
+                Connect Account
+              </button>
+            </motion.div>
+
+            {/* Browser View Dialog */}
+            <Dialog open={dialogOpen} onOpenChange={() => {}}>
+              <DialogContent className="bg-background border-0 rounded-3xl p-0 max-w-md overflow-hidden [&>button]:hidden">
+                <AnimatePresence mode="wait">
+                  {instagramPhase === "connecting" && (
+                    <motion.div
+                      key="connecting"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="p-6"
+                    >
+                      <div className="border-4 border-foreground rounded-3xl overflow-hidden">
+                        <div className="aspect-[9/16] bg-background flex flex-col items-center justify-center gap-6 p-8">
+                          <Instagram className="w-12 h-12 text-foreground" strokeWidth={1.5} />
+                          <span className="font-sans text-foreground text-lg">Secure Login Window</span>
+                          
+                          {/* Loading dots */}
+                          <div className="flex gap-2">
+                            {[0, 1, 2].map((i) => (
+                              <motion.div
+                                key={i}
+                                className="w-2 h-2 bg-foreground rounded-full"
+                                animate={{ opacity: [0.3, 1, 0.3] }}
+                                transition={{
+                                  duration: 1,
+                                  repeat: Infinity,
+                                  delay: i * 0.2,
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {instagramPhase === "success" && (
+                    <motion.div
+                      key="success"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="p-12 flex flex-col items-center justify-center gap-6 min-h-[400px]"
+                    >
+                      <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ 
+                          type: "spring",
+                          stiffness: 200,
+                          damping: 15,
+                          delay: 0.1
+                        }}
+                        className="w-20 h-20 border-4 border-foreground rounded-full flex items-center justify-center"
+                      >
+                        <Check className="w-10 h-10 text-foreground" strokeWidth={2.5} />
+                      </motion.div>
+                      
+                      <h3 className="text-2xl font-serif text-foreground text-center">
+                        Connection Established.
+                      </h3>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </DialogContent>
+            </Dialog>
           </motion.div>
         )}
       </AnimatePresence>
