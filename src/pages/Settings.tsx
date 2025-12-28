@@ -66,16 +66,16 @@ const Settings = () => {
     <div className="min-h-screen bg-background text-foreground p-6 md:p-12">
       <div className="max-w-md mx-auto space-y-8 text-center">
         {/* Header */}
-        <div className="flex items-center justify-center gap-4">
+        <div className="relative">
           <Button
             variant="ghost"
             size="icon"
             onClick={handleBack}
-            className="text-muted-foreground hover:bg-transparent focus:ring-0 focus-visible:ring-0 active:bg-transparent"
+            className="absolute left-0 top-1/2 -translate-y-1/2 text-muted-foreground hover:bg-transparent focus:ring-0 focus-visible:ring-0 active:bg-transparent"
           >
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <h1 className="font-serif text-4xl md:text-5xl">Settings</h1>
+          <h1 className="font-serif text-4xl md:text-5xl text-center">Settings</h1>
         </div>
 
         {/* Analysis Frequency */}
