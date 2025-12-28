@@ -349,7 +349,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 Enter your OpenAI API Key
               </h2>
               <p className="text-muted-foreground text-sm font-sans leading-relaxed max-w-sm mx-auto">
-                Kowalski uses your LLM to create it's analysis.
+                Private by design. Your data is processed using your personal OpenAI account and is stored exclusively on your device.
               </p>
             </motion.div>
 
