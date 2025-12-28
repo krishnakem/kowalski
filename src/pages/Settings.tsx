@@ -73,12 +73,12 @@ const Settings = () => {
           >
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <h1 className="font-serif text-2xl md:text-3xl">Settings</h1>
+          <h1 className="font-serif text-4xl md:text-5xl">Settings</h1>
         </div>
 
         {/* Digest Frequency */}
         <div className="space-y-3">
-          <Label className="text-lg font-serif">Digest Frequency</Label>
+          <Label className="text-xl font-serif">Digest Frequency</Label>
           <div className="grid grid-cols-2 gap-4">
             {/* Once a day */}
             <motion.button
@@ -93,7 +93,7 @@ const Settings = () => {
                          }`}
             >
               <PixelSun size={40} color="charcoal" />
-              <span className="font-sans text-foreground text-sm">Once a day</span>
+              <span className="font-sans text-foreground text-base">Once a day</span>
             </motion.button>
 
             {/* Twice a day */}
@@ -112,15 +112,15 @@ const Settings = () => {
                 <PixelSun size={32} color="charcoal" />
                 <PixelMoon size={32} color="charcoal" />
               </div>
-              <span className="font-sans text-foreground text-sm">Twice a day</span>
+              <span className="font-sans text-foreground text-base">Twice a day</span>
             </motion.button>
           </div>
         </div>
 
         {/* Morning Time */}
         <div className="space-y-3">
-          <Label className="text-lg font-serif">
-            {settings.digestFrequency === 1 ? "Digest Time" : "Morning Digest"}
+          <Label className="text-xl font-serif">
+            {settings.digestFrequency === 1 ? "Delivery Time" : "Morning Analysis"}
           </Label>
           <select
             value={settings.morningTime}
@@ -138,7 +138,7 @@ const Settings = () => {
         {/* Evening Time (only if twice daily) */}
         {settings.digestFrequency === 2 && (
           <div className="space-y-3">
-            <Label className="text-lg font-serif">Evening Digest</Label>
+            <Label className="text-xl font-serif">Evening Analysis</Label>
             <select
               value={settings.eveningTime}
               onChange={(e) => setSettings({ ...settings, eveningTime: e.target.value })}
@@ -155,7 +155,7 @@ const Settings = () => {
 
         {/* API Key */}
         <div className="space-y-3">
-          <Label className="text-lg font-serif">OpenAI API Key</Label>
+          <Label className="text-xl font-serif">OpenAI API Key</Label>
           <div className="relative">
             <Input
               type={showApiKey ? "text" : "password"}
