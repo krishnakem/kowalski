@@ -76,9 +76,9 @@ const Settings = () => {
           <h1 className="font-serif text-4xl md:text-5xl">Settings</h1>
         </div>
 
-        {/* Digest Frequency */}
+        {/* Analysis Frequency */}
         <div className="space-y-3">
-          <Label className="text-xl font-serif">Digest Frequency</Label>
+          <Label className="text-xl font-serif">Analysis Frequency</Label>
           <div className="grid grid-cols-2 gap-4">
             {/* Once a day */}
             <motion.button
