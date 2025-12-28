@@ -29,7 +29,7 @@ const TIME_OPTIONS = [
 const TypewriterText = ({ 
   text, 
   onComplete,
-  speed = 45 
+  speed = 90 
 }: { 
   text: string; 
   onComplete: () => void;
