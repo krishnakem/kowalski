@@ -480,11 +480,12 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               
               <button
                 onClick={handleConnectClick}
-                className="px-8 py-4 border-2 border-foreground rounded-3xl
+                className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
                            text-foreground font-sans text-sm tracking-wider uppercase
                            hover:bg-foreground hover:text-background transition-all duration-200"
               >
                 Connect Account
+                <PixelArrow size={16} color="charcoal" />
               </button>
             </motion.div>
 
