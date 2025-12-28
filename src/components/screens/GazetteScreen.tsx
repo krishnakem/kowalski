@@ -59,7 +59,7 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
           onClick={() => navigate("/settings", { state: { from: "gazette" } })}
           className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
         >
-          <Settings className="w-7 h-7" />
+          <Settings className="w-10 h-10" />
         </Button>
       </motion.div>
 
