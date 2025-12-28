@@ -223,9 +223,14 @@ const Settings = () => {
           </div>
         </div>
 
-        <Button onClick={handleSave} className="w-full" size="lg">
+        <button
+          onClick={handleSave}
+          className="w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground 
+                     text-foreground font-sans text-sm tracking-wider uppercase
+                     hover:bg-foreground hover:text-background transition-all duration-200"
+        >
           Save Settings
-        </Button>
+        </button>
       </div>
     </div>
   );
