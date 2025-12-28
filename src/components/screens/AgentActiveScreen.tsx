@@ -1,12 +1,17 @@
 import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { Settings } from "lucide-react";
 import { AnimatedPixelPenguin } from "../icons/PixelIcons";
+import { Button } from "@/components/ui/button";
 
 interface AgentActiveScreenProps {
   onComplete: () => void;
 }
 
 const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
+  const navigate = useNavigate();
+
   useEffect(() => {
     // Auto-complete after 5 seconds
     const timer = setTimeout(onComplete, 5000);
@@ -14,7 +19,24 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
   }, [onComplete]);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background">
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
+      {/* Settings Button */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 1, duration: 0.5 }}
+        className="absolute top-6 right-6"
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate("/settings")}
+          className="text-muted-foreground hover:text-foreground opacity-60 hover:opacity-100 transition-opacity"
+        >
+          <Settings className="w-5 h-5" />
+        </Button>
+      </motion.div>
+
       {/* Animated Pixel Penguin */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
