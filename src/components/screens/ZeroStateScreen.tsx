@@ -210,15 +210,16 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             <div className="flex justify-center min-h-[56px]">
               <motion.button
                 initial={false}
-                animate={showBegin ? { opacity: 1 } : { opacity: 0 }}
-                transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+                animate={showBegin ? { opacity: 1, y: 0 } : { opacity: 0, y: 8 }}
+                transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
+                style={{ willChange: "opacity, transform" }}
                 onClick={handleBegin}
                 tabIndex={showBegin ? 0 : -1}
                 aria-hidden={!showBegin}
                 className={
                   "inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground " +
                   "text-foreground font-sans text-sm tracking-wider uppercase " +
-                  "hover:bg-foreground hover:text-background transition-all duration-200" +
+                  "hover:bg-foreground hover:text-background transition-colors duration-200" +
                   (showBegin ? "" : " pointer-events-none")
                 }
               >
