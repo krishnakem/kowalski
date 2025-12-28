@@ -250,7 +250,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               transition={{ delay: 0.15, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               className="text-5xl font-serif text-foreground"
             >
-              When do you want your briefing?
+              When do you want your analysis?
             </motion.h2>
 
             <motion.div
