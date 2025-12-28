@@ -80,7 +80,7 @@ const Settings = () => {
 
         {/* Analysis Frequency */}
         <div className="space-y-3">
-          <Label className="text-sm text-muted-foreground font-sans">Analysis Frequency</Label>
+          <Label className="text-sm text-foreground font-sans">Analysis Frequency</Label>
           <div className="grid grid-cols-2 gap-4">
             {/* Once a day */}
             <motion.button
@@ -121,7 +121,7 @@ const Settings = () => {
 
         {/* Morning Time */}
         <div className="space-y-3">
-          <Label className="text-sm text-muted-foreground font-sans">
+          <Label className="text-sm text-foreground font-sans">
             {settings.digestFrequency === 1 ? "Delivery Time" : "Morning Analysis"}
           </Label>
           <select
@@ -140,7 +140,7 @@ const Settings = () => {
         {/* Evening Time (only if twice daily) */}
         {settings.digestFrequency === 2 && (
           <div className="space-y-3">
-            <Label className="text-sm text-muted-foreground font-sans">Evening Analysis</Label>
+            <Label className="text-sm text-foreground font-sans">Evening Analysis</Label>
             <select
               value={settings.eveningTime}
               onChange={(e) => setSettings({ ...settings, eveningTime: e.target.value })}
@@ -157,7 +157,7 @@ const Settings = () => {
 
         {/* API Key */}
         <div className="space-y-3">
-          <Label className="text-sm text-muted-foreground font-sans">OpenAI API Key</Label>
+          <Label className="text-sm text-foreground font-sans">OpenAI API Key</Label>
           <div className="relative">
             <input
               type={showApiKey ? "text" : "password"}
@@ -180,7 +180,7 @@ const Settings = () => {
         {/* Monthly Usage Cap */}
         <div className="space-y-4">
           <div className="space-y-1">
-            <Label className="text-sm text-muted-foreground font-sans">
+            <Label className="text-sm text-foreground font-sans">
               Monthly Usage Cap: ${settings.usageCap}
             </Label>
             <p className="text-sm text-muted-foreground font-sans">
