@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { PixelSun, PixelMoon } from "@/components/icons/PixelIcons";
 
 const TIME_OPTIONS = [
   "6:00 AM", "6:30 AM", "7:00 AM", "7:30 AM", "8:00 AM", "8:30 AM",
@@ -71,21 +73,41 @@ const Settings = () => {
         {/* Digest Frequency */}
         <div className="space-y-3">
           <Label className="text-lg font-serif">Digest Frequency</Label>
-          <div className="flex gap-3">
-            <Button
-              variant={settings.digestFrequency === 1 ? "default" : "outline"}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Once a day */}
+            <motion.button
+              whileHover={{ y: -2, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+              transition={{ duration: 0.2 }}
               onClick={() => setSettings({ ...settings, digestFrequency: 1 })}
-              className="flex-1"
+              className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-4
+                         transition-colors duration-200 bg-card ${
+                           settings.digestFrequency === 1 
+                             ? "border-foreground" 
+                             : "border-foreground/20 hover:border-foreground"
+                         }`}
             >
-              Once daily
-            </Button>
-            <Button
-              variant={settings.digestFrequency === 2 ? "default" : "outline"}
+              <PixelSun size={40} color="charcoal" />
+              <span className="font-sans text-foreground text-sm">Once a day</span>
+            </motion.button>
+
+            {/* Twice a day */}
+            <motion.button
+              whileHover={{ y: -2, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+              transition={{ duration: 0.2 }}
               onClick={() => setSettings({ ...settings, digestFrequency: 2 })}
-              className="flex-1"
+              className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-4
+                         transition-colors duration-200 bg-card ${
+                           settings.digestFrequency === 2 
+                             ? "border-foreground" 
+                             : "border-foreground/20 hover:border-foreground"
+                         }`}
             >
-              Twice daily
-            </Button>
+              <div className="flex items-center gap-1">
+                <PixelSun size={32} color="charcoal" />
+                <PixelMoon size={32} color="charcoal" />
+              </div>
+              <span className="font-sans text-foreground text-sm">Twice a day</span>
+            </motion.button>
           </div>
         </div>
 
