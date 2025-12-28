@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { Eye, EyeOff } from "lucide-react";
 import { 
   PixelSun, 
@@ -73,21 +73,25 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [showKey, setShowKey] = useState(false);
   const [digestCount, setDigestCount] = useState<DigestCount | null>(null);
   const [typingComplete, setTypingComplete] = useState(false);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [morningTime, setMorningTime] = useState("8:00 AM");
   const [eveningTime, setEveningTime] = useState("6:00 PM");
+
+  // Smooth penguin animation using springs
+  const mouseX = useMotionValue(0);
+  const smoothX = useSpring(mouseX, { stiffness: 100, damping: 20, mass: 0.5 });
+  const penguinX = useTransform(smoothX, (v) => v * 12);
+  const penguinRotate = useTransform(smoothX, (v) => v * 8);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       // Calculate offset from center of screen, normalized to -1 to 1
       const x = (e.clientX / window.innerWidth - 0.5) * 2;
-      const y = (e.clientY / window.innerHeight - 0.5) * 2;
-      setMousePosition({ x, y });
+      mouseX.set(x);
     };
 
     window.addEventListener("mousemove", handleMouseMove);
     return () => window.removeEventListener("mousemove", handleMouseMove);
-  }, []);
+  }, [mouseX]);
 
   const handleBegin = () => {
     setStep("routine");
@@ -114,19 +118,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
         {step === "hook" && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
-            animate={{ 
-              opacity: 1, 
-              y: 0,
-              x: mousePosition.x * 8,
-              rotate: mousePosition.x * 5
-            }}
+            animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
-            transition={{ 
-              opacity: { duration: 0.5, delay: 0.3 },
-              y: { duration: 0.5, delay: 0.3 },
-              x: { duration: 0.15, ease: "easeOut" },
-              rotate: { duration: 0.15, ease: "easeOut" }
-            }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            style={{ x: penguinX, rotate: penguinRotate }}
             className="fixed bottom-8 left-8"
           >
             <WavingPenguin size={80} />
