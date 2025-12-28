@@ -22,6 +22,7 @@ interface SettingsData {
   morningTime: string;
   eveningTime: string;
   apiKey: string;
+  usageCap: number;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -29,6 +30,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   morningTime: "8:00 AM",
   eveningTime: "6:00 PM",
   apiKey: "",
+  usageCap: 10,
 };
 
 const Settings = () => {
@@ -175,7 +177,46 @@ const Settings = () => {
           </div>
         </div>
 
-        {/* Save Button */}
+        {/* Monthly Usage Cap */}
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <Label className="text-xl font-serif">
+              Monthly Usage Cap: ${settings.usageCap}
+            </Label>
+            <p className="text-sm text-muted-foreground font-sans">
+              Kowalski will stop processing requests once this limit is reached
+            </p>
+          </div>
+          <div className="relative px-1">
+            <input
+              type="range"
+              min={5}
+              max={15}
+              value={settings.usageCap}
+              onChange={(e) => setSettings({ ...settings, usageCap: Number(e.target.value) })}
+              className="w-full h-0.5 bg-transparent appearance-none cursor-pointer
+                         [&::-webkit-slider-runnable-track]:h-0.5 
+                         [&::-webkit-slider-runnable-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
+                         [&::-webkit-slider-thumb]:appearance-none 
+                         [&::-webkit-slider-thumb]:w-4 
+                         [&::-webkit-slider-thumb]:h-4 
+                         [&::-webkit-slider-thumb]:rounded-full 
+                         [&::-webkit-slider-thumb]:bg-foreground 
+                         [&::-webkit-slider-thumb]:-mt-[7px]
+                         [&::-webkit-slider-thumb]:cursor-pointer
+                         [&::-moz-range-track]:h-0.5 
+                         [&::-moz-range-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
+                         [&::-moz-range-thumb]:appearance-none 
+                         [&::-moz-range-thumb]:w-4 
+                         [&::-moz-range-thumb]:h-4 
+                         [&::-moz-range-thumb]:rounded-full 
+                         [&::-moz-range-thumb]:bg-foreground 
+                         [&::-moz-range-thumb]:border-0
+                         [&::-moz-range-thumb]:cursor-pointer"
+            />
+          </div>
+        </div>
+
         <Button onClick={handleSave} className="w-full" size="lg">
           Save Settings
         </Button>
