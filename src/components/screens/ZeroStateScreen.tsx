@@ -348,8 +348,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 />
                 <button
                   onClick={() => setShowKey(!showKey)}
-                  className="absolute right-0 top-1/2 -translate-y-1/2 p-3 text-muted-foreground 
-                             hover:text-foreground transition-colors"
+                  className="absolute right-0 top-1/2 -translate-y-1/2 p-3 text-muted-foreground transition-colors"
                 >
                   {showKey ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>

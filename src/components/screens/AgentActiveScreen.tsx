@@ -31,7 +31,7 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
           variant="ghost"
           size="icon"
           onClick={() => navigate("/settings")}
-          className="text-muted-foreground hover:text-foreground opacity-60 hover:opacity-100 transition-opacity"
+          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
         >
           <Settings className="w-5 h-5" />
         </Button>
