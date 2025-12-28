@@ -29,7 +29,7 @@ const TIME_OPTIONS = [
 const TypewriterText = ({ 
   text, 
   onComplete,
-  speed = 30 
+  speed = 45 
 }: { 
   text: string; 
   onComplete: () => void;
@@ -44,18 +44,26 @@ const TypewriterText = ({
     hasStarted.current = true;
 
     let index = 0;
-    const interval = setInterval(() => {
+    
+    const typeNext = () => {
       if (index < text.length) {
         setDisplayedText(text.slice(0, index + 1));
+        const char = text[index];
         index++;
+        
+        // Variable delay for natural feel
+        let delay = speed + Math.random() * 30; // Base + slight randomness
+        if (char === '.' || char === ',' || char === '!') delay += 150; // Pause after punctuation
+        if (char === ' ') delay -= 10; // Faster for spaces
+        
+        setTimeout(typeNext, delay);
       } else {
-        clearInterval(interval);
         setIsComplete(true);
         onComplete();
       }
-    }, speed);
-
-    return () => clearInterval(interval);
+    };
+    
+    typeNext();
   }, [text, speed, onComplete]);
 
   return (
