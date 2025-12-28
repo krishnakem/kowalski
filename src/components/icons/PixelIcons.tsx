@@ -229,39 +229,39 @@ export const AnimatedPixelPenguin = ({ className, size = 160 }: { className?: st
   </div>
 );
 
-// Standalone waving penguin (extracted from the Mac screen)
+// Standalone waving penguin (matches the Mac screen penguin exactly)
 export const WavingPenguin = ({ className, size = 64 }: { className?: string; size?: number }) => (
   <div className={className}>
-    <svg width={size} height={size} viewBox="0 0 24 24" style={{ imageRendering: "pixelated" }}>
+    <svg width={size} height={size} viewBox="0 0 18 18" style={{ imageRendering: "pixelated" }}>
       {/* Body */}
-      <rect x="8" y="12" width="8" height="10" fill="#1C1C1E" />
-      <rect x="9" y="14" width="6" height="6" fill="#F9F8F5" />
+      <rect x="5" y="8" width="8" height="10" fill="#1C1C1E" />
+      <rect x="6" y="10" width="6" height="6" fill="#F9F8F5" />
       
       {/* Head */}
-      <rect x="9" y="4" width="6" height="8" fill="#1C1C1E" />
+      <rect x="6" y="2" width="6" height="6" fill="#1C1C1E" />
       
       {/* Eyes */}
-      <rect x="10" y="7" width="2" height="2" fill="#F9F8F5" />
-      <rect x="13" y="7" width="2" height="2" fill="#F9F8F5" />
+      <rect x="7" y="4" width="1" height="1" fill="#F9F8F5" />
+      <rect x="10" y="4" width="1" height="1" fill="#F9F8F5" />
       
       {/* Beak */}
-      <rect x="11" y="10" width="3" height="2" fill="#D4854A" />
+      <rect x="8" y="6" width="2" height="1" fill="#F9F8F5" />
       
       {/* Waving flipper - animated */}
       <motion.g
-        animate={{ rotate: [-20, 20, -20] }}
-        transition={{ duration: 0.5, repeat: Infinity, ease: "easeInOut" }}
-        style={{ transformOrigin: "16px 14px" }}
+        animate={{ rotate: [-15, 15, -15] }}
+        transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut" }}
+        style={{ transformOrigin: "13px 10px" }}
       >
-        <rect x="16" y="12" width="3" height="5" fill="#1C1C1E" />
+        <rect x="13" y="8" width="2" height="4" fill="#1C1C1E" />
       </motion.g>
       
       {/* Static flipper */}
-      <rect x="5" y="14" width="3" height="5" fill="#1C1C1E" />
+      <rect x="3" y="10" width="2" height="4" fill="#1C1C1E" />
       
       {/* Feet */}
-      <rect x="8" y="22" width="3" height="2" fill="#D4854A" />
-      <rect x="13" y="22" width="3" height="2" fill="#D4854A" />
+      <rect x="5" y="18" width="3" height="1" fill="#1C1C1E" />
+      <rect x="10" y="18" width="3" height="1" fill="#1C1C1E" />
     </svg>
   </div>
 );
