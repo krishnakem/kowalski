@@ -87,11 +87,22 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [showKey, setShowKey] = useState(false);
   const [digestCount, setDigestCount] = useState<DigestCount | null>(null);
   const [typingComplete, setTypingComplete] = useState(false);
+  const [showBegin, setShowBegin] = useState(false);
   const [morningTime, setMorningTime] = useState("8:00 AM");
   const [eveningTime, setEveningTime] = useState("6:00 PM");
   const [instagramPhase, setInstagramPhase] = useState<InstagramPhase>("trigger");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [usageCap, setUsageCap] = useState(10);
+
+  useEffect(() => {
+    if (!typingComplete) {
+      setShowBegin(false);
+      return;
+    }
+
+    const t = window.setTimeout(() => setShowBegin(true), 2000);
+    return () => window.clearTimeout(t);
+  }, [typingComplete]);
 
   // Smooth penguin animation using springs
   const mouseX = useMotionValue(0);
@@ -192,27 +203,29 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 <TypewriterText 
                   text="Kowalski gets high for you."
                   onComplete={() => setTypingComplete(true)}
-                  speed={30}
                 />
               </motion.div>
             </div>
 
-            <AnimatePresence>
-              {typingComplete && (
-                <motion.button
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: 2, ease: [0.22, 1, 0.36, 1] }}
-                  onClick={handleBegin}
-                  className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
-                             text-foreground font-sans text-sm tracking-wider uppercase
-                             hover:bg-foreground hover:text-background transition-all duration-200"
-                >
-                  <span>Begin</span>
-                  <PixelArrow size={16} color="charcoal" />
-                </motion.button>
-              )}
-            </AnimatePresence>
+            <div className="flex justify-center min-h-[56px]">
+              <motion.button
+                initial={false}
+                animate={showBegin ? { opacity: 1 } : { opacity: 0 }}
+                transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+                onClick={handleBegin}
+                tabIndex={showBegin ? 0 : -1}
+                aria-hidden={!showBegin}
+                className={
+                  "inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground " +
+                  "text-foreground font-sans text-sm tracking-wider uppercase " +
+                  "hover:bg-foreground hover:text-background transition-all duration-200" +
+                  (showBegin ? "" : " pointer-events-none")
+                }
+              >
+                <span>Begin</span>
+                <PixelArrow size={16} color="charcoal" />
+              </motion.button>
+            </div>
           </motion.div>
         )}
 
