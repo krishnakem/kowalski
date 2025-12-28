@@ -170,7 +170,7 @@ const Settings = () => {
               value={settings.apiKey}
               onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
               placeholder="sk-..."
-              className="w-full input-dotted text-foreground placeholder:text-foreground/30 text-center
+              className="w-full input-dotted text-foreground placeholder:text-foreground/30 text-left
                          font-sans text-lg tracking-wider pr-12 py-4"
             />
             <button
