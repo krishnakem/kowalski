@@ -30,7 +30,7 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => navigate("/settings")}
+          onClick={() => navigate("/settings", { state: { from: "agent" } })}
           className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
         >
           <Settings className="w-5 h-5" />

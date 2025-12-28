@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import ZeroStateScreen from "@/components/screens/ZeroStateScreen";
 import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
@@ -7,7 +8,16 @@ import GazetteScreen from "@/components/screens/GazetteScreen";
 type Screen = "zero" | "agent" | "gazette";
 
 const Index = () => {
-  const [currentScreen, setCurrentScreen] = useState<Screen>("zero");
+  const location = useLocation();
+  const initialScreen = (location.state as { screen?: Screen })?.screen || "zero";
+  const [currentScreen, setCurrentScreen] = useState<Screen>(initialScreen);
+
+  useEffect(() => {
+    const screenFromState = (location.state as { screen?: Screen })?.screen;
+    if (screenFromState) {
+      setCurrentScreen(screenFromState);
+    }
+  }, [location.state]);
 
   const handleContinue = () => setCurrentScreen("agent");
   const handleAgentComplete = () => setCurrentScreen("gazette");
