@@ -144,9 +144,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             transition={{ duration: 0.5 }}
             className="max-w-lg w-full text-center space-y-12"
           >
-            <div className="text-2xl md:text-3xl leading-relaxed">
+            <div className="text-2xl md:text-3xl leading-relaxed space-y-2">
+              <div className="font-serif text-foreground">Social Media is a drug.</div>
               <TypewriterText 
-                text="Social Media is addictive. Let Kowalski do the scrolling for you."
+                text="Let Kowalski get high for you."
                 onComplete={() => setTypingComplete(true)}
                 speed={30}
               />
