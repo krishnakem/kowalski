@@ -216,7 +216,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <motion.button
                 initial={false}
                 animate={{ opacity: showBegin ? 1 : 0 }}
-                transition={{ duration: 0.8, ease: "easeOut" }}
+                transition={{ duration: 1.5, ease: "easeOut" }}
                 onClick={handleBegin}
                 tabIndex={showBegin ? 0 : -1}
                 aria-hidden={!showBegin}
