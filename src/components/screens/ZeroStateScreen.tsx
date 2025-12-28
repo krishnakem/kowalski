@@ -474,7 +474,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <div className="text-center space-y-2">
                 <h2 className="text-2xl font-serif text-foreground">Connect Instagram</h2>
                 <p className="text-muted-foreground text-sm font-sans">
-                  Your data is stored locally on your machine
+                  Kowalski interacts with Instagram in a local sandbox. Your credentials never leave your device.
                 </p>
               </div>
               
