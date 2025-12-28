@@ -444,7 +444,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                         disabled:opacity-30 disabled:cursor-not-allowed
                         hover:bg-foreground/90 transition-colors duration-200"
             >
-              Initialize
+              Next
             </motion.button>
           </motion.div>
         )}
