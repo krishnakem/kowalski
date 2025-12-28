@@ -210,9 +210,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             <div className="flex justify-center min-h-[56px]">
               <motion.button
                 initial={false}
-                animate={showBegin ? { opacity: 1, y: 0 } : { opacity: 0, y: 8 }}
-                transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
-                style={{ willChange: "opacity, transform" }}
+                animate={{ opacity: showBegin ? 1 : 0 }}
+                transition={{ duration: 0.8, ease: "easeOut" }}
                 onClick={handleBegin}
                 tabIndex={showBegin ? 0 : -1}
                 aria-hidden={!showBegin}
