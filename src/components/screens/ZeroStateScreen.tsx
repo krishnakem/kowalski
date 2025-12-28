@@ -433,19 +433,27 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               </div>
             </motion.div>
 
-            {/* Initialize Button */}
-            <motion.button
+            {/* Next Button */}
+            <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.4 }}
-              onClick={handleInitialize}
-              disabled={!apiKey}
-              className="w-full py-4 bg-foreground text-background font-sans text-sm tracking-wider uppercase
-                        disabled:opacity-30 disabled:cursor-not-allowed
-                        hover:bg-foreground/90 transition-colors duration-200"
+              className="flex justify-center"
             >
-              Next
-            </motion.button>
+              <button
+                onClick={handleInitialize}
+                disabled={!apiKey}
+                className={`inline-flex items-center gap-3 px-8 py-4 border-2 font-sans text-sm tracking-wider uppercase transition-all duration-200
+                           ${
+                             apiKey
+                               ? "border-foreground text-foreground hover:bg-foreground hover:text-background cursor-pointer"
+                               : "border-foreground/20 text-foreground/30 cursor-not-allowed"
+                           }`}
+              >
+                <span>Next</span>
+                <PixelArrow size={16} color="charcoal" />
+              </button>
+            </motion.div>
           </motion.div>
         )}
 
