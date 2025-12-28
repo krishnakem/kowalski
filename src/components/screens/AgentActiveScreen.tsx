@@ -33,7 +33,7 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
           onClick={() => navigate("/settings", { state: { from: "agent" } })}
           className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
         >
-          <Settings className="w-5 h-5" />
+          <Settings className="w-7 h-7" />
         </Button>
       </motion.div>
 
