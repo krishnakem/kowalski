@@ -545,7 +545,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
             {/* Browser View Dialog */}
             <Dialog open={dialogOpen} onOpenChange={() => {}}>
-              <DialogContent className="bg-background border-0 rounded-3xl p-0 max-w-md overflow-hidden [&>button]:hidden" overlayClassName="bg-background">
+              <DialogContent className="bg-background border-0 rounded-3xl p-0 max-w-2xl overflow-hidden [&>button]:hidden" overlayClassName="bg-background">
                 <AnimatePresence mode="wait">
                   {instagramPhase === "connecting" && (
                     <motion.div
@@ -557,7 +557,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                       className="p-6"
                     >
                       <div className="border-4 border-foreground rounded-3xl overflow-hidden">
-                        <div className="aspect-[9/16] bg-background flex flex-col items-center justify-center gap-6 p-8">
+                        <div className="aspect-video bg-background flex flex-col items-center justify-center gap-6 p-8">
                           <Instagram className="w-12 h-12 text-foreground" strokeWidth={1.5} />
                           <span className="font-sans text-foreground text-lg">Secure Login Window</span>
                           
