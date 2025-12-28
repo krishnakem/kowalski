@@ -86,6 +86,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [digestCount, setDigestCount] = useState<DigestCount | null>(null);
+  const [firstLineComplete, setFirstLineComplete] = useState(false);
   const [typingComplete, setTypingComplete] = useState(false);
   const [showBegin, setShowBegin] = useState(false);
   const [morningTime, setMorningTime] = useState("8:00 AM");
@@ -188,23 +189,27 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
           >
             <div className="text-5xl leading-relaxed space-y-2">
               <motion.div 
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.7, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                className="font-serif text-foreground"
-              >
-                Social Media is a drug.
-              </motion.div>
-              <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ duration: 0.4, delay: 0.6 }}
+                transition={{ duration: 0.4, delay: 0.2 }}
               >
                 <TypewriterText 
-                  text="Kowalski gets high for you."
-                  onComplete={() => setTypingComplete(true)}
+                  text="Social Media is a drug."
+                  onComplete={() => setFirstLineComplete(true)}
                 />
               </motion.div>
+              {firstLineComplete && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.4 }}
+                >
+                  <TypewriterText 
+                    text="Kowalski gets high for you."
+                    onComplete={() => setTypingComplete(true)}
+                  />
+                </motion.div>
+              )}
             </div>
 
             <div className="flex justify-center min-h-[56px]">
