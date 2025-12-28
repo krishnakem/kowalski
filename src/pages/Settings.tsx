@@ -59,7 +59,6 @@ const Settings = () => {
   const handleSave = () => {
     localStorage.setItem("kowalski-settings", JSON.stringify(settings));
     toast.success("Settings saved");
-    handleBack();
   };
 
   return (
