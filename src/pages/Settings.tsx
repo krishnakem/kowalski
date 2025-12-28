@@ -121,7 +121,8 @@ const Settings = () => {
 
         {/* Morning Time */}
         <div className="space-y-3">
-          <Label className="text-sm text-foreground font-sans">
+          <Label className="text-sm text-foreground font-sans flex items-center gap-2">
+            {settings.digestFrequency === 2 && <PixelSun size={16} color="charcoal" />}
             {settings.digestFrequency === 1 ? "Delivery Time" : "Morning Analysis"}
           </Label>
           <select
@@ -141,7 +142,10 @@ const Settings = () => {
         {/* Evening Time (only if twice daily) */}
         {settings.digestFrequency === 2 && (
           <div className="space-y-3">
-            <Label className="text-sm text-foreground font-sans">Evening Analysis</Label>
+            <Label className="text-sm text-foreground font-sans flex items-center gap-2">
+              <PixelMoon size={16} color="charcoal" />
+              Evening Analysis
+            </Label>
             <select
               value={settings.eveningTime}
               onChange={(e) => setSettings({ ...settings, eveningTime: e.target.value })}
