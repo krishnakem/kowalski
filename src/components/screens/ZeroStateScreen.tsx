@@ -346,7 +346,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               className="text-center space-y-4"
             >
               <h2 className="text-4xl md:text-5xl font-serif text-foreground">
-                Bring Your Own Key.
+                Enter your OpenAI API Key
               </h2>
               <p className="text-muted-foreground text-sm font-sans leading-relaxed max-w-sm mx-auto">
                 Kowalski uses your LLM to create it's analysis.
