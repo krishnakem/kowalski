@@ -55,7 +55,7 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
         className="text-center max-w-sm"
       >
         <p className="text-foreground font-sans text-lg leading-relaxed">
-          Kowalski is working on curating your digest.
+          Kowalski is working on curating your analysis.
           <br />
           <span className="text-muted-foreground">We'll let you know when it's ready.</span>
         </p>
