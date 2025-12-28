@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -33,8 +33,14 @@ const DEFAULT_SETTINGS: SettingsData = {
 
 const Settings = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromScreen = (location.state as { from?: string })?.from || "agent";
   const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
   const [showApiKey, setShowApiKey] = useState(false);
+
+  const handleBack = () => {
+    navigate("/", { state: { screen: fromScreen } });
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem("kowalski-settings");
@@ -51,7 +57,7 @@ const Settings = () => {
   const handleSave = () => {
     localStorage.setItem("kowalski-settings", JSON.stringify(settings));
     toast.success("Settings saved");
-    navigate(-1);
+    handleBack();
   };
 
   return (
@@ -62,7 +68,7 @@ const Settings = () => {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => navigate(-1)}
+            onClick={handleBack}
             className="text-muted-foreground hover:bg-transparent focus:ring-0 focus-visible:ring-0 active:bg-transparent"
           >
             <ArrowLeft className="w-5 h-5" />
