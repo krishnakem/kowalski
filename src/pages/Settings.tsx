@@ -173,9 +173,6 @@ const Settings = () => {
               {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Your API key is stored locally and never sent to our servers.
-          </p>
         </div>
 
         {/* Save Button */}
