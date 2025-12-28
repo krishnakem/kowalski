@@ -166,7 +166,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             transition={{ duration: 0.5 }}
             className="max-w-lg w-full text-center space-y-12"
           >
-            <div className="text-2xl md:text-3xl leading-relaxed space-y-2">
+            <div className="text-5xl leading-relaxed space-y-2">
               <div className="font-serif text-foreground">Social Media is a drug.</div>
               <TypewriterText 
                 text="Kowalski gets high for you."
@@ -208,7 +208,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1, duration: 0.4 }}
-              className="text-3xl md:text-4xl font-serif text-foreground"
+              className="text-5xl font-serif text-foreground"
             >
               When do you want your briefing?
             </motion.h2>
@@ -349,7 +349,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               transition={{ delay: 0.1, duration: 0.4 }}
               className="text-center space-y-4"
             >
-              <h2 className="text-4xl md:text-5xl font-serif text-foreground">
+              <h2 className="text-5xl font-serif text-foreground">
                 OpenAI API Key please
               </h2>
               <p className="text-muted-foreground text-sm font-sans leading-relaxed max-w-sm mx-auto">
@@ -472,7 +472,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <Instagram className="w-16 h-16 text-foreground" strokeWidth={1.5} />
               
               <div className="text-center space-y-2">
-                <h2 className="text-2xl font-serif text-foreground">Connect Instagram</h2>
+                <h2 className="text-5xl font-serif text-foreground">Connect Instagram</h2>
                 <p className="text-muted-foreground text-sm font-sans">
                   Kowalski interacts with Instagram in a local sandbox. Your credentials never leave your device.
                 </p>
