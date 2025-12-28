@@ -64,9 +64,9 @@ const Settings = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6 md:p-12">
-      <div className="max-w-md mx-auto space-y-8">
+      <div className="max-w-md mx-auto space-y-8 text-center">
         {/* Header */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center justify-center gap-4">
           <Button
             variant="ghost"
             size="icon"
@@ -121,14 +121,14 @@ const Settings = () => {
 
         {/* Morning Time */}
         <div className="space-y-3">
-          <Label className="text-sm text-foreground font-sans flex items-center gap-2">
+          <Label className="text-sm text-foreground font-sans flex items-center justify-center gap-2">
             {settings.digestFrequency === 2 && <PixelSun size={16} color="charcoal" />}
             {settings.digestFrequency === 1 ? "Delivery Time" : "Morning Analysis"}
           </Label>
           <select
             value={settings.morningTime}
             onChange={(e) => setSettings({ ...settings, morningTime: e.target.value })}
-            className="w-full bg-background border-2 border-foreground/20 px-6 py-3 font-sans text-foreground 
+            className="w-full bg-background border-2 border-foreground/20 px-6 py-3 font-sans text-foreground text-center
                        focus:border-foreground outline-none transition-colors cursor-pointer"
           >
             {TIME_OPTIONS.map((time) => (
@@ -142,14 +142,14 @@ const Settings = () => {
         {/* Evening Time (only if twice daily) */}
         {settings.digestFrequency === 2 && (
           <div className="space-y-3">
-            <Label className="text-sm text-foreground font-sans flex items-center gap-2">
+            <Label className="text-sm text-foreground font-sans flex items-center justify-center gap-2">
               <PixelMoon size={16} color="charcoal" />
               Evening Analysis
             </Label>
             <select
               value={settings.eveningTime}
               onChange={(e) => setSettings({ ...settings, eveningTime: e.target.value })}
-              className="w-full bg-background border-2 border-foreground/20 px-6 py-3 font-sans text-foreground 
+              className="w-full bg-background border-2 border-foreground/20 px-6 py-3 font-sans text-foreground text-center
                          focus:border-foreground outline-none transition-colors cursor-pointer"
             >
               {TIME_OPTIONS.map((time) => (
@@ -170,7 +170,7 @@ const Settings = () => {
               value={settings.apiKey}
               onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
               placeholder="sk-..."
-              className="w-full input-dotted text-foreground placeholder:text-foreground/30
+              className="w-full input-dotted text-foreground placeholder:text-foreground/30 text-center
                          font-sans text-lg tracking-wider pr-12 py-4"
             />
             <button
