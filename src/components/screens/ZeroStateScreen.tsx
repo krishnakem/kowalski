@@ -309,7 +309,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     {/* Morning/Single Time */}
                     <div className="flex flex-col items-center gap-3">
                       <label className="text-sm text-muted-foreground font-sans flex items-center gap-2">
-                        <PixelSun size={16} color="charcoal" />
+                        {digestCount === 2 && <PixelSun size={16} color="charcoal" />}
                         {digestCount === 1 ? "Delivery time" : "Morning analysis"}
                       </label>
                       <select
