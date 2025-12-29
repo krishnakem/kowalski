@@ -257,8 +257,54 @@ const getMatchContext = (analysis: ArchivedAnalysis, query: string): MatchContex
     extractSnippet(analysis.data.location, "Location");
   }
   
-  // Limit to 3 contexts max
-  return contexts.slice(0, 3);
+  // Return all contexts (no limit)
+  return contexts;
+};
+
+// Collapsible match context component
+const MatchContextList = ({ 
+  contexts, 
+  searchQuery 
+}: { 
+  contexts: MatchContext[]; 
+  searchQuery: string;
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const visibleCount = 3;
+  const hasMore = contexts.length > visibleCount;
+  const displayedContexts = isExpanded ? contexts : contexts.slice(0, visibleCount);
+  
+  if (contexts.length === 0) return null;
+  
+  return (
+    <div className="mt-4 space-y-2">
+      {displayedContexts.map((context, ctxIndex) => (
+        <div key={ctxIndex} className="flex items-start gap-2 text-xs">
+          <span className="text-primary font-sans font-medium shrink-0">
+            Found in {context.field}:
+          </span>
+          <span className="text-muted-foreground font-sans italic">
+            "{highlightMatch(context.snippet, searchQuery)}"
+          </span>
+        </div>
+      ))}
+      {hasMore && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsExpanded(!isExpanded);
+          }}
+          className="text-xs text-primary hover:text-primary/80 font-sans font-medium transition-colors flex items-center gap-1"
+        >
+          {isExpanded ? (
+            <>Show less</>
+          ) : (
+            <>+{contexts.length - visibleCount} more matches</>
+          )}
+        </button>
+      )}
+    </div>
+  );
 };
 
 type ViewMode = "months" | "analyses";
@@ -508,20 +554,10 @@ const AnalysisArchive = () => {
                         </div>
                         
                         {/* Match Context Snippets */}
-                        {getMatchContext(analysis, searchQuery).length > 0 && (
-                          <div className="mt-4 space-y-2">
-                            {getMatchContext(analysis, searchQuery).map((context, ctxIndex) => (
-                              <div key={ctxIndex} className="flex items-start gap-2 text-xs">
-                                <span className="text-primary font-sans font-medium shrink-0">
-                                  Found in {context.field}:
-                                </span>
-                                <span className="text-muted-foreground font-sans italic">
-                                  "{highlightMatch(context.snippet, searchQuery)}"
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <MatchContextList 
+                          contexts={getMatchContext(analysis, searchQuery)} 
+                          searchQuery={searchQuery} 
+                        />
                       </div>
                     </motion.article>
                   ))}
