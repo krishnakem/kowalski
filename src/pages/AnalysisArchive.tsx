@@ -212,6 +212,55 @@ const highlightMatch = (text: string, query: string): React.ReactNode => {
   );
 };
 
+// Get match context snippets for search results
+interface MatchContext {
+  field: string;
+  snippet: string;
+}
+
+const getMatchContext = (analysis: ArchivedAnalysis, query: string): MatchContext[] => {
+  if (!query.trim()) return [];
+  
+  const q = query.toLowerCase();
+  const contexts: MatchContext[] = [];
+  const snippetLength = 60;
+  
+  const extractSnippet = (text: string, field: string) => {
+    const lowerText = text.toLowerCase();
+    const matchIndex = lowerText.indexOf(q);
+    if (matchIndex === -1) return;
+    
+    const start = Math.max(0, matchIndex - snippetLength / 2);
+    const end = Math.min(text.length, matchIndex + q.length + snippetLength / 2);
+    let snippet = text.slice(start, end);
+    
+    if (start > 0) snippet = "..." + snippet;
+    if (end < text.length) snippet = snippet + "...";
+    
+    contexts.push({ field, snippet });
+  };
+  
+  // Check each field for matches
+  analysis.data.worldUpdates.forEach((update, i) => {
+    if (update.summary.toLowerCase().includes(q)) {
+      extractSnippet(update.summary, `${update.source}`);
+    }
+  });
+  
+  analysis.data.circleUpdates.forEach((update) => {
+    if (update.update.toLowerCase().includes(q)) {
+      extractSnippet(update.update, `${update.name}'s Update`);
+    }
+  });
+  
+  if (analysis.data.location.toLowerCase().includes(q)) {
+    extractSnippet(analysis.data.location, "Location");
+  }
+  
+  // Limit to 3 contexts max
+  return contexts.slice(0, 3);
+};
+
 type ViewMode = "months" | "analyses";
 
 const AnalysisArchive = () => {
@@ -457,6 +506,22 @@ const AnalysisArchive = () => {
                             {highlightMatch(analysis.leadStoryPreview, searchQuery)}
                           </p>
                         </div>
+                        
+                        {/* Match Context Snippets */}
+                        {getMatchContext(analysis, searchQuery).length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            {getMatchContext(analysis, searchQuery).map((context, ctxIndex) => (
+                              <div key={ctxIndex} className="flex items-start gap-2 text-xs">
+                                <span className="text-primary font-sans font-medium shrink-0">
+                                  Found in {context.field}:
+                                </span>
+                                <span className="text-muted-foreground font-sans italic">
+                                  "{highlightMatch(context.snippet, searchQuery)}"
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </motion.article>
                   ))}
