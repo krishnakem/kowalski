@@ -487,6 +487,28 @@ const AnalysisArchive = () => {
     return dayMap;
   }, [selectedMonth, currentMonthAnalyses]);
 
+  // Check if adjacent months have analyses
+  const hasAnalysesInMonth = (year: number, month: number) => {
+    return archivedAnalyses.some((analysis) => {
+      const date = analysis.data.date;
+      return date.getFullYear() === year && date.getMonth() === month;
+    });
+  };
+
+  const hasPrevMonth = useMemo(() => {
+    if (selectedMonth === null) return false;
+    const prevMonth = selectedMonth === 0 ? 11 : selectedMonth - 1;
+    const prevYear = selectedMonth === 0 ? selectedYear - 1 : selectedYear;
+    return hasAnalysesInMonth(prevYear, prevMonth);
+  }, [selectedMonth, selectedYear]);
+
+  const hasNextMonth = useMemo(() => {
+    if (selectedMonth === null) return false;
+    const nextMonth = selectedMonth === 11 ? 0 : selectedMonth + 1;
+    const nextYear = selectedMonth === 11 ? selectedYear + 1 : selectedYear;
+    return hasAnalysesInMonth(nextYear, nextMonth);
+  }, [selectedMonth, selectedYear]);
+
   const selectedMonthName = selectedMonth !== null 
     ? MONTHS[selectedMonth].full 
     : "";
@@ -602,6 +624,7 @@ const AnalysisArchive = () => {
               <Button
                 variant="ghost"
                 size="icon"
+                disabled={!hasPrevMonth}
                 onClick={() => {
                   if (selectedMonth === 0) {
                     setSelectedMonth(11);
@@ -610,7 +633,7 @@ const AnalysisArchive = () => {
                     setSelectedMonth(selectedMonth - 1);
                   }
                 }}
-                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors"
+                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <ChevronLeft className="w-6 h-6" />
               </Button>
@@ -622,6 +645,7 @@ const AnalysisArchive = () => {
               <Button
                 variant="ghost"
                 size="icon"
+                disabled={!hasNextMonth}
                 onClick={() => {
                   if (selectedMonth === 11) {
                     setSelectedMonth(0);
@@ -630,7 +654,7 @@ const AnalysisArchive = () => {
                     setSelectedMonth(selectedMonth + 1);
                   }
                 }}
-                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors"
+                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <ChevronRight className="w-6 h-6" />
               </Button>
