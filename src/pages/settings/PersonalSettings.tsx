@@ -19,6 +19,7 @@ const PersonalSettings = () => {
   // Sync state when settings are loaded
   useEffect(() => {
     if (isLoaded) {
+      console.log("Settings loaded:", { userName: settings.userName, location: settings.location });
       setEditName(settings.userName);
       setEditLocation(settings.location);
     }
