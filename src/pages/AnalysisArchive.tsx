@@ -289,6 +289,16 @@ const AnalysisArchive = () => {
     ? MONTHS[selectedMonth].full 
     : "";
 
+  // Get all matching analyses across all years when searching
+  const getAllMatchingAnalyses = () => {
+    return archivedAnalyses
+      .filter((analysis) => matchesSearch(analysis, searchQuery))
+      .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+  };
+
+  const isSearching = searchQuery.trim().length > 0;
+  const searchResults = isSearching ? getAllMatchingAnalyses() : [];
+
   return (
     <AnimatePresence mode="wait">
       {selectedAnalysis ? (
@@ -339,8 +349,17 @@ const AnalysisArchive = () => {
             className="text-center mb-12"
           >
             <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
-              {viewMode === "months" ? "Analysis Archive" : `${selectedMonthName} ${selectedYear}`}
+              {isSearching 
+                ? "Search Results" 
+                : viewMode === "months" 
+                  ? "Analysis Archive" 
+                  : `${selectedMonthName} ${selectedYear}`}
             </h1>
+            {isSearching && (
+              <p className="font-sans text-muted-foreground">
+                {searchResults.length} {searchResults.length === 1 ? "analysis" : "analyses"} found
+              </p>
+            )}
           </motion.header>
 
           {/* Search Bar */}
@@ -362,7 +381,62 @@ const AnalysisArchive = () => {
             </div>
           </motion.div>
 
-          {viewMode === "months" ? (
+          {isSearching ? (
+            /* Search Results - Flat list of all matching analyses */
+            <main className="max-w-2xl mx-auto px-6 py-8">
+              {searchResults.length === 0 ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2, duration: 0.5 }}
+                  className="flex flex-col items-center justify-center py-20 text-center"
+                >
+                  <Search className="w-12 h-12 text-muted-foreground mb-4" />
+                  <h2 className="font-serif text-xl text-foreground mb-3">
+                    No Results Found
+                  </h2>
+                  <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
+                    No analyses match "{searchQuery}".
+                  </p>
+                </motion.div>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.2, duration: 0.4 }}
+                  className="space-y-6"
+                >
+                  {searchResults.map((analysis, index) => (
+                    <motion.article
+                      key={analysis.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.05 * (index + 1), duration: 0.4 }}
+                      className="group cursor-pointer"
+                      onClick={() => handleAnalysisClick(analysis)}
+                    >
+                      <div className="pb-6 border-b border-border">
+                        <h2 className="font-serif text-xl text-foreground group-hover:text-primary transition-colors mb-1">
+                          {getWeekdayTitle(analysis.data.date)}
+                        </h2>
+                        <p className="font-sans text-xs text-muted-foreground uppercase tracking-wider mb-4">
+                          {formatDate(analysis.data.date)} • {analysis.data.location}
+                        </p>
+                        <div className="flex gap-2">
+                          <span className="font-sans text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                            {analysis.data.worldUpdates[0].source}:
+                          </span>
+                          <p className="font-serif text-sm text-foreground/80 leading-relaxed line-clamp-2">
+                            {analysis.leadStoryPreview}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.article>
+                  ))}
+                </motion.div>
+              )}
+            </main>
+          ) : viewMode === "months" ? (
             <>
               {/* Year Dropdown */}
               <motion.div
