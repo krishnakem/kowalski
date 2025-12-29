@@ -29,8 +29,6 @@ const Index = () => {
         {currentScreen === "zero" && (
           <motion.div
             key="zero"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
           >
@@ -41,8 +39,6 @@ const Index = () => {
         {currentScreen === "agent" && (
           <motion.div
             key="agent"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
           >
@@ -53,8 +49,6 @@ const Index = () => {
         {currentScreen === "gazette" && (
           <motion.div
             key="gazette"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
           >
