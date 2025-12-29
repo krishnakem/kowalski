@@ -67,7 +67,7 @@ const TypewriterText = ({
   }, [text, speed, onComplete]);
 
   return (
-    <span className="font-serif text-foreground">
+    <span className="text-foreground" style={{ fontFamily: 'Georgia, serif' }}>
       {displayedText}
       <motion.span
         animate={{ opacity: isComplete ? 0 : [1, 0] }}
