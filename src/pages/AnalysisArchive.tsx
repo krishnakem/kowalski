@@ -229,6 +229,8 @@ const AnalysisArchive = () => {
     const from = location.state?.from;
     if (from === "agent") {
       navigate("/", { state: { screen: "agent" } });
+    } else if (from === "gazette") {
+      navigate("/", { state: { screen: "gazette" } });
     } else {
       navigate(-1);
     }
