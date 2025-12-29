@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MapPin, Loader2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -10,11 +10,19 @@ import SettingsLayout from "@/components/layouts/SettingsLayout";
 
 const PersonalSettings = () => {
   const { navigateBack } = useFromScreen();
-  const { settings, patchSettings } = useSettings();
+  const { settings, isLoaded, patchSettings } = useSettings();
   
-  const [editName, setEditName] = useState(settings.userName);
-  const [editLocation, setEditLocation] = useState(settings.location);
+  const [editName, setEditName] = useState("");
+  const [editLocation, setEditLocation] = useState("");
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+
+  // Sync state when settings are loaded
+  useEffect(() => {
+    if (isLoaded) {
+      setEditName(settings.userName);
+      setEditLocation(settings.location);
+    }
+  }, [isLoaded, settings.userName, settings.location]);
 
   const handleSave = () => {
     patchSettings({ userName: editName, location: editLocation });
