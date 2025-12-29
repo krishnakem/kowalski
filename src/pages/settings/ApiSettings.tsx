@@ -1,16 +1,14 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useSettings } from "@/hooks/useSettings";
+import { useFromScreen } from "@/hooks/useFromScreen";
+import SettingsLayout from "@/components/layouts/SettingsLayout";
 
 const ApiSettings = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const fromScreen = (location.state as { from?: string })?.from;
+  const { navigateBack } = useFromScreen();
   const { settings, setSettings, saveSettings, isLoaded } = useSettings();
   const [showApiKey, setShowApiKey] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
@@ -22,10 +20,6 @@ const ApiSettings = () => {
       originalApiKeyRef.current = settings.apiKey || "";
     }
   }, [isLoaded, settings.apiKey]);
-
-  const handleBack = () => {
-    navigate("/settings", { state: { from: fromScreen } });
-  };
 
   const handleSave = async () => {
     const apiKeyChanged = settings.apiKey !== originalApiKeyRef.current;
@@ -56,117 +50,104 @@ const ApiSettings = () => {
     saveSettings();
     originalApiKeyRef.current = settings.apiKey;
     toast.success("API settings saved");
-    handleBack();
+    navigateBack("/settings");
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground py-16 px-6 relative">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={handleBack}
-        className="absolute top-6 left-6 text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-      >
-        <ArrowLeft className="w-6 h-6" />
-      </Button>
-
-      <div className="max-w-md mx-auto space-y-8 text-center">
-        <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">API & Usage</h1>
-
-        {/* API Key */}
-        <div className="space-y-3">
-          <Label className="text-sm text-foreground font-sans">OpenAI API Key</Label>
-          <div className="relative">
-            <input
-              type={showApiKey ? "text" : "password"}
-              value={settings.apiKey}
-              onChange={(e) => {
-                setSettings({ ...settings, apiKey: e.target.value });
-                setKeyError(null);
-              }}
-              placeholder="sk-..."
-              className={`w-full input-dotted text-foreground placeholder:text-foreground/30 text-left
-                         font-sans text-lg tracking-wider pr-12 py-4 ${keyError ? 'border-destructive' : ''}`}
-            />
-            <button
-              type="button"
-              onClick={() => setShowApiKey(!showApiKey)}
-              className="absolute right-0 top-1/2 -translate-y-1/2 p-3 text-muted-foreground transition-colors"
-            >
-              {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
-            </button>
-          </div>
-          {keyError && (
-            <motion.p
-              initial={{ opacity: 0, y: -5 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-destructive text-sm font-sans text-center"
-            >
-              {keyError}
-            </motion.p>
-          )}
+    <SettingsLayout title="API & Usage">
+      {/* API Key */}
+      <div className="space-y-3">
+        <Label className="text-sm text-foreground font-sans">OpenAI API Key</Label>
+        <div className="relative">
+          <input
+            type={showApiKey ? "text" : "password"}
+            value={settings.apiKey}
+            onChange={(e) => {
+              setSettings({ ...settings, apiKey: e.target.value });
+              setKeyError(null);
+            }}
+            placeholder="sk-..."
+            className={`w-full input-dotted text-foreground placeholder:text-foreground/30 text-left
+                       font-sans text-lg tracking-wider pr-12 py-4 ${keyError ? 'border-destructive' : ''}`}
+          />
+          <button
+            type="button"
+            onClick={() => setShowApiKey(!showApiKey)}
+            className="absolute right-0 top-1/2 -translate-y-1/2 p-3 text-muted-foreground transition-colors"
+          >
+            {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
+          </button>
         </div>
-
-        {/* Monthly Usage Cap */}
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <Label className="text-sm text-foreground font-sans">
-              Monthly Usage Cap: ${settings.usageCap}
-            </Label>
-            <p className="text-sm text-muted-foreground font-sans">
-              Kowalski will stop processing requests once this limit is reached
-            </p>
-          </div>
-          <div className="relative px-1">
-            <input
-              type="range"
-              min={5}
-              max={15}
-              value={settings.usageCap}
-              onChange={(e) => setSettings({ ...settings, usageCap: Number(e.target.value) })}
-              className="w-full h-0.5 bg-transparent appearance-none cursor-pointer
-                         [&::-webkit-slider-runnable-track]:h-0.5 
-                         [&::-webkit-slider-runnable-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
-                         [&::-webkit-slider-thumb]:appearance-none 
-                         [&::-webkit-slider-thumb]:w-4 
-                         [&::-webkit-slider-thumb]:h-4 
-                         [&::-webkit-slider-thumb]:rounded-full 
-                         [&::-webkit-slider-thumb]:bg-foreground 
-                         [&::-webkit-slider-thumb]:-mt-[7px]
-                         [&::-webkit-slider-thumb]:cursor-pointer
-                         [&::-moz-range-track]:h-0.5 
-                         [&::-moz-range-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
-                         [&::-moz-range-thumb]:appearance-none 
-                         [&::-moz-range-thumb]:w-4 
-                         [&::-moz-range-thumb]:h-4 
-                         [&::-moz-range-thumb]:rounded-full 
-                         [&::-moz-range-thumb]:bg-foreground 
-                         [&::-moz-range-thumb]:border-0
-                         [&::-moz-range-thumb]:cursor-pointer"
-            />
-          </div>
-        </div>
-
-        <button
-          onClick={handleSave}
-          disabled={isValidating}
-          className={`w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground 
-                     font-sans text-sm tracking-wider uppercase transition-all duration-200
-                     ${isValidating 
-                       ? 'text-foreground/50 cursor-not-allowed' 
-                       : 'text-foreground hover:bg-foreground hover:text-background'}`}
-        >
-          {isValidating ? (
-            <>
-              <Loader2 size={16} className="animate-spin" />
-              <span>Validating...</span>
-            </>
-          ) : (
-            <span>Save</span>
-          )}
-        </button>
+        {keyError && (
+          <motion.p
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-destructive text-sm font-sans text-center"
+          >
+            {keyError}
+          </motion.p>
+        )}
       </div>
-    </div>
+
+      {/* Monthly Usage Cap */}
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <Label className="text-sm text-foreground font-sans">
+            Monthly Usage Cap: ${settings.usageCap}
+          </Label>
+          <p className="text-sm text-muted-foreground font-sans">
+            Kowalski will stop processing requests once this limit is reached
+          </p>
+        </div>
+        <div className="relative px-1">
+          <input
+            type="range"
+            min={5}
+            max={15}
+            value={settings.usageCap}
+            onChange={(e) => setSettings({ ...settings, usageCap: Number(e.target.value) })}
+            className="w-full h-0.5 bg-transparent appearance-none cursor-pointer
+                       [&::-webkit-slider-runnable-track]:h-0.5 
+                       [&::-webkit-slider-runnable-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
+                       [&::-webkit-slider-thumb]:appearance-none 
+                       [&::-webkit-slider-thumb]:w-4 
+                       [&::-webkit-slider-thumb]:h-4 
+                       [&::-webkit-slider-thumb]:rounded-full 
+                       [&::-webkit-slider-thumb]:bg-foreground 
+                       [&::-webkit-slider-thumb]:-mt-[7px]
+                       [&::-webkit-slider-thumb]:cursor-pointer
+                       [&::-moz-range-track]:h-0.5 
+                       [&::-moz-range-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
+                       [&::-moz-range-thumb]:appearance-none 
+                       [&::-moz-range-thumb]:w-4 
+                       [&::-moz-range-thumb]:h-4 
+                       [&::-moz-range-thumb]:rounded-full 
+                       [&::-moz-range-thumb]:bg-foreground 
+                       [&::-moz-range-thumb]:border-0
+                       [&::-moz-range-thumb]:cursor-pointer"
+          />
+        </div>
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={isValidating}
+        className={`w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground 
+                   font-sans text-sm tracking-wider uppercase transition-all duration-200
+                   ${isValidating 
+                     ? 'text-foreground/50 cursor-not-allowed' 
+                     : 'text-foreground hover:bg-foreground hover:text-background'}`}
+      >
+        {isValidating ? (
+          <>
+            <Loader2 size={16} className="animate-spin" />
+            <span>Validating...</span>
+          </>
+        ) : (
+          <span>Save</span>
+        )}
+      </button>
+    </SettingsLayout>
   );
 };
 

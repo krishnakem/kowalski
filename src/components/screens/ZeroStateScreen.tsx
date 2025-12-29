@@ -11,29 +11,16 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
-import { SETTINGS_KEY, DEFAULT_SETTINGS, SettingsData } from "@/hooks/useSettings";
+import { useSettings } from "@/hooks/useSettings";
+import { TIME_OPTIONS } from "@/lib/constants";
 
 interface ZeroStateScreenProps {
   onContinue: () => void;
 }
 
-// Helper to save current onboarding state to localStorage
-const saveOnboardingProgress = (updates: Partial<SettingsData>) => {
-  const existing = localStorage.getItem(SETTINGS_KEY);
-  const current = existing ? JSON.parse(existing) : DEFAULT_SETTINGS;
-  const merged = { ...DEFAULT_SETTINGS, ...current, ...updates };
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
-};
-
 type DigestCount = 1 | 2;
 type Step = "hook" | "routine" | "interests" | "key" | "instagram";
 type InstagramPhase = "trigger" | "connecting" | "success";
-
-const TIME_OPTIONS = [
-  "6:00 AM", "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
-  "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", 
-  "8:00 PM", "9:00 PM", "10:00 PM"
-];
 
 const TypewriterText = ({ 
   text, 
@@ -91,6 +78,7 @@ const TypewriterText = ({
 };
 
 const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
+  const { patchSettings } = useSettings();
   const [step, setStep] = useState<Step>("hook");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -145,7 +133,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const handleRoutineContinue = () => {
     // Save schedule settings before moving to interests
-    saveOnboardingProgress({
+    patchSettings({
       digestFrequency: digestCount || 1,
       morningTime,
       eveningTime,
@@ -167,7 +155,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const handleInterestsContinue = () => {
     // Save interests before moving to API key step
-    saveOnboardingProgress({ interests });
+    patchSettings({ interests });
     setStep("key");
   };
 
@@ -188,7 +176,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
       }
       
       // Valid key - save and proceed
-      saveOnboardingProgress({ apiKey, usageCap });
+      patchSettings({ apiKey, usageCap });
       setStep("instagram");
     } catch (error) {
       setKeyError('Could not validate key. Check your connection.');
@@ -591,7 +579,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             {/* Temporary dev skip button - DELETE BEFORE SHIPPING */}
             <button
               onClick={() => {
-                saveOnboardingProgress({ usageCap });
+                patchSettings({ usageCap });
                 setStep("instagram");
               }}
               className="absolute -top-8 right-0 text-xs text-muted-foreground/50 hover:text-muted-foreground underline"

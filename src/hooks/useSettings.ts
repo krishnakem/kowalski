@@ -48,5 +48,17 @@ export const useSettings = () => {
     setSettings(DEFAULT_SETTINGS);
   };
 
-  return { settings, setSettings, saveSettings, resetSettings, isLoaded };
+  /**
+   * Patch settings with partial updates - merges with existing settings and saves.
+   * Useful for incremental saves during onboarding.
+   */
+  const patchSettings = (updates: Partial<SettingsData>) => {
+    const existing = localStorage.getItem(SETTINGS_KEY);
+    const current = existing ? JSON.parse(existing) : DEFAULT_SETTINGS;
+    const merged = { ...DEFAULT_SETTINGS, ...current, ...updates };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+    setSettings(merged);
+  };
+
+  return { settings, setSettings, saveSettings, resetSettings, patchSettings, isLoaded };
 };
