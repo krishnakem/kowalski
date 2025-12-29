@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Search } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { ArrowLeft, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WavingPenguin } from "@/components/icons/PixelIcons";
 import GazetteScreen, { AnalysisData } from "@/components/screens/GazetteScreen";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface ArchivedAnalysis {
   id: string;
@@ -13,7 +18,7 @@ interface ArchivedAnalysis {
   leadStoryPreview: string;
 }
 
-// Mock data for demo purposes
+// Mock data for demo purposes - expanded with more months
 const archivedAnalyses: ArchivedAnalysis[] = [
   {
     id: "1",
@@ -94,8 +99,76 @@ const archivedAnalyses: ArchivedAnalysis[] = [
       ]
     },
     leadStoryPreview: "Holiday tech gifts trend toward privacy-focused devices as consumers become more security conscious."
+  },
+  {
+    id: "4",
+    data: {
+      date: new Date("2024-11-15"),
+      location: "Sunnyvale",
+      circleUpdates: [
+        { name: "Rachel", update: "got promoted to senior engineer" },
+        { name: "Chris", update: "moved to Seattle" },
+      ],
+      worldUpdates: [
+        {
+          source: "TechCrunch",
+          summary: "November sees record venture capital deployment as investors rush to close end-of-year deals."
+        },
+        {
+          source: "Bloomberg",
+          summary: "Tech layoffs slow as companies stabilize after year of restructuring."
+        },
+        {
+          source: "Wired",
+          summary: "New AI regulations proposed in Congress spark industry debate."
+        }
+      ]
+    },
+    leadStoryPreview: "November sees record venture capital deployment as investors rush to close end-of-year deals."
+  },
+  {
+    id: "5",
+    data: {
+      date: new Date("2024-10-20"),
+      location: "Sunnyvale",
+      circleUpdates: [
+        { name: "Alex", update: "launched a new startup" },
+      ],
+      worldUpdates: [
+        {
+          source: "The Verge",
+          summary: "October brings major product launches as tech giants compete for holiday shopping season."
+        },
+        {
+          source: "Reuters",
+          summary: "Smartphone sales rebound after two-year decline."
+        },
+        {
+          source: "Ars Technica",
+          summary: "New browser technologies promise faster, more private web experience."
+        }
+      ]
+    },
+    leadStoryPreview: "October brings major product launches as tech giants compete for holiday shopping season."
   }
 ];
+
+const MONTHS = [
+  { short: "Jan", full: "January", index: 0 },
+  { short: "Feb", full: "February", index: 1 },
+  { short: "Mar", full: "March", index: 2 },
+  { short: "Apr", full: "April", index: 3 },
+  { short: "May", full: "May", index: 4 },
+  { short: "Jun", full: "June", index: 5 },
+  { short: "Jul", full: "July", index: 6 },
+  { short: "Aug", full: "August", index: 7 },
+  { short: "Sep", full: "September", index: 8 },
+  { short: "Oct", full: "October", index: 9 },
+  { short: "Nov", full: "November", index: 10 },
+  { short: "Dec", full: "December", index: 11 },
+];
+
+const AVAILABLE_YEARS = [2025, 2024, 2023];
 
 const formatDate = (date: Date): string => {
   return date.toLocaleDateString("en-US", {
@@ -111,13 +184,22 @@ const getWeekdayTitle = (date: Date): string => {
   return `The ${weekday} Analysis`;
 };
 
+type ViewMode = "months" | "analyses";
+
 const AnalysisArchive = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [selectedAnalysis, setSelectedAnalysis] = useState<ArchivedAnalysis | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedYear, setSelectedYear] = useState(2024);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("months");
 
   const handleBack = () => {
+    if (viewMode === "analyses") {
+      setViewMode("months");
+      setSelectedMonth(null);
+      return;
+    }
     const from = location.state?.from;
     if (from === "agent") {
       navigate("/", { state: { screen: "agent" } });
@@ -134,34 +216,39 @@ const AnalysisArchive = () => {
     setSelectedAnalysis(null);
   };
 
-  // For demo: toggle between empty and populated state
-  const showEmptyState = false; // Change to true to see empty state
-  
-  // Filter analyses based on search query
-  const filteredAnalyses = archivedAnalyses.filter((analysis) => {
-    if (!searchQuery.trim()) return true;
-    
-    const query = searchQuery.toLowerCase();
-    const dateStr = formatDate(analysis.data.date).toLowerCase();
-    const weekdayTitle = getWeekdayTitle(analysis.data.date).toLowerCase();
-    const location = analysis.data.location.toLowerCase();
-    const leadStory = analysis.leadStoryPreview.toLowerCase();
-    const sources = analysis.data.worldUpdates.map(u => u.source.toLowerCase()).join(" ");
-    const summaries = analysis.data.worldUpdates.map(u => u.summary.toLowerCase()).join(" ");
-    const circleNames = analysis.data.circleUpdates.map(u => u.name.toLowerCase()).join(" ");
-    
-    return (
-      dateStr.includes(query) ||
-      weekdayTitle.includes(query) ||
-      location.includes(query) ||
-      leadStory.includes(query) ||
-      sources.includes(query) ||
-      summaries.includes(query) ||
-      circleNames.includes(query)
-    );
-  });
+  const handleMonthClick = (monthIndex: number) => {
+    setSelectedMonth(monthIndex);
+    setViewMode("analyses");
+  };
 
-  const analyses = showEmptyState ? [] : filteredAnalyses;
+  // Get analyses for selected month/year
+  const getAnalysesForMonth = (year: number, month: number) => {
+    return archivedAnalyses.filter((analysis) => {
+      const date = analysis.data.date;
+      return date.getFullYear() === year && date.getMonth() === month;
+    });
+  };
+
+  // Get months that have analyses for the selected year
+  const getMonthsWithAnalyses = (year: number) => {
+    const monthsSet = new Set<number>();
+    archivedAnalyses.forEach((analysis) => {
+      const date = analysis.data.date;
+      if (date.getFullYear() === year) {
+        monthsSet.add(date.getMonth());
+      }
+    });
+    return monthsSet;
+  };
+
+  const monthsWithAnalyses = getMonthsWithAnalyses(selectedYear);
+  const currentMonthAnalyses = selectedMonth !== null 
+    ? getAnalysesForMonth(selectedYear, selectedMonth) 
+    : [];
+
+  const selectedMonthName = selectedMonth !== null 
+    ? MONTHS[selectedMonth].full 
+    : "";
 
   return (
     <AnimatePresence mode="wait">
@@ -193,7 +280,7 @@ const AnalysisArchive = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3, duration: 0.5 }}
-            className="absolute top-6 left-6"
+            className="absolute top-6 left-6 z-10"
           >
             <Button
               variant="ghost"
@@ -214,106 +301,169 @@ const AnalysisArchive = () => {
           >
             <div className="max-w-2xl mx-auto">
               <h1 className="font-serif text-4xl md:text-5xl text-center text-foreground">
-                Analysis Archive
+                {viewMode === "months" ? "Analysis Archive" : `${selectedMonthName} ${selectedYear}`}
               </h1>
             </div>
           </motion.header>
 
-          {/* Search Bar */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, duration: 0.4 }}
-            className="max-w-2xl mx-auto px-6 mb-6"
-          >
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search by date, source, or topic..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 bg-background border-border font-sans"
-              />
-            </div>
-          </motion.div>
-
-          <main className="max-w-2xl mx-auto px-6 py-8">
-            {analyses.length === 0 && searchQuery.trim() ? (
-              /* No Results State */
+          {viewMode === "months" ? (
+            <>
+              {/* Year Dropdown */}
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2, duration: 0.5 }}
-                className="flex flex-col items-center justify-center py-20 text-center"
-              >
-                <Search className="w-12 h-12 text-muted-foreground mb-4" />
-                <h2 className="font-serif text-xl text-foreground mb-3">
-                  No Results Found
-                </h2>
-                <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
-                  No analyses match "{searchQuery}". Try a different search term.
-                </p>
-              </motion.div>
-            ) : analyses.length === 0 ? (
-              /* Empty State */
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2, duration: 0.5 }}
-                className="flex flex-col items-center justify-center py-20 text-center"
-              >
-                <WavingPenguin size={120} />
-                <h2 className="font-serif text-xl text-foreground mt-8 mb-3">
-                  No Analyses Yet
-                </h2>
-                <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
-                  Your daily analyses will appear here once Kowalski creates them.
-                </p>
-              </motion.div>
-            ) : (
-              /* Archive List */
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
                 transition={{ delay: 0.2, duration: 0.4 }}
-                className="space-y-6"
+                className="max-w-2xl mx-auto px-6 mb-8"
               >
-                {analyses.map((analysis, index) => (
-                  <motion.article
-                    key={analysis.id}
+                <div className="flex justify-center">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="font-sans text-lg px-6 py-2 border-2 border-foreground/20 hover:border-foreground bg-background"
+                      >
+                        {selectedYear}
+                        <ChevronDown className="ml-2 w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="bg-background border-border z-50">
+                      {AVAILABLE_YEARS.map((year) => (
+                        <DropdownMenuItem
+                          key={year}
+                          onClick={() => setSelectedYear(year)}
+                          className={`font-sans cursor-pointer ${
+                            year === selectedYear ? "font-medium" : ""
+                          }`}
+                        >
+                          {year}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </motion.div>
+
+              {/* Month Grid */}
+              <main className="max-w-2xl mx-auto px-6 py-4">
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.3, duration: 0.4 }}
+                  className="grid grid-cols-3 md:grid-cols-4 gap-4"
+                >
+                  {MONTHS.map((month, index) => {
+                    const hasAnalyses = monthsWithAnalyses.has(month.index);
+                    const analysesCount = getAnalysesForMonth(selectedYear, month.index).length;
+                    
+                    return (
+                      <motion.button
+                        key={month.short}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.05 * index, duration: 0.3 }}
+                        whileHover={hasAnalyses ? { y: -2, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" } : {}}
+                        onClick={() => hasAnalyses && handleMonthClick(month.index)}
+                        disabled={!hasAnalyses}
+                        className={`aspect-square border-2 p-4 flex flex-col items-center justify-center gap-2
+                          transition-colors duration-200 bg-card ${
+                            hasAnalyses
+                              ? "border-foreground/20 hover:border-foreground cursor-pointer"
+                              : "border-border/50 opacity-40 cursor-not-allowed"
+                          }`}
+                      >
+                        <span className="font-serif text-2xl md:text-3xl text-foreground">
+                          {month.short}
+                        </span>
+                        {hasAnalyses && (
+                          <span className="font-sans text-xs text-muted-foreground">
+                            {analysesCount} {analysesCount === 1 ? "analysis" : "analyses"}
+                          </span>
+                        )}
+                      </motion.button>
+                    );
+                  })}
+                </motion.div>
+
+                {/* No analyses for year */}
+                {monthsWithAnalyses.size === 0 && (
+                  <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 * (index + 1), duration: 0.4 }}
-                    className="group cursor-pointer"
-                    onClick={() => handleAnalysisClick(analysis)}
+                    transition={{ delay: 0.2, duration: 0.5 }}
+                    className="flex flex-col items-center justify-center py-12 text-center"
                   >
-                    <div className="pb-6 border-b border-border">
-                      {/* Title */}
-                      <h2 className="font-serif text-xl text-foreground group-hover:text-primary transition-colors mb-1">
-                        {getWeekdayTitle(analysis.data.date)}
-                      </h2>
-                      
-                      {/* Date & Location */}
-                      <p className="font-sans text-xs text-muted-foreground uppercase tracking-wider mb-4">
-                        {formatDate(analysis.data.date)} • {analysis.data.location}
-                      </p>
-                      
-                      {/* Lead Story Preview */}
-                      <div className="flex gap-2">
-                        <span className="font-sans text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                          {analysis.data.worldUpdates[0].source}:
-                        </span>
-                        <p className="font-serif text-sm text-foreground/80 leading-relaxed line-clamp-2">
-                          {analysis.leadStoryPreview}
+                    <WavingPenguin size={80} />
+                    <h2 className="font-serif text-xl text-foreground mt-6 mb-3">
+                      No Analyses in {selectedYear}
+                    </h2>
+                    <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
+                      Try selecting a different year.
+                    </p>
+                  </motion.div>
+                )}
+              </main>
+            </>
+          ) : (
+            /* Analyses List for Selected Month */
+            <main className="max-w-2xl mx-auto px-6 py-8">
+              {currentMonthAnalyses.length === 0 ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2, duration: 0.5 }}
+                  className="flex flex-col items-center justify-center py-20 text-center"
+                >
+                  <WavingPenguin size={120} />
+                  <h2 className="font-serif text-xl text-foreground mt-8 mb-3">
+                    No Analyses
+                  </h2>
+                  <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
+                    No analyses found for {selectedMonthName} {selectedYear}.
+                  </p>
+                </motion.div>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.2, duration: 0.4 }}
+                  className="space-y-6"
+                >
+                  {currentMonthAnalyses.map((analysis, index) => (
+                    <motion.article
+                      key={analysis.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.1 * (index + 1), duration: 0.4 }}
+                      className="group cursor-pointer"
+                      onClick={() => handleAnalysisClick(analysis)}
+                    >
+                      <div className="pb-6 border-b border-border">
+                        {/* Title */}
+                        <h2 className="font-serif text-xl text-foreground group-hover:text-primary transition-colors mb-1">
+                          {getWeekdayTitle(analysis.data.date)}
+                        </h2>
+                        
+                        {/* Date & Location */}
+                        <p className="font-sans text-xs text-muted-foreground uppercase tracking-wider mb-4">
+                          {formatDate(analysis.data.date)} • {analysis.data.location}
                         </p>
+                        
+                        {/* Lead Story Preview */}
+                        <div className="flex gap-2">
+                          <span className="font-sans text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                            {analysis.data.worldUpdates[0].source}:
+                          </span>
+                          <p className="font-serif text-sm text-foreground/80 leading-relaxed line-clamp-2">
+                            {analysis.leadStoryPreview}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </motion.article>
-                ))}
-              </motion.div>
-            )}
-          </main>
+                    </motion.article>
+                  ))}
+                </motion.div>
+              )}
+            </main>
+          )}
         </motion.div>
       )}
     </AnimatePresence>
