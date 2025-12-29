@@ -15,14 +15,13 @@ const Index = () => {
   const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
   const [waitingForNextAnalysis, setWaitingForNextAnalysis] = useState(false);
 
-  // Determine initial screen based on user state
+  // Determine initial screen based on user state - only runs once on initial load
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || currentScreen !== null) return;
 
     const screenFromState = (location.state as { screen?: Screen })?.screen;
 
     // Only honor navigation-driven screen overrides for users who have onboarded.
-    // This prevents stale history state from forcing "gazette/agent/ready" after a dev reset.
     if (screenFromState && (settings.hasOnboarded || screenFromState === "zero")) {
       setCurrentScreen(screenFromState);
       return;
@@ -40,11 +39,10 @@ const Index = () => {
           setCurrentScreen("ready");
           break;
         default:
-          // idle - show zero state (waiting for next scheduled analysis)
           setCurrentScreen("zero");
       }
     }
-  }, [isLoaded, location.state, settings.hasOnboarded, settings.analysisStatus]);
+  }, [isLoaded, currentScreen, location.state, settings.hasOnboarded, settings.analysisStatus]);
 
   const handleContinue = () => {
     patchSettings({ hasOnboarded: true, analysisStatus: "working" });
