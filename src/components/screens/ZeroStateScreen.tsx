@@ -101,7 +101,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
       return;
     }
 
-    const t = window.setTimeout(() => setShowBegin(true), 2000);
+    const t = window.setTimeout(() => setShowBegin(true), 600);
     return () => window.clearTimeout(t);
   }, [typingComplete]);
 
@@ -216,7 +216,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <motion.button
                 initial={false}
                 animate={{ opacity: showBegin ? 1 : 0 }}
-                transition={{ duration: 1.5, ease: "easeOut" }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
                 onClick={handleBegin}
                 tabIndex={showBegin ? 0 : -1}
                 aria-hidden={!showBegin}
