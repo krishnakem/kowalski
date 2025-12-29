@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { motion } from "framer-motion";
 
 interface PixelIconProps {
@@ -16,7 +17,7 @@ const getColor = (color: "charcoal" | "blue" | "orange" | "yellow" = "charcoal")
   }
 };
 
-export const PixelSun = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelSun = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
     <rect x="11" y="2" width="2" height="3" fill={getColor(color)} />
     <rect x="11" y="19" width="2" height="3" fill={getColor(color)} />
@@ -32,9 +33,10 @@ export const PixelSun = ({ className, size = 24, color = "charcoal" }: PixelIcon
     <rect x="9" y="15" width="6" height="2" fill={getColor(color)} />
     <rect x="9" y="9" width="6" height="6" fill={getColor(color)} opacity="0.3" />
   </svg>
-);
+));
+PixelSun.displayName = "PixelSun";
 
-export const PixelMoon = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelMoon = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
     <rect x="10" y="3" width="6" height="2" fill={getColor(color)} />
     <rect x="8" y="5" width="2" height="2" fill={getColor(color)} />
@@ -49,23 +51,22 @@ export const PixelMoon = ({ className, size = 24, color = "charcoal" }: PixelIco
     <rect x="12" y="13" width="2" height="2" fill={getColor(color)} />
     <rect x="14" y="15" width="2" height="2" fill={getColor(color)} />
   </svg>
-);
+));
+PixelMoon.displayName = "PixelMoon";
 
-export const PixelInstagram = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelInstagram = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
-    {/* Outer rounded square */}
     <rect x="4" y="4" width="16" height="16" fill={getColor(color)} />
     <rect x="6" y="6" width="12" height="12" fill="#F9F8F5" />
-    {/* Inner circle (lens) */}
     <rect x="9" y="9" width="6" height="6" fill={getColor(color)} />
     <rect x="10" y="10" width="4" height="4" fill="#F9F8F5" />
     <rect x="11" y="11" width="2" height="2" fill={getColor(color)} />
-    {/* Flash dot */}
     <rect x="16" y="6" width="2" height="2" fill={getColor(color)} />
   </svg>
-);
+));
+PixelInstagram.displayName = "PixelInstagram";
 
-export const PixelFloppy = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelFloppy = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
     <rect x="4" y="3" width="16" height="18" fill={getColor(color)} />
     <rect x="6" y="3" width="10" height="6" fill="#F9F8F5" />
@@ -74,9 +75,10 @@ export const PixelFloppy = ({ className, size = 24, color = "charcoal" }: PixelI
     <rect x="8" y="15" width="8" height="1" fill={getColor(color)} opacity="0.3" />
     <rect x="8" y="17" width="6" height="1" fill={getColor(color)} opacity="0.3" />
   </svg>
-);
+));
+PixelFloppy.displayName = "PixelFloppy";
 
-export const PixelEye = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelEye = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
     <rect x="6" y="8" width="12" height="2" fill={getColor(color)} />
     <rect x="4" y="10" width="2" height="4" fill={getColor(color)} />
@@ -86,9 +88,10 @@ export const PixelEye = ({ className, size = 24, color = "charcoal" }: PixelIcon
     <rect x="10" y="10" width="4" height="4" fill={getColor(color)} />
     <rect x="11" y="11" width="2" height="2" fill="#F9F8F5" />
   </svg>
-);
+));
+PixelEye.displayName = "PixelEye";
 
-export const PixelHourglass = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelHourglass = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
     <rect x="6" y="3" width="12" height="2" fill={getColor(color)} />
     <rect x="6" y="19" width="12" height="2" fill={getColor(color)} />
@@ -98,13 +101,13 @@ export const PixelHourglass = ({ className, size = 24, color = "charcoal" }: Pix
     <rect x="11" y="13" width="2" height="2" fill={getColor(color)} />
     <rect x="10" y="15" width="4" height="2" fill={getColor(color)} />
     <rect x="8" y="17" width="8" height="2" fill={getColor(color)} />
-    {/* Sand */}
     <rect x="10" y="5" width="4" height="1" fill={getColor(color)} opacity="0.4" />
     <rect x="10" y="17" width="4" height="1" fill={getColor(color)} opacity="0.4" />
   </svg>
-);
+));
+PixelHourglass.displayName = "PixelHourglass";
 
-export const PixelArrow = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelArrow = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
     <rect x="4" y="11" width="12" height="2" fill={getColor(color)} />
     <rect x="14" y="9" width="2" height="2" fill={getColor(color)} />
@@ -113,9 +116,10 @@ export const PixelArrow = ({ className, size = 24, color = "charcoal" }: PixelIc
     <rect x="16" y="15" width="2" height="2" fill={getColor(color)} />
     <rect x="18" y="11" width="2" height="2" fill={getColor(color)} />
   </svg>
-);
+));
+PixelArrow.displayName = "PixelArrow";
 
-export const PixelCheck = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelCheck = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
     <rect x="6" y="12" width="2" height="2" fill={getColor(color)} />
     <rect x="8" y="14" width="2" height="2" fill={getColor(color)} />
@@ -125,9 +129,10 @@ export const PixelCheck = ({ className, size = 24, color = "charcoal" }: PixelIc
     <rect x="16" y="10" width="2" height="2" fill={getColor(color)} />
     <rect x="18" y="8" width="2" height="2" fill={getColor(color)} />
   </svg>
-);
+));
+PixelCheck.displayName = "PixelCheck";
 
-export const PixelPin = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelPin = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
     <rect x="10" y="4" width="4" height="2" fill={getColor(color)} />
     <rect x="8" y="6" width="8" height="2" fill={getColor(color)} />
@@ -136,9 +141,10 @@ export const PixelPin = ({ className, size = 24, color = "charcoal" }: PixelIcon
     <rect x="11" y="14" width="2" height="6" fill={getColor(color)} />
     <rect x="9" y="7" width="2" height="2" fill="#F9F8F5" opacity="0.5" />
   </svg>
-);
+));
+PixelPin.displayName = "PixelPin";
 
-export const PixelClose = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelClose = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
     <rect x="6" y="6" width="2" height="2" fill={getColor(color)} />
     <rect x="8" y="8" width="2" height="2" fill={getColor(color)} />
@@ -150,73 +156,87 @@ export const PixelClose = ({ className, size = 24, color = "charcoal" }: PixelIc
     <rect x="14" y="14" width="2" height="2" fill={getColor(color)} />
     <rect x="16" y="16" width="2" height="2" fill={getColor(color)} />
   </svg>
-);
+));
+PixelClose.displayName = "PixelClose";
 
-export const PixelKey = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelKey = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
-    {/* Key head (circle) */}
     <rect x="5" y="6" width="6" height="2" fill={getColor(color)} />
     <rect x="3" y="8" width="2" height="4" fill={getColor(color)} />
     <rect x="11" y="8" width="2" height="4" fill={getColor(color)} />
     <rect x="5" y="12" width="6" height="2" fill={getColor(color)} />
     <rect x="6" y="9" width="4" height="2" fill={getColor(color)} opacity="0.3" />
-    {/* Key shaft */}
     <rect x="13" y="10" width="6" height="2" fill={getColor(color)} />
-    {/* Key teeth */}
     <rect x="17" y="12" width="2" height="2" fill={getColor(color)} />
     <rect x="19" y="10" width="2" height="2" fill={getColor(color)} />
     <rect x="21" y="12" width="2" height="2" fill={getColor(color)} />
   </svg>
-);
+));
+PixelKey.displayName = "PixelKey";
 
-export const PixelLightbulb = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelLightbulb = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
-    {/* Bulb top */}
     <rect x="9" y="3" width="6" height="2" fill={getColor(color)} />
     <rect x="7" y="5" width="2" height="2" fill={getColor(color)} />
     <rect x="15" y="5" width="2" height="2" fill={getColor(color)} />
     <rect x="5" y="7" width="2" height="4" fill={getColor(color)} />
     <rect x="17" y="7" width="2" height="4" fill={getColor(color)} />
-    {/* Bulb inner glow */}
     <rect x="9" y="5" width="6" height="6" fill={getColor(color)} opacity="0.2" />
-    {/* Bulb bottom curve */}
     <rect x="7" y="11" width="2" height="2" fill={getColor(color)} />
     <rect x="15" y="11" width="2" height="2" fill={getColor(color)} />
     <rect x="9" y="13" width="6" height="2" fill={getColor(color)} />
-    {/* Base/screw */}
     <rect x="9" y="15" width="6" height="2" fill={getColor(color)} />
     <rect x="10" y="17" width="4" height="2" fill={getColor(color)} />
     <rect x="11" y="19" width="2" height="2" fill={getColor(color)} />
-    {/* Light rays */}
     <rect x="3" y="8" width="2" height="2" fill={getColor(color)} opacity="0.4" />
-  <rect x="19" y="8" width="2" height="2" fill={getColor(color)} opacity="0.4" />
-</svg>
-);
+    <rect x="19" y="8" width="2" height="2" fill={getColor(color)} opacity="0.4" />
+  </svg>
+));
+PixelLightbulb.displayName = "PixelLightbulb";
 
-export const PixelUser = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+export const PixelUser = memo(({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
-    {/* Head */}
     <rect x="9" y="3" width="6" height="2" fill={getColor(color)} />
     <rect x="7" y="5" width="2" height="4" fill={getColor(color)} />
     <rect x="15" y="5" width="2" height="4" fill={getColor(color)} />
     <rect x="9" y="9" width="6" height="2" fill={getColor(color)} />
     <rect x="9" y="5" width="6" height="4" fill={getColor(color)} opacity="0.2" />
-    {/* Neck */}
     <rect x="11" y="11" width="2" height="2" fill={getColor(color)} />
-    {/* Body/shoulders */}
     <rect x="5" y="13" width="14" height="2" fill={getColor(color)} />
     <rect x="3" y="15" width="4" height="6" fill={getColor(color)} />
     <rect x="17" y="15" width="4" height="6" fill={getColor(color)} />
     <rect x="7" y="15" width="10" height="6" fill={getColor(color)} />
     <rect x="7" y="17" width="10" height="2" fill={getColor(color)} opacity="0.3" />
   </svg>
-);
+));
+PixelUser.displayName = "PixelUser";
+
+// Animation variants defined outside component for performance
+const eyeFloatAnimation = {
+  y: [0, -4, 0],
+};
+
+const eyeFloatTransition = {
+  duration: 2,
+  repeat: Infinity,
+  ease: "easeInOut" as const,
+};
+
+const pupilAnimation = {
+  x: [-1, 1, -1],
+};
+
+const pupilTransition = {
+  duration: 3,
+  repeat: Infinity,
+  ease: "easeInOut" as const,
+};
 
 // Animated Eye component for Agent screen
-export const AnimatedPixelEye = ({ className, size = 64 }: PixelIconProps) => (
+export const AnimatedPixelEye = memo(({ className, size = 64 }: PixelIconProps) => (
   <motion.div
-    animate={{ y: [0, -4, 0] }}
-    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+    animate={eyeFloatAnimation}
+    transition={eyeFloatTransition}
     className={className}
   >
     <svg width={size} height={size} viewBox="0 0 24 24" style={{ imageRendering: "pixelated" }}>
@@ -225,96 +245,84 @@ export const AnimatedPixelEye = ({ className, size = 64 }: PixelIconProps) => (
       <rect x="20" y="10" width="2" height="4" fill="#1C1C1E" />
       <rect x="4" y="14" width="16" height="2" fill="#1C1C1E" />
       <rect x="4" y="10" width="16" height="4" fill="#1C1C1E" opacity="0.15" />
-      {/* Pupil */}
       <motion.g
-        animate={{ x: [-1, 1, -1] }}
-        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+        animate={pupilAnimation}
+        transition={pupilTransition}
       >
         <rect x="10" y="10" width="4" height="4" fill="#1C1C1E" />
         <rect x="11" y="11" width="2" height="2" fill="#F9F8F5" />
       </motion.g>
     </svg>
   </motion.div>
-);
+));
+AnimatedPixelEye.displayName = "AnimatedPixelEye";
+
+// Flipper animation variants
+const flipperAnimation = {
+  rotate: [-12, 12, -12],
+};
+
+const flipperTransition = {
+  duration: 1.2,
+  repeat: Infinity,
+  ease: "easeInOut" as const,
+};
 
 // Retro Macintosh with animated penguin on screen
-export const AnimatedPixelPenguin = ({ className, size = 160 }: { className?: string; size?: number }) => (
+export const AnimatedPixelPenguin = memo(({ className, size = 160 }: { className?: string; size?: number }) => (
   <div className={className}>
     <svg width={size} height={size} viewBox="0 0 48 48" style={{ imageRendering: "pixelated" }}>
-      {/* Macintosh body */}
       <rect x="8" y="4" width="32" height="36" fill="#1C1C1E" />
       <rect x="10" y="6" width="28" height="22" fill="#F9F8F5" />
-      
-      {/* Screen bezel bottom */}
       <rect x="10" y="30" width="28" height="2" fill="#1C1C1E" />
-      
-      {/* Floppy drive slot */}
       <rect x="28" y="32" width="8" height="2" fill="#F9F8F5" opacity="0.3" />
-      
-      {/* Base/stand */}
       <rect x="12" y="40" width="24" height="4" fill="#1C1C1E" />
       <rect x="16" y="44" width="16" height="2" fill="#1C1C1E" />
-      
-      {/* Penguin on screen - animated waving */}
-      {/* Body */}
       <rect x="20" y="16" width="8" height="10" fill="#1C1C1E" />
       <rect x="21" y="18" width="6" height="6" fill="#F9F8F5" />
-      
-      {/* Head */}
       <rect x="21" y="10" width="6" height="6" fill="#1C1C1E" />
-      
-      {/* Eyes */}
       <rect x="22" y="12" width="1" height="1" fill="#F9F8F5" />
       <rect x="25" y="12" width="1" height="1" fill="#F9F8F5" />
-      
-      {/* Beak */}
       <rect x="23" y="14" width="2" height="1" fill="#F9F8F5" />
-      
-      {/* Waving flipper - animated with slower, more organic timing */}
       <motion.g
-        animate={{ rotate: [-12, 12, -12] }}
-        transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
+        animate={flipperAnimation}
+        transition={flipperTransition}
         style={{ transformOrigin: "28px 18px" }}
       >
         <rect x="28" y="16" width="2" height="4" fill="#1C1C1E" />
       </motion.g>
-      
-      {/* Static flipper */}
       <rect x="18" y="18" width="2" height="4" fill="#1C1C1E" />
-      
-      {/* Feet */}
       <rect x="20" y="26" width="3" height="1" fill="#1C1C1E" />
       <rect x="25" y="26" width="3" height="1" fill="#1C1C1E" />
     </svg>
   </div>
-);
+));
+AnimatedPixelPenguin.displayName = "AnimatedPixelPenguin";
+
+// Smoother flipper animation for standalone penguin
+const wavingFlipperAnimation = {
+  rotate: [-10, 10, -10],
+};
+
+const wavingFlipperTransition = {
+  duration: 1.4,
+  repeat: Infinity,
+  ease: [0.45, 0.05, 0.55, 0.95] as const,
+};
 
 // Standalone waving penguin (matches the Mac screen penguin exactly)
-export const WavingPenguin = ({ className, size = 64 }: { className?: string; size?: number }) => (
+export const WavingPenguin = memo(({ className, size = 64 }: { className?: string; size?: number }) => (
   <div className={className} style={{ willChange: "transform" }}>
     <svg width={size} height={size} viewBox="0 0 18 18" style={{ imageRendering: "pixelated" }}>
-      {/* Body */}
       <rect x="5" y="8" width="8" height="10" fill="#1C1C1E" />
       <rect x="6" y="10" width="6" height="6" fill="#F9F8F5" />
-      
-      {/* Head */}
       <rect x="6" y="2" width="6" height="6" fill="#1C1C1E" />
-      
-      {/* Eyes */}
       <rect x="7" y="4" width="1" height="1" fill="#F9F8F5" />
       <rect x="10" y="4" width="1" height="1" fill="#F9F8F5" />
-      
-      {/* Beak */}
       <rect x="8" y="6" width="2" height="1" fill="#F9F8F5" />
-      
-      {/* Waving flipper - smoother animation with GPU acceleration */}
       <motion.g
-        animate={{ rotate: [-10, 10, -10] }}
-        transition={{ 
-          duration: 1.4, 
-          repeat: Infinity, 
-          ease: [0.45, 0.05, 0.55, 0.95]
-        }}
+        animate={wavingFlipperAnimation}
+        transition={wavingFlipperTransition}
         style={{ 
           transformOrigin: "13px 10px",
           willChange: "transform"
@@ -322,13 +330,10 @@ export const WavingPenguin = ({ className, size = 64 }: { className?: string; si
       >
         <rect x="13" y="8" width="2" height="4" fill="#1C1C1E" />
       </motion.g>
-      
-      {/* Static flipper */}
       <rect x="3" y="10" width="2" height="4" fill="#1C1C1E" />
-      
-      {/* Feet */}
       <rect x="5" y="18" width="3" height="1" fill="#1C1C1E" />
       <rect x="10" y="18" width="3" height="1" fill="#1C1C1E" />
     </svg>
   </div>
-);
+));
+WavingPenguin.displayName = "WavingPenguin";

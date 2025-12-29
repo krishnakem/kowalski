@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useMemo, useCallback, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { Settings, ArrowLeft, Archive } from "lucide-react";
@@ -6,16 +6,7 @@ import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
 import { ease, duration, spring, stagger } from "@/lib/animations";
-
-interface CircleUpdate {
-  name: string;
-  update: string;
-}
-
-interface WorldUpdate {
-  source: string;
-  summary: string;
-}
+import { defaultCircleUpdates, defaultWorldUpdates, type CircleUpdate, type WorldUpdate } from "@/lib/data/gazetteData";
 
 export interface AnalysisData {
   date: Date;
@@ -30,29 +21,14 @@ interface GazetteScreenProps {
   isArchived?: boolean;
 }
 
-const defaultCircleUpdates: CircleUpdate[] = [
-  { name: "Sarah", update: "got engaged in Kyoto" },
-  { name: "Mike", update: "posted 3 photos from the launch" },
-  { name: "Elena", update: "started a new role at Stripe" },
-  { name: "James", update: "is traveling through Portugal" },
-];
+// Animation transitions defined outside component
+const buttonEntranceTransition = { delay: 0.3, duration: duration.slow, ease: ease.cinematic };
+const articleEntranceTransition = { duration: duration.slower, ease: ease.cinematic };
+const headerTransition = { delay: 0.15, duration: duration.slow, ease: ease.cinematic };
+const dividerTransition = { duration: duration.slow, ease: ease.cinematic };
+const sectionTransition = { duration: duration.slow, ease: ease.cinematic };
 
-const defaultWorldUpdates: WorldUpdate[] = [
-  {
-    source: "The Verge",
-    summary: "Apple announced the M4 chip lineup with significant improvements to neural engine performance, promising 2x faster on-device AI processing.",
-  },
-  {
-    source: "Bloomberg",
-    summary: "OpenAI reportedly in talks for a new funding round that would value the company at $150 billion, marking a significant increase from previous valuations.",
-  },
-  {
-    source: "Wired",
-    summary: "The EU's Digital Services Act takes full effect today, requiring major platforms to provide algorithmic transparency and content moderation appeals.",
-  },
-];
-
-const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScreenProps) => {
+const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: GazetteScreenProps) => {
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,27 +39,39 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
   const headerOpacity = useTransform(scrollY, [0, 200], [1, 0.3]);
   const headerScale = useTransform(scrollY, [0, 300], [1, 0.95]);
 
-  const handleClose = () => {
-    // Reset to idle when user closes the gazette
+  const handleClose = useCallback(() => {
     patchSettings({ analysisStatus: "idle" });
     onClose();
-  };
+  }, [patchSettings, onClose]);
+
+  const handleNavigateToArchive = useCallback(() => {
+    navigate("/archive", { state: { from: "gazette" } });
+  }, [navigate]);
+
+  const handleNavigateToSettings = useCallback(() => {
+    navigate("/settings", { state: { from: "gazette" } });
+  }, [navigate]);
   
   const date = analysisData?.date || new Date();
   const location = analysisData?.location || settings.location || "Cupertino";
   const circleUpdates = analysisData?.circleUpdates || defaultCircleUpdates;
   const worldUpdates = analysisData?.worldUpdates || defaultWorldUpdates;
 
-  const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
-  const monthDay = date.toLocaleDateString("en-US", { 
-    month: "short", 
-    day: "numeric"
-  });
+  // Memoize expensive string operations
+  const { dayName, monthDay } = useMemo(() => ({
+    dayName: date.toLocaleDateString("en-US", { weekday: "long" }),
+    monthDay: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+  }), [date]);
 
-  // Get first letter for drop cap
-  const firstUpdate = worldUpdates[0];
-  const firstLetter = firstUpdate.summary.charAt(0);
-  const restOfFirst = firstUpdate.summary.slice(1);
+  // Get first letter for drop cap - memoized
+  const { firstLetter, restOfFirst, firstUpdate } = useMemo(() => {
+    const update = worldUpdates[0];
+    return {
+      firstUpdate: update,
+      firstLetter: update.summary.charAt(0),
+      restOfFirst: update.summary.slice(1),
+    };
+  }, [worldUpdates]);
 
   return (
     <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background relative">
@@ -92,7 +80,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3, duration: duration.slow, ease: ease.cinematic }}
+        transition={buttonEntranceTransition}
         className="absolute top-6 left-6"
       >
         {isArchived ? (
@@ -108,7 +96,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => navigate("/archive", { state: { from: "gazette" } })}
+            onClick={handleNavigateToArchive}
             className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
           >
             <Archive className="w-8 h-8" />
@@ -120,13 +108,13 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3, duration: duration.slow, ease: ease.cinematic }}
+        transition={buttonEntranceTransition}
         className="absolute top-6 right-6"
       >
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => navigate("/settings", { state: { from: "gazette" } })}
+          onClick={handleNavigateToSettings}
           className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
         >
           <Settings className="w-8 h-8" />
@@ -136,18 +124,19 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
       <motion.article
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: duration.slower, ease: ease.cinematic }}
+        transition={articleEntranceTransition}
         className="max-w-[650px] w-full"
       >
         {/* Masthead with Parallax */}
         <motion.header
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15, duration: duration.slow, ease: ease.cinematic }}
+          transition={headerTransition}
           style={{ 
             y: headerY, 
             opacity: headerOpacity,
-            scale: headerScale 
+            scale: headerScale,
+            willChange: "transform, opacity"
           }}
           className="text-center mb-12"
         >
@@ -165,7 +154,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           initial={{ scaleX: 0 }}
           whileInView={{ scaleX: 1 }}
           viewport={{ once: true, margin: "-50px" }}
-          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          transition={dividerTransition}
           className="divider mb-12 origin-left"
         />
 
@@ -174,7 +163,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          transition={sectionTransition}
           className="mb-12"
         >
           <p className="text-xs text-accent font-sans tracking-widest uppercase mb-3">
@@ -193,7 +182,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           initial={{ scaleX: 0 }}
           whileInView={{ scaleX: 1 }}
           viewport={{ once: true, margin: "-50px" }}
-          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          transition={dividerTransition}
           className="divider mb-12 origin-left"
         />
 
@@ -202,7 +191,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          transition={sectionTransition}
           className="mb-12"
         >
           <h2 className="text-2xl font-serif text-foreground mb-2">
@@ -240,7 +229,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           initial={{ scaleX: 0 }}
           whileInView={{ scaleX: 1 }}
           viewport={{ once: true, margin: "-50px" }}
-          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          transition={dividerTransition}
           className="divider mb-12 origin-left"
         />
 
@@ -249,7 +238,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          transition={sectionTransition}
           className="mb-12"
         >
           <h2 className="text-2xl font-serif text-foreground mb-2">
@@ -287,7 +276,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           initial={{ scaleX: 0 }}
           whileInView={{ scaleX: 1 }}
           viewport={{ once: true, margin: "-50px" }}
-          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          transition={dividerTransition}
           className="divider mb-12 origin-left"
         />
 
@@ -296,7 +285,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          transition={sectionTransition}
           className="text-center"
         >
           <div className="flex flex-col items-center gap-4">
@@ -327,6 +316,8 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
       </motion.article>
     </div>
   );
-};
+});
+
+GazetteScreen.displayName = "GazetteScreen";
 
 export default GazetteScreen;

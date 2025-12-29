@@ -1,3 +1,4 @@
+import { useCallback, memo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
@@ -6,20 +7,46 @@ import { PixelSun, PixelMoon, PixelKey, PixelLightbulb, PixelUser } from "@/comp
 import { useSettings } from "@/hooks/useSettings";
 import { ease, duration, spring, stagger } from "@/lib/animations";
 
-const Settings = () => {
+// Animation variants defined outside component
+const cardHiddenVisible = {
+  hidden: { opacity: 0, y: 15, scale: 0.98 },
+  visible: { 
+    opacity: 1, 
+    y: 0, 
+    scale: 1,
+    transition: spring.gentle,
+  }
+};
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: stagger.fast,
+      delayChildren: 0.15,
+    }
+  }
+};
+
+const Settings = memo(() => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from || "agent";
   const { settings, resetSettings, isLoaded } = useSettings();
 
-  const handleDevReset = () => {
+  const handleDevReset = useCallback(() => {
     resetSettings();
     navigate("/onboarding", { replace: true, state: {} });
-  };
+  }, [resetSettings, navigate]);
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     navigate("/", { state: { screen: fromScreen } });
-  };
+  }, [navigate, fromScreen]);
+
+  const handleCardClick = useCallback((path: string) => {
+    navigate(path, { state: { from: fromScreen } });
+  }, [navigate, fromScreen]);
 
   if (!isLoaded) {
     return <div className="min-h-screen bg-background" />;
@@ -122,32 +149,15 @@ const Settings = () => {
           className="grid grid-cols-2 gap-4"
           initial="hidden"
           animate="visible"
-          variants={{
-            hidden: { opacity: 0 },
-            visible: {
-              opacity: 1,
-              transition: {
-                staggerChildren: stagger.fast,
-                delayChildren: 0.15,
-              }
-            }
-          }}
+          variants={containerVariants}
         >
           {cards.map((card, index) => (
             <motion.button
               key={card.title}
-              variants={{
-                hidden: { opacity: 0, y: 15, scale: 0.98 },
-                visible: { 
-                  opacity: 1, 
-                  y: 0, 
-                  scale: 1,
-                  transition: spring.gentle,
-                }
-              }}
+              variants={cardHiddenVisible}
               whileHover={{ y: -4, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => navigate(card.path, { state: { from: fromScreen } })}
+              onClick={() => handleCardClick(card.path)}
               className="aspect-square border-2 p-6 flex flex-col items-center justify-center gap-3
                          transition-colors duration-200 bg-card border-foreground/20 hover:border-foreground cursor-pointer"
             >
@@ -175,6 +185,8 @@ const Settings = () => {
 
     </div>
   );
-};
+});
+
+Settings.displayName = "Settings";
 
 export default Settings;

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useCallback, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Settings, Archive } from "lucide-react";
@@ -13,22 +13,32 @@ interface AgentActiveScreenProps {
   autoComplete?: boolean;
 }
 
-const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
+// Animation transitions defined outside component
+const buttonEntranceTransition = { delay: 0.4, duration: duration.slow, ease: ease.cinematic };
+const contentEntranceTransition = { delay: 0.25, duration: duration.slow, ease: ease.cinematic };
+const subtextTransition = { delay: 0.5, duration: duration.slow, ease: ease.cinematic };
+
+const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
   const nextAnalysis = getNextAnalysisTime(settings);
 
   useEffect(() => {
-    // Set status to working when screen mounts
     patchSettings({ analysisStatus: "working" });
     
-    // Only auto-complete after 5 seconds if autoComplete is true
     if (autoComplete) {
       const timer = setTimeout(onComplete, 5000);
       return () => clearTimeout(timer);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onComplete, autoComplete]);
+  }, [onComplete, autoComplete, patchSettings]);
+
+  const handleNavigateToArchive = useCallback(() => {
+    navigate("/archive", { state: { from: "agent" } });
+  }, [navigate]);
+
+  const handleNavigateToSettings = useCallback(() => {
+    navigate("/settings", { state: { from: "agent" } });
+  }, [navigate]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
@@ -37,13 +47,13 @@ const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScree
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4, duration: duration.slow, ease: ease.cinematic }}
+        transition={buttonEntranceTransition}
         className="absolute top-6 left-6"
       >
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => navigate("/archive", { state: { from: "agent" } })}
+          onClick={handleNavigateToArchive}
           className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
         >
           <Archive className="w-8 h-8" />
@@ -54,13 +64,13 @@ const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScree
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4, duration: duration.slow, ease: ease.cinematic }}
+        transition={buttonEntranceTransition}
         className="absolute top-6 right-6"
       >
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => navigate("/settings", { state: { from: "agent" } })}
+          onClick={handleNavigateToSettings}
           className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
         >
           <Settings className="w-8 h-8" />
@@ -81,7 +91,7 @@ const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScree
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.25, duration: duration.slow, ease: ease.cinematic }}
+        transition={contentEntranceTransition}
         className="text-center max-w-sm"
       >
         <p className="text-foreground font-sans text-lg leading-relaxed">
@@ -90,7 +100,7 @@ const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScree
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.5, duration: duration.slow, ease: ease.cinematic }}
+          transition={subtextTransition}
           className="text-muted-foreground text-base mt-4"
         >
           Your analysis will be ready {nextAnalysis.toLowerCase()}.
@@ -98,6 +108,8 @@ const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScree
       </motion.div>
     </div>
   );
-};
+});
+
+AgentActiveScreen.displayName = "AgentActiveScreen";
 
 export default AgentActiveScreen;
