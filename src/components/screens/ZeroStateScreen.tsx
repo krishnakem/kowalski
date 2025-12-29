@@ -400,8 +400,15 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="max-w-md w-full space-y-12"
+            className="max-w-md w-full space-y-12 relative"
           >
+            {/* Temporary dev skip button - DELETE BEFORE SHIPPING */}
+            <button
+              onClick={() => setStep("instagram")}
+              className="absolute -top-8 right-0 text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
+            >
+              Skip (dev only)
+            </button>
             {/* Headline */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -528,14 +535,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     <PixelArrow size={16} color="charcoal" />
                   </>
                 )}
-              </button>
-              
-              {/* Temporary dev skip button - DELETE BEFORE SHIPPING */}
-              <button
-                onClick={() => setStep("instagram")}
-                className="text-xs text-muted-foreground/50 hover:text-muted-foreground underline mt-4"
-              >
-                Skip for now (dev only)
               </button>
             </motion.div>
           </motion.div>
