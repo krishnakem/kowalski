@@ -19,7 +19,7 @@ const ApiSettings = () => {
     if (isLoaded) {
       originalApiKeyRef.current = settings.apiKey || "";
     }
-  }, [isLoaded, settings.apiKey]);
+  }, [isLoaded]);
 
   const handleSave = async () => {
     const apiKeyChanged = settings.apiKey !== originalApiKeyRef.current;
