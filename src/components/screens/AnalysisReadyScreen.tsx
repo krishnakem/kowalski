@@ -1,3 +1,4 @@
+import { useCallback, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Settings, Archive } from "lucide-react";
@@ -14,7 +15,12 @@ interface AnalysisReadyScreenProps {
   lastAnalysisDate?: string;
 }
 
-const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReadyScreenProps) => {
+// Animation transitions defined outside component
+const contentEntranceTransition = { delay: 0.2, duration: duration.slow, ease: ease.cinematic };
+const subtextTransition = { delay: 0.3, duration: duration.slow };
+const buttonEntranceTransition = { duration: duration.slow, ease: ease.cinematic, delay: 0.6 };
+
+const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: AnalysisReadyScreenProps) => {
   const navigate = useNavigate();
   const { settings } = useSettings();
 
@@ -24,11 +30,19 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
     ? `${greeting}, ${settings.userName.trim()}` 
     : greeting;
 
+  const handleNavigateToArchive = useCallback(() => {
+    navigate("/archive", { state: { from: "ready" } });
+  }, [navigate]);
+
+  const handleNavigateToSettings = useCallback(() => {
+    navigate("/settings", { state: { from: "ready" } });
+  }, [navigate]);
+
   const leftAction = (
     <Button
       variant="ghost"
       size="icon"
-      onClick={() => navigate("/archive", { state: { from: "ready" } })}
+      onClick={handleNavigateToArchive}
       className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
     >
       <Archive className="w-8 h-8" />
@@ -39,7 +53,7 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
     <Button
       variant="ghost"
       size="icon"
-      onClick={() => navigate("/settings", { state: { from: "ready" } })}
+      onClick={handleNavigateToSettings}
       className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
     >
       <Settings className="w-8 h-8" />
@@ -68,7 +82,7 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2, duration: duration.slow, ease: ease.cinematic }}
+        transition={contentEntranceTransition}
         className="text-center max-w-sm space-y-4"
       >
         <h1 className="text-4xl font-serif text-foreground">
@@ -78,7 +92,7 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.3, duration: duration.slow }}
+          transition={subtextTransition}
           className="text-lg text-muted-foreground"
         >
           Your analysis is ready
@@ -88,7 +102,7 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
         <motion.button
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: duration.slow, ease: ease.cinematic, delay: 0.6 }}
+          transition={buttonEntranceTransition}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={onViewAnalysis}
@@ -101,6 +115,8 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
       </motion.div>
     </div>
   );
-};
+});
+
+AnalysisReadyScreen.displayName = "AnalysisReadyScreen";
 
 export default AnalysisReadyScreen;
