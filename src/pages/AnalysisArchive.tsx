@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, Search, ChevronLeft, ChevronRight, ArrowLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { WavingPenguin } from "@/components/icons/PixelIcons";
@@ -584,45 +584,60 @@ const AnalysisArchive = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2, duration: 0.4 }}
-              className="flex items-center justify-center gap-6 mb-4"
+              className="flex items-center justify-center gap-4 mb-4"
             >
+              {/* Back to months button */}
               <Button
                 variant="ghost"
                 size="icon"
-                disabled={!hasPrevMonth}
                 onClick={() => {
-                  if (selectedMonth === 0) {
-                    setSelectedMonth(11);
-                    setSelectedYear(selectedYear - 1);
-                  } else {
-                    setSelectedMonth(selectedMonth - 1);
-                  }
+                  setViewMode("months");
+                  setSelectedMonth(null);
                 }}
-                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors"
               >
-                <ChevronLeft className="w-6 h-6" />
+                <ArrowLeft className="w-5 h-5" />
               </Button>
-              
-              <h2 className="text-2xl font-serif text-foreground min-w-[200px] text-center">
-                {selectedMonthName} {selectedYear}
-              </h2>
-              
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={!hasNextMonth}
-                onClick={() => {
-                  if (selectedMonth === 11) {
-                    setSelectedMonth(0);
-                    setSelectedYear(selectedYear + 1);
-                  } else {
-                    setSelectedMonth(selectedMonth + 1);
-                  }
-                }}
-                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </Button>
+
+              <div className="flex items-center gap-4">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={!hasPrevMonth}
+                  onClick={() => {
+                    if (selectedMonth === 0) {
+                      setSelectedMonth(11);
+                      setSelectedYear(selectedYear - 1);
+                    } else {
+                      setSelectedMonth(selectedMonth - 1);
+                    }
+                  }}
+                  className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </Button>
+                
+                <h2 className="text-2xl font-serif text-foreground min-w-[200px] text-center">
+                  {selectedMonthName} {selectedYear}
+                </h2>
+                
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={!hasNextMonth}
+                  onClick={() => {
+                    if (selectedMonth === 11) {
+                      setSelectedMonth(0);
+                      setSelectedYear(selectedYear + 1);
+                    } else {
+                      setSelectedMonth(selectedMonth + 1);
+                    }
+                  }}
+                  className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </Button>
+              </div>
             </motion.div>
           )}
 
