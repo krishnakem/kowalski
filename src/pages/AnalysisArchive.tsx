@@ -349,15 +349,13 @@ const AnalysisArchive = () => {
             className="text-center mb-12"
           >
             <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
-              {isSearching 
-                ? "Search Results" 
-                : viewMode === "months" 
-                  ? "Analysis Archive" 
-                  : `${selectedMonthName} ${selectedYear}`}
+              {viewMode === "months" || isSearching
+                ? "Analysis Archive" 
+                : `${selectedMonthName} ${selectedYear}`}
             </h1>
             {isSearching && (
               <p className="font-sans text-muted-foreground">
-                {searchResults.length} {searchResults.length === 1 ? "analysis" : "analyses"} found
+                {searchResults.length} {searchResults.length === 1 ? "result" : "results"} for "{searchQuery}"
               </p>
             )}
           </motion.header>
