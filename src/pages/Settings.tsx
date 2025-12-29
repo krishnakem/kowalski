@@ -75,7 +75,7 @@ const Settings = () => {
 
       <div className="max-w-md mx-auto space-y-8 text-center">
         {/* Header */}
-        <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">Settings</h1>
+        <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">Preferences</h1>
 
         {/* Analysis Frequency */}
         <div className="space-y-3">
@@ -229,7 +229,7 @@ const Settings = () => {
                        text-foreground font-sans text-sm tracking-wider uppercase
                        hover:bg-foreground hover:text-background transition-all duration-200"
           >
-            Save Settings
+            Save
           </button>
           <button
             onClick={() => {
