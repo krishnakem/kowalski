@@ -3,17 +3,21 @@ import { useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import ZeroStateScreen from "@/components/screens/ZeroStateScreen";
 import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
-import GazetteScreen from "@/components/screens/GazetteScreen";
+import GazetteScreen, { AnalysisData } from "@/components/screens/GazetteScreen";
 import AnalysisReadyScreen from "@/components/screens/AnalysisReadyScreen";
 import { useSettings } from "@/hooks/useSettings";
+import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { pageTransition } from "@/lib/animations";
+import { defaultCircleUpdates, defaultWorldUpdates } from "@/lib/data/gazetteData";
 
 type Screen = "zero" | "agent" | "ready" | "gazette";
 
 const Index = () => {
   const location = useLocation();
   const { settings, isLoaded, patchSettings } = useSettings();
+  const { addAnalysis } = useArchivedAnalyses();
   const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
+  const [currentAnalysis, setCurrentAnalysis] = useState<AnalysisData | null>(null);
 
   // Determine initial screen based on user state - only runs once on initial load
   useEffect(() => {
@@ -50,6 +54,18 @@ const Index = () => {
   };
 
   const handleAgentComplete = () => {
+    // Generate a new analysis when agent completes
+    const newAnalysis: AnalysisData = {
+      date: new Date(),
+      location: settings.location || "Cupertino",
+      circleUpdates: defaultCircleUpdates,
+      worldUpdates: defaultWorldUpdates,
+    };
+    
+    // Save to archive
+    addAnalysis(newAnalysis);
+    setCurrentAnalysis(newAnalysis);
+    
     patchSettings({ 
       analysisStatus: "ready", 
       lastAnalysisDate: new Date().toISOString() 
@@ -118,7 +134,10 @@ const Index = () => {
             animate={pageTransition.animate}
             exit={pageTransition.exit}
           >
-            <GazetteScreen onClose={handleClose} />
+            <GazetteScreen 
+              onClose={handleClose} 
+              analysisData={currentAnalysis || undefined}
+            />
           </motion.div>
         )}
       </AnimatePresence>
