@@ -189,7 +189,26 @@ export const PixelLightbulb = ({ className, size = 24, color = "charcoal" }: Pix
     <rect x="11" y="19" width="2" height="2" fill={getColor(color)} />
     {/* Light rays */}
     <rect x="3" y="8" width="2" height="2" fill={getColor(color)} opacity="0.4" />
-    <rect x="19" y="8" width="2" height="2" fill={getColor(color)} opacity="0.4" />
+  <rect x="19" y="8" width="2" height="2" fill={getColor(color)} opacity="0.4" />
+</svg>
+);
+
+export const PixelUser = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
+    {/* Head */}
+    <rect x="9" y="3" width="6" height="2" fill={getColor(color)} />
+    <rect x="7" y="5" width="2" height="4" fill={getColor(color)} />
+    <rect x="15" y="5" width="2" height="4" fill={getColor(color)} />
+    <rect x="9" y="9" width="6" height="2" fill={getColor(color)} />
+    <rect x="9" y="5" width="6" height="4" fill={getColor(color)} opacity="0.2" />
+    {/* Neck */}
+    <rect x="11" y="11" width="2" height="2" fill={getColor(color)} />
+    {/* Body/shoulders */}
+    <rect x="5" y="13" width="14" height="2" fill={getColor(color)} />
+    <rect x="3" y="15" width="4" height="6" fill={getColor(color)} />
+    <rect x="17" y="15" width="4" height="6" fill={getColor(color)} />
+    <rect x="7" y="15" width="10" height="6" fill={getColor(color)} />
+    <rect x="7" y="17" width="10" height="2" fill={getColor(color)} opacity="0.3" />
   </svg>
 );
 

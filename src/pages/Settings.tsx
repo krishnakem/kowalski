@@ -1,9 +1,18 @@
+import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { PixelSun, PixelMoon, PixelKey, PixelLightbulb } from "@/components/icons/PixelIcons";
+import { PixelSun, PixelMoon, PixelKey, PixelLightbulb, PixelUser } from "@/components/icons/PixelIcons";
 import { useSettings } from "@/hooks/useSettings";
 import { ease, duration, spring, stagger } from "@/lib/animations";
 
@@ -11,7 +20,11 @@ const Settings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from || "agent";
-  const { settings, resetSettings, isLoaded } = useSettings();
+  const { settings, patchSettings, resetSettings, isLoaded } = useSettings();
+  
+  const [isPersonalOpen, setIsPersonalOpen] = useState(false);
+  const [editName, setEditName] = useState(settings.userName);
+  const [editLocation, setEditLocation] = useState(settings.location);
 
   const handleDevReset = () => {
     resetSettings();
@@ -22,10 +35,30 @@ const Settings = () => {
     navigate("/", { state: { screen: fromScreen } });
   };
 
+  const handlePersonalSave = () => {
+    patchSettings({ userName: editName, location: editLocation });
+    setIsPersonalOpen(false);
+    toast.success("Personal info updated");
+  };
+
+  const openPersonalDialog = () => {
+    setEditName(settings.userName);
+    setEditLocation(settings.location);
+    setIsPersonalOpen(true);
+  };
+
   if (!isLoaded) {
     return <div className="min-h-screen bg-background" />;
   }
 
+  const getPersonalSummary = () => {
+    if (settings.userName && settings.location) {
+      return `${settings.userName} · ${settings.location}`;
+    }
+    if (settings.userName) return settings.userName;
+    if (settings.location) return settings.location;
+    return "Not set";
+  };
 
   const getScheduleSummary = () => {
     if (settings.digestFrequency === 1) {
@@ -49,6 +82,12 @@ const Settings = () => {
   };
 
   const cards = [
+    {
+      title: "Personal",
+      summary: getPersonalSummary(),
+      icon: <PixelUser size={40} color="charcoal" />,
+      onClick: openPersonalDialog,
+    },
     {
       title: "Schedule",
       summary: getScheduleSummary(),
@@ -133,10 +172,10 @@ const Settings = () => {
               }}
               whileHover={{ y: -4, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => navigate(card.path, { state: { from: fromScreen } })}
+              onClick={() => card.onClick ? card.onClick() : navigate(card.path!, { state: { from: fromScreen } })}
               className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-3
                          transition-colors duration-200 bg-card border-foreground/20 hover:border-foreground cursor-pointer
-                         ${index === 2 ? "col-span-2 !aspect-auto py-8" : ""}`}
+                         ${index === 3 ? "col-span-2 !aspect-auto py-8" : ""}`}
             >
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
@@ -159,6 +198,38 @@ const Settings = () => {
           Reset (dev only)
         </button>
       </div>
+
+      {/* Personal Info Dialog */}
+      <Dialog open={isPersonalOpen} onOpenChange={setIsPersonalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-2xl">Personal Info</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Your name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="location">Location</Label>
+              <Input
+                id="location"
+                value={editLocation}
+                onChange={(e) => setEditLocation(e.target.value)}
+                placeholder="e.g. Cupertino"
+              />
+            </div>
+            <Button onClick={handlePersonalSave} className="w-full">
+              Save
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
