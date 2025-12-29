@@ -344,12 +344,14 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
             {/* Button section - reserved space */}
             <div className="h-16 flex items-center justify-center">
-              <AnimatePresence>
+              <AnimatePresence mode="wait">
                 {nameQuestionComplete && userName.trim() && (
                   <motion.button
+                    key="continue-btn"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    transition={{ duration: 0.5 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3 }}
                     onClick={handleNameContinue}
                     className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
                                text-foreground font-sans text-sm tracking-wider uppercase
