@@ -133,25 +133,55 @@ const Settings = () => {
         <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">Preferences</h1>
 
         {/* Cards Grid */}
-        <div className="grid grid-cols-2 gap-4">
+        <motion.div 
+          className="grid grid-cols-2 gap-4"
+          initial="hidden"
+          animate="visible"
+          variants={{
+            hidden: {},
+            visible: {
+              transition: {
+                staggerChildren: 0.08,
+                delayChildren: 0.1,
+              }
+            }
+          }}
+        >
           {cards.map((card, index) => (
             <motion.button
               key={card.title}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1, duration: 0.3 }}
-              whileHover={{ y: -2, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+              variants={{
+                hidden: { opacity: 0, y: 12, scale: 0.98 },
+                visible: { 
+                  opacity: 1, 
+                  y: 0, 
+                  scale: 1,
+                  transition: {
+                    type: "spring",
+                    stiffness: 400,
+                    damping: 25,
+                  }
+                }
+              }}
+              whileHover={{ y: -3, boxShadow: "0 6px 16px rgba(0,0,0,0.08)" }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => navigate(card.path, { state: { from: fromScreen } })}
               className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-3
                          transition-colors duration-200 bg-card border-foreground/20 hover:border-foreground cursor-pointer
                          ${index === 2 ? "col-span-2 !aspect-auto py-8" : ""}`}
             >
-              {card.icon}
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: 0.2 + index * 0.08, type: "spring", stiffness: 300 }}
+              >
+                {card.icon}
+              </motion.div>
               <span className="font-sans text-foreground text-base">{card.title}</span>
               <span className="font-sans text-muted-foreground text-sm">{card.summary}</span>
             </motion.button>
           ))}
-        </div>
+        </motion.div>
 
         {/* Reset Button */}
         <button
