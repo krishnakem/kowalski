@@ -19,7 +19,7 @@ interface ZeroStateScreenProps {
 }
 
 type DigestCount = 1 | 2;
-type Step = "hook" | "routine" | "interests" | "key" | "instagram";
+type Step = "hook" | "name" | "routine" | "interests" | "key" | "instagram";
 type InstagramPhase = "trigger" | "connecting" | "success";
 
 const TypewriterText = ({ 
@@ -95,6 +95,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [keyError, setKeyError] = useState<string | null>(null);
   const [interests, setInterests] = useState<string[]>([]);
   const [interestInput, setInterestInput] = useState("");
+  const [userName, setUserName] = useState("");
+  const [nameQuestionComplete, setNameQuestionComplete] = useState(false);
 
   useEffect(() => {
     if (!typingComplete) {
@@ -124,6 +126,11 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   }, [mouseX]);
 
   const handleBegin = () => {
+    setStep("name");
+  };
+
+  const handleNameContinue = () => {
+    patchSettings({ userName: userName.trim() });
     setStep("routine");
   };
 
@@ -283,7 +290,79 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
           </motion.div>
         )}
 
-        {/* Step 2: The Routine */}
+        {/* Step 2: Name */}
+        {step === "name" && (
+          <motion.div
+            key="name"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            className="max-w-2xl w-full text-center space-y-8"
+          >
+            {/* Typewriter question */}
+            <div className="text-4xl md:text-5xl leading-relaxed">
+              <TypewriterText
+                text="What's your name?"
+                onComplete={() => setNameQuestionComplete(true)}
+                speed={80}
+              />
+            </div>
+
+            {/* Name input with blinking cursor */}
+            <AnimatePresence>
+              {nameQuestionComplete && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.3, delay: 0.2 }}
+                  className="flex justify-center"
+                >
+                  <div className="relative inline-flex items-center justify-center">
+                    <input
+                      type="text"
+                      value={userName}
+                      onChange={(e) => setUserName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleNameContinue()}
+                      placeholder=""
+                      autoFocus
+                      className="bg-transparent border-none outline-none 
+                                 font-serif text-4xl md:text-5xl text-foreground
+                                 text-center caret-transparent"
+                      style={{ width: `${Math.max(2, userName.length + 1)}ch` }}
+                    />
+                    {/* Blinking cursor that follows typing */}
+                    <motion.span
+                      animate={{ opacity: [1, 0] }}
+                      transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
+                      className="inline-block w-3 h-10 md:h-12 bg-foreground"
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Continue button appears after question is typed */}
+            <AnimatePresence>
+              {nameQuestionComplete && (
+                <motion.button
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.5, delay: 0.5 }}
+                  onClick={handleNameContinue}
+                  className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
+                             text-foreground font-sans text-sm tracking-wider uppercase
+                             hover:bg-foreground hover:text-background transition-all duration-200"
+                >
+                  <span>{userName.trim() ? "Continue" : "Skip"}</span>
+                  <PixelArrow size={16} color="charcoal" />
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+
+        {/* Step 3: The Routine */}
         {step === "routine" && (
           <motion.div
             key="routine"
