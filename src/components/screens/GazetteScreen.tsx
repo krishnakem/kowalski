@@ -1,5 +1,6 @@
+import { useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, useScroll, useTransform } from "framer-motion";
 import { Settings, ArrowLeft, Archive } from "lucide-react";
 import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,13 @@ const defaultWorldUpdates: WorldUpdate[] = [
 const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScreenProps) => {
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  // Parallax scroll effects
+  const { scrollY } = useScroll();
+  const headerY = useTransform(scrollY, [0, 300], [0, 50]);
+  const headerOpacity = useTransform(scrollY, [0, 200], [1, 0.3]);
+  const headerScale = useTransform(scrollY, [0, 300], [1, 0.95]);
 
   const handleClose = () => {
     // Reset to idle when user closes the gazette
@@ -131,14 +139,19 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
         transition={{ duration: duration.slower, ease: ease.cinematic }}
         className="max-w-[650px] w-full"
       >
-        {/* Masthead */}
+        {/* Masthead with Parallax */}
         <motion.header
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15, duration: duration.slow, ease: ease.cinematic }}
+          style={{ 
+            y: headerY, 
+            opacity: headerOpacity,
+            scale: headerScale 
+          }}
           className="text-center mb-12"
         >
-        <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
+          <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
             {settings.userName?.trim() ? `${settings.userName.trim()}'s Analysis` : `The ${dayName} Analysis`}
           </h1>
           <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic">
