@@ -169,7 +169,16 @@ const MONTHS = [
   { short: "Dec", full: "December", index: 11 },
 ];
 
-const AVAILABLE_YEARS = [2025, 2024, 2023];
+// Dynamically get years that have analyses
+const getAvailableYears = (): number[] => {
+  const yearsSet = new Set<number>();
+  archivedAnalyses.forEach((analysis) => {
+    yearsSet.add(analysis.data.date.getFullYear());
+  });
+  return Array.from(yearsSet).sort((a, b) => b - a); // Sort descending
+};
+
+const AVAILABLE_YEARS = getAvailableYears();
 
 const formatDate = (date: Date): string => {
   return date.toLocaleDateString("en-US", {
@@ -390,7 +399,7 @@ const AnalysisArchive = () => {
                 </div>
               </motion.div>
 
-              {/* Month Grid */}
+              {/* Month Grid - Only show months with analyses */}
               <main className="max-w-2xl mx-auto px-6 py-4">
                 <motion.div
                   initial={{ opacity: 0 }}
@@ -398,9 +407,8 @@ const AnalysisArchive = () => {
                   transition={{ delay: 0.3, duration: 0.4 }}
                   className="grid grid-cols-3 md:grid-cols-4 gap-4"
                 >
-                  {MONTHS.map((month, index) => {
+                  {MONTHS.filter(month => monthsWithAnalyses.has(month.index)).map((month, index) => {
                     const analysesCount = monthsWithAnalyses.get(month.index) || 0;
-                    const hasAnalyses = analysesCount > 0;
                     
                     return (
                       <motion.button
@@ -408,24 +416,17 @@ const AnalysisArchive = () => {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.05 * index, duration: 0.3 }}
-                        whileHover={hasAnalyses ? { y: -2, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" } : {}}
-                        onClick={() => hasAnalyses && handleMonthClick(month.index)}
-                        disabled={!hasAnalyses}
-                        className={`aspect-square border-2 p-4 flex flex-col items-center justify-center gap-2
-                          transition-colors duration-200 bg-card ${
-                            hasAnalyses
-                              ? "border-foreground/20 hover:border-foreground cursor-pointer"
-                              : "border-border/50 opacity-40 cursor-not-allowed"
-                          }`}
+                        whileHover={{ y: -2, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+                        onClick={() => handleMonthClick(month.index)}
+                        className="aspect-square border-2 p-4 flex flex-col items-center justify-center gap-2
+                          transition-colors duration-200 bg-card border-foreground/20 hover:border-foreground cursor-pointer"
                       >
                         <span className="font-serif text-2xl md:text-3xl text-foreground">
                           {month.short}
                         </span>
-                        {hasAnalyses && (
-                          <span className="font-sans text-xs text-muted-foreground">
-                            {analysesCount} {analysesCount === 1 ? "analysis" : "analyses"}
-                          </span>
-                        )}
+                        <span className="font-sans text-xs text-muted-foreground">
+                          {analysesCount} {analysesCount === 1 ? "analysis" : "analyses"}
+                        </span>
                       </motion.button>
                     );
                   })}
