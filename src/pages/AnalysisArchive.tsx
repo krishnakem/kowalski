@@ -350,14 +350,23 @@ const AnalysisArchive = () => {
           >
             <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
               {viewMode === "months" || isSearching
-                ? "Analysis Archive" 
+                ? "Analysis Archive"
                 : `${selectedMonthName} ${selectedYear}`}
             </h1>
-            {isSearching && (
-              <p className="font-sans text-muted-foreground">
-                {searchResults.length} {searchResults.length === 1 ? "result" : "results"} for "{searchQuery}"
-              </p>
-            )}
+
+            {/* Reserve space so the search bar doesn't jump when typing */}
+            <p
+              className={`font-sans text-muted-foreground h-6 max-w-2xl mx-auto truncate transition-opacity ${
+                isSearching ? "opacity-100" : "opacity-0"
+              }`}
+              aria-live="polite"
+            >
+              {isSearching
+                ? `${searchResults.length} ${
+                    searchResults.length === 1 ? "result" : "results"
+                  } for "${searchQuery}"`
+                : "\u00A0"}
+            </p>
           </motion.header>
 
           {/* Search Bar */}
