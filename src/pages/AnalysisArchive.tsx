@@ -591,17 +591,49 @@ const AnalysisArchive = () => {
             </div>
           </motion.div>
 
-          {/* Month Subheading - only show in calendar view */}
+          {/* Month Subheading with Navigation - only show in calendar view */}
           {viewMode === "calendar" && selectedMonth !== null && !isSearching && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2, duration: 0.4 }}
-              className="text-center mb-8"
+              className="flex items-center justify-center gap-6 mb-8"
             >
-              <h2 className="text-2xl font-serif text-foreground">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  if (selectedMonth === 0) {
+                    setSelectedMonth(11);
+                    setSelectedYear(selectedYear - 1);
+                  } else {
+                    setSelectedMonth(selectedMonth - 1);
+                  }
+                }}
+                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </Button>
+              
+              <h2 className="text-2xl font-serif text-foreground min-w-[200px] text-center">
                 {selectedMonthName} {selectedYear}
               </h2>
+              
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  if (selectedMonth === 11) {
+                    setSelectedMonth(0);
+                    setSelectedYear(selectedYear + 1);
+                  } else {
+                    setSelectedMonth(selectedMonth + 1);
+                  }
+                }}
+                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </Button>
             </motion.div>
           )}
 
