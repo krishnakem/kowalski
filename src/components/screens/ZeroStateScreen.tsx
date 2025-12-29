@@ -17,7 +17,7 @@ interface ZeroStateScreenProps {
 }
 
 type DigestCount = 1 | 2;
-type Step = "hook" | "routine" | "key" | "instagram";
+type Step = "hook" | "routine" | "interests" | "key" | "instagram";
 type InstagramPhase = "trigger" | "connecting" | "success";
 
 const TIME_OPTIONS = [
@@ -96,6 +96,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [usageCap, setUsageCap] = useState(10);
   const [isValidating, setIsValidating] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
+  const [interests, setInterests] = useState<string[]>([]);
+  const [interestInput, setInterestInput] = useState("");
 
   useEffect(() => {
     if (!typingComplete) {
@@ -133,6 +135,22 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   };
 
   const handleRoutineContinue = () => {
+    setStep("interests");
+  };
+
+  const handleAddInterest = () => {
+    const trimmed = interestInput.trim();
+    if (trimmed && !interests.includes(trimmed)) {
+      setInterests([...interests, trimmed]);
+      setInterestInput("");
+    }
+  };
+
+  const handleRemoveInterest = (interest: string) => {
+    setInterests(interests.filter((i) => i !== interest));
+  };
+
+  const handleInterestsContinue = () => {
     setStep("key");
   };
 
@@ -159,6 +177,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
         digestCount,
         morningTime,
         eveningTime,
+        interests,
       }));
       setStep("instagram");
     } catch (error) {
@@ -392,7 +411,117 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
           </motion.div>
         )}
 
-        {/* Step 3: The Key */}
+        {/* Step 3: Interests */}
+        {step === "interests" && (
+          <motion.div
+            key="interests"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            className="max-w-xl w-full text-center space-y-10"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              className="space-y-4"
+            >
+              <h2 className="text-5xl font-serif text-foreground">
+                What should Kowalski watch for?
+              </h2>
+              <p className="text-muted-foreground text-sm font-sans">
+                Add people, topics, or anything you want included in your analysis
+              </p>
+            </motion.div>
+
+            {/* Input */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              className="flex gap-3 justify-center"
+            >
+              <input
+                type="text"
+                value={interestInput}
+                onChange={(e) => setInterestInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddInterest()}
+                placeholder="e.g., Taylor Swift, AI news, NBA..."
+                className="input-dotted text-foreground placeholder:text-foreground/30 font-sans text-lg w-80 py-3"
+              />
+              <button
+                onClick={handleAddInterest}
+                disabled={!interestInput.trim()}
+                className={`px-6 py-3 border-2 font-sans text-sm tracking-wider uppercase transition-all duration-200
+                           ${interestInput.trim() 
+                             ? "border-foreground text-foreground hover:bg-foreground hover:text-background" 
+                             : "border-foreground/20 text-foreground/30 cursor-not-allowed"}`}
+              >
+                Add
+              </button>
+            </motion.div>
+
+            {/* Word Cloud */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.35, duration: 0.5 }}
+              className="min-h-[200px] flex flex-wrap justify-center items-center gap-x-6 gap-y-4 px-4"
+            >
+              <AnimatePresence>
+                {interests.map((interest, index) => {
+                  // Generate consistent random values based on index
+                  const rotation = ((index * 7) % 25) - 12; // -12 to +12 degrees
+                  const sizeClass = index % 3 === 0 ? "text-3xl" : index % 3 === 1 ? "text-2xl" : "text-xl";
+                  
+                  return (
+                    <motion.span
+                      key={interest}
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.5 }}
+                      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                      onClick={() => handleRemoveInterest(interest)}
+                      style={{ transform: `rotate(${rotation}deg)` }}
+                      className={`word-cloud-item font-serif ${sizeClass} text-foreground select-none`}
+                    >
+                      {interest}
+                    </motion.span>
+                  );
+                })}
+              </AnimatePresence>
+              
+              {interests.length === 0 && (
+                <span className="text-muted-foreground/50 font-sans text-sm italic">
+                  Your interests will appear here...
+                </span>
+              )}
+            </motion.div>
+
+            {/* Continue Button */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: interests.length > 0 ? 1 : 0.3, y: 0 }}
+              transition={{ delay: 0.4, duration: 0.5 }}
+              className="flex justify-center"
+            >
+              <button
+                onClick={handleInterestsContinue}
+                disabled={interests.length === 0}
+                className={`inline-flex items-center gap-3 px-8 py-4 border-2 font-sans text-sm tracking-wider uppercase transition-all duration-200
+                           ${interests.length > 0 
+                             ? "border-foreground text-foreground hover:bg-foreground hover:text-background cursor-pointer" 
+                             : "border-foreground/20 text-foreground/30 cursor-not-allowed"}`}
+              >
+                <span>Continue</span>
+                <PixelArrow size={16} color="charcoal" />
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Step 4: The Key */}
         {step === "key" && (
           <motion.div
             key="key"
