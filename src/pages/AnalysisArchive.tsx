@@ -546,7 +546,7 @@ const AnalysisArchive = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: duration.normal, ease: ease.cinematic }}
-          className="min-h-screen bg-background relative py-10 px-6"
+          className="min-h-screen bg-background relative py-16 px-6"
         >
           {/* Back Button */}
           <motion.div
