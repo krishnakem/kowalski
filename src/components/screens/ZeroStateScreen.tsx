@@ -345,17 +345,17 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             {/* Button section - reserved space */}
             <div className="h-16 flex items-center justify-center">
               <AnimatePresence>
-                {nameQuestionComplete && (
+                {nameQuestionComplete && userName.trim() && (
                   <motion.button
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    transition={{ duration: 0.5, delay: 0.5 }}
+                    transition={{ duration: 0.5 }}
                     onClick={handleNameContinue}
                     className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
                                text-foreground font-sans text-sm tracking-wider uppercase
                                hover:bg-foreground hover:text-background transition-all duration-200"
                   >
-                    <span>{userName.trim() ? "Continue" : "Skip"}</span>
+                    <span>Continue</span>
                     <PixelArrow size={16} color="charcoal" />
                   </motion.button>
                 )}
