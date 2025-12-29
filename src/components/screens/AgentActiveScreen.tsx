@@ -26,7 +26,8 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
     // Auto-complete after 5 seconds
     const timer = setTimeout(onComplete, 5000);
     return () => clearTimeout(timer);
-  }, [onComplete, patchSettings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onComplete]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
