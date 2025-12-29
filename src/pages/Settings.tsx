@@ -4,13 +4,13 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { PixelSun, PixelMoon, PixelKey, PixelLightbulb } from "@/components/icons/PixelIcons";
-import { useSettings, DEFAULT_SETTINGS } from "@/hooks/useSettings";
+import { useSettings } from "@/hooks/useSettings";
 
 const Settings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from || "agent";
-  const { settings, resetSettings, isLoaded } = useSettings();
+  const { settings, isLoaded } = useSettings();
 
   const handleBack = () => {
     navigate("/", { state: { screen: fromScreen } });
@@ -20,10 +20,6 @@ const Settings = () => {
     return <div className="min-h-screen bg-background" />;
   }
 
-  const handleResetToDefaults = () => {
-    resetSettings();
-    toast.success("Settings reset to defaults");
-  };
 
   const getScheduleSummary = () => {
     if (settings.digestFrequency === 1) {
@@ -139,15 +135,6 @@ const Settings = () => {
           ))}
         </motion.div>
 
-        {/* Reset Button */}
-        <button
-          onClick={handleResetToDefaults}
-          className="w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground/20 
-                     text-muted-foreground font-sans text-sm tracking-wider uppercase
-                     hover:border-foreground hover:text-foreground transition-all duration-200"
-        >
-          Reset to Defaults
-        </button>
       </div>
     </div>
   );
