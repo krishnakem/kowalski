@@ -8,7 +8,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('/fonts/InstrumentSerif-Regular.woff2') format('woff2');
+  src: url('/fonts/InstrumentSerif-Regular.woff2?v=2') format('woff2');
 }
 
 @font-face {
@@ -16,7 +16,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url('/fonts/InstrumentSerif-Italic.woff2') format('woff2');
+  src: url('/fonts/InstrumentSerif-Italic.woff2?v=2') format('woff2');
 }
 
 @font-face {
