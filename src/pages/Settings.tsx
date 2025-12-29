@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Key, Lightbulb } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { PixelSun, PixelMoon } from "@/components/icons/PixelIcons";
+import { PixelSun, PixelMoon, PixelKey, PixelLightbulb } from "@/components/icons/PixelIcons";
 
 interface SettingsData {
   digestFrequency: 1 | 2;
@@ -107,13 +107,13 @@ const Settings = () => {
     {
       title: "API & Usage",
       summary: getApiSummary(),
-      icon: <Key size={40} strokeWidth={1.5} />,
+      icon: <PixelKey size={40} color="charcoal" />,
       path: "/settings/api",
     },
     {
       title: "Interests",
       summary: getInterestsSummary(),
-      icon: <Lightbulb size={40} strokeWidth={1.5} />,
+      icon: <PixelLightbulb size={40} color="charcoal" />,
       path: "/settings/interests",
     },
   ];
