@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,9 @@ const Settings = () => {
   const fromScreen = (location.state as { from?: string })?.from || "agent";
   const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const originalApiKeyRef = useRef<string>("");
 
   const handleBack = () => {
     navigate("/", { state: { screen: fromScreen } });
@@ -50,14 +53,42 @@ const Settings = () => {
       try {
         const parsed = JSON.parse(saved);
         setSettings({ ...DEFAULT_SETTINGS, ...parsed });
+        originalApiKeyRef.current = parsed.apiKey || "";
       } catch (e) {
         console.error("Failed to parse settings:", e);
       }
     }
   }, []);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const apiKeyChanged = settings.apiKey !== originalApiKeyRef.current;
+    
+    // Only validate if API key has changed and is not empty
+    if (apiKeyChanged && settings.apiKey) {
+      setIsValidating(true);
+      setKeyError(null);
+      
+      try {
+        const response = await fetch('https://api.openai.com/v1/models', {
+          headers: { 'Authorization': `Bearer ${settings.apiKey}` }
+        });
+        
+        if (response.status === 401) {
+          setKeyError('Invalid API key. Please check and try again.');
+          setIsValidating(false);
+          return;
+        }
+      } catch (error) {
+        setKeyError('Could not validate key. Check your connection.');
+        setIsValidating(false);
+        return;
+      }
+      
+      setIsValidating(false);
+    }
+    
     localStorage.setItem("kowalski-settings", JSON.stringify(settings));
+    originalApiKeyRef.current = settings.apiKey;
     toast.success("Settings saved");
   };
 
@@ -167,10 +198,13 @@ const Settings = () => {
             <input
               type={showApiKey ? "text" : "password"}
               value={settings.apiKey}
-              onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
+              onChange={(e) => {
+                setSettings({ ...settings, apiKey: e.target.value });
+                setKeyError(null);
+              }}
               placeholder="sk-..."
-              className="w-full input-dotted text-foreground placeholder:text-foreground/30 text-left
-                         font-sans text-lg tracking-wider pr-12 py-4"
+              className={`w-full input-dotted text-foreground placeholder:text-foreground/30 text-left
+                         font-sans text-lg tracking-wider pr-12 py-4 ${keyError ? 'border-destructive' : ''}`}
             />
             <button
               type="button"
@@ -180,6 +214,15 @@ const Settings = () => {
               {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
           </div>
+          {keyError && (
+            <motion.p
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-destructive text-sm font-sans text-center"
+            >
+              {keyError}
+            </motion.p>
+          )}
         </div>
 
         {/* Monthly Usage Cap */}
@@ -225,15 +268,26 @@ const Settings = () => {
         <div className="space-y-3">
           <button
             onClick={handleSave}
-            className="w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground 
-                       text-foreground font-sans text-sm tracking-wider uppercase
-                       hover:bg-foreground hover:text-background transition-all duration-200"
+            disabled={isValidating}
+            className={`w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground 
+                       font-sans text-sm tracking-wider uppercase transition-all duration-200
+                       ${isValidating 
+                         ? 'text-foreground/50 cursor-not-allowed' 
+                         : 'text-foreground hover:bg-foreground hover:text-background'}`}
           >
-            Save
+            {isValidating ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                <span>Validating...</span>
+              </>
+            ) : (
+              <span>Save</span>
+            )}
           </button>
           <button
             onClick={() => {
               setSettings(DEFAULT_SETTINGS);
+              setKeyError(null);
               toast.success("Settings reset to defaults");
             }}
             className="w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground/20 
