@@ -521,7 +521,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               className="space-y-4"
             >
               <h2 className="text-5xl font-serif text-foreground">
-                What should Kowalski watch for?
+                {userName.trim() ? `${userName.trim()}, what` : "What"} should Kowalski watch for?
               </h2>
               <p className="text-muted-foreground text-sm font-sans">
                 Add people, topics, or anything you want included in your analysis
