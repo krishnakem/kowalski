@@ -689,7 +689,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               className="text-center space-y-4"
             >
               <h2 className="text-5xl font-serif text-foreground">
-                OpenAI API Key please
+                {userName.trim() ? `${userName.trim()}, what` : "What"} is your OpenAI API Key?
               </h2>
               <p className="text-muted-foreground text-sm font-sans leading-relaxed max-w-sm mx-auto">
                 Kowalski is private by design. Your data is processed using your personal OpenAI account and stored locally on your device.
