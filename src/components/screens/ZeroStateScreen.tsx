@@ -552,19 +552,16 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             {/* Continue Button */}
             <motion.div
               initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: interests.length > 0 ? 1 : 0.3, y: 0 }}
+              animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4, duration: 0.5 }}
               className="flex justify-center"
             >
               <button
                 onClick={handleInterestsContinue}
-                disabled={interests.length === 0}
-                className={`inline-flex items-center gap-3 px-8 py-4 border-2 font-sans text-sm tracking-wider uppercase transition-all duration-200
-                           ${interests.length > 0 
-                             ? "border-foreground text-foreground hover:bg-foreground hover:text-background cursor-pointer" 
-                             : "border-foreground/20 text-foreground/30 cursor-not-allowed"}`}
+                className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground text-foreground font-sans text-sm tracking-wider uppercase transition-all duration-200
+                           hover:bg-foreground hover:text-background cursor-pointer"
               >
-                <span>Continue</span>
+                <span>{interests.length > 0 ? "Continue" : "Skip"}</span>
                 <PixelArrow size={16} color="charcoal" />
               </button>
             </motion.div>
