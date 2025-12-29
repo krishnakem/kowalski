@@ -298,10 +298,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="max-w-2xl w-full text-center space-y-8"
+            className="max-w-2xl w-full text-center flex flex-col items-center"
           >
-            {/* Typewriter question */}
-            <div className="text-4xl md:text-5xl leading-relaxed">
+            {/* Typewriter question - fixed position */}
+            <div className="text-4xl md:text-5xl leading-relaxed mb-8">
               <TypewriterText
                 text="What's your name?"
                 onComplete={() => setNameQuestionComplete(true)}
@@ -309,16 +309,16 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               />
             </div>
 
-            {/* Name input with blinking cursor */}
-            <AnimatePresence>
-              {nameQuestionComplete && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.3, delay: 0.2 }}
-                  className="flex justify-center"
-                >
-                  <div className="relative inline-flex items-center justify-center">
+            {/* Input section - reserved space to prevent layout shift */}
+            <div className="h-16 flex items-center justify-center mb-8">
+              <AnimatePresence>
+                {nameQuestionComplete && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.3, delay: 0.2 }}
+                    className="inline-flex items-center justify-center"
+                  >
                     <input
                       type="text"
                       value={userName}
@@ -331,34 +331,36 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                                  text-center caret-transparent"
                       style={{ width: `${Math.max(2, userName.length + 1)}ch` }}
                     />
-                    {/* Blinking cursor that follows typing */}
+                    {/* Blinking cursor - matches TypewriterText cursor */}
                     <motion.span
                       animate={{ opacity: [1, 0] }}
                       transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
-                      className="inline-block w-3 h-10 md:h-12 bg-foreground"
+                      className="inline-block w-3 h-6 bg-foreground ml-1 align-middle"
                     />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
-            {/* Continue button appears after question is typed */}
-            <AnimatePresence>
-              {nameQuestionComplete && (
-                <motion.button
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.5, delay: 0.5 }}
-                  onClick={handleNameContinue}
-                  className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
-                             text-foreground font-sans text-sm tracking-wider uppercase
-                             hover:bg-foreground hover:text-background transition-all duration-200"
-                >
-                  <span>{userName.trim() ? "Continue" : "Skip"}</span>
-                  <PixelArrow size={16} color="charcoal" />
-                </motion.button>
-              )}
-            </AnimatePresence>
+            {/* Button section - reserved space */}
+            <div className="h-16 flex items-center justify-center">
+              <AnimatePresence>
+                {nameQuestionComplete && (
+                  <motion.button
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.5, delay: 0.5 }}
+                    onClick={handleNameContinue}
+                    className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
+                               text-foreground font-sans text-sm tracking-wider uppercase
+                               hover:bg-foreground hover:text-background transition-all duration-200"
+                  >
+                    <span>{userName.trim() ? "Continue" : "Skip"}</span>
+                    <PixelArrow size={16} color="charcoal" />
+                  </motion.button>
+                )}
+              </AnimatePresence>
+            </div>
           </motion.div>
         )}
 
