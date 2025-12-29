@@ -79,27 +79,29 @@ const PersonalSettings = () => {
 
   return (
     <SettingsLayout title="Personal">
-      <div className="space-y-6 text-left">
+      <div className="space-y-8 text-left">
         <div className="space-y-3">
           <Label htmlFor="name" className="text-sm text-foreground font-sans">Name</Label>
-          <Input
+          <input
             id="name"
+            type="text"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
             placeholder="Your name"
-            className="text-center"
+            className="input-dotted w-full text-center font-serif text-xl"
           />
         </div>
 
         <div className="space-y-3">
           <Label htmlFor="location" className="text-sm text-foreground font-sans">Location</Label>
-          <div className="flex gap-2">
-            <Input
+          <div className="flex gap-2 items-end">
+            <input
               id="location"
+              type="text"
               value={editLocation}
               onChange={(e) => setEditLocation(e.target.value)}
               placeholder="e.g. Cupertino"
-              className="flex-1 text-center"
+              className="input-dotted flex-1 text-center font-serif text-xl"
             />
             <Button
               type="button"
@@ -108,6 +110,7 @@ const PersonalSettings = () => {
               onClick={handleDetectLocation}
               disabled={isDetectingLocation}
               title="Detect my location"
+              className="mb-1"
             >
               {isDetectingLocation ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
