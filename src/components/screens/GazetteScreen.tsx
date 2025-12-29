@@ -143,7 +143,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           </h1>
           <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic">
             <PixelPin size={14} />
-            <span>{monthDay} • {location}</span>
+            <span>{monthDay} · {settings.morningTime || "8:00 AM"} · {location}</span>
           </div>
         </motion.header>
 
