@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { PixelSun, PixelMoon } from "@/components/icons/PixelIcons";
 import { useSettings } from "@/hooks/useSettings";
 import { useFromScreen } from "@/hooks/useFromScreen";
-import { TIME_OPTIONS } from "@/lib/constants";
+import { TIME_OPTIONS, MORNING_TIME_OPTIONS, EVENING_TIME_OPTIONS } from "@/lib/constants";
 import SettingsLayout from "@/components/layouts/SettingsLayout";
 
 const ScheduleSettings = () => {
@@ -70,7 +70,7 @@ const ScheduleSettings = () => {
           className="w-full bg-background border-2 border-foreground/20 px-6 py-3 font-sans text-foreground text-center
                      focus:border-foreground outline-none transition-colors cursor-pointer"
         >
-          {TIME_OPTIONS.map((time) => (
+          {(settings.digestFrequency === 2 ? MORNING_TIME_OPTIONS : TIME_OPTIONS).map((time) => (
             <option key={time} value={time} className="bg-background">
               {time}
             </option>
@@ -91,7 +91,7 @@ const ScheduleSettings = () => {
             className="w-full bg-background border-2 border-foreground/20 px-6 py-3 font-sans text-foreground text-center
                        focus:border-foreground outline-none transition-colors cursor-pointer"
           >
-            {TIME_OPTIONS.map((time) => (
+            {EVENING_TIME_OPTIONS.map((time) => (
               <option key={time} value={time} className="bg-background">
                 {time}
               </option>
