@@ -80,7 +80,7 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
         className="text-center max-w-sm space-y-6"
       >
         <h1 className="text-4xl font-serif text-foreground">
-          {settings.userName?.trim() ? `${settings.userName.trim()}'s Analysis` : "Your Analysis"}
+          {settings.userName?.trim() ? `${settings.userName.trim()}, your analysis is ready` : "Your analysis is ready"}
         </h1>
         
         <motion.button
