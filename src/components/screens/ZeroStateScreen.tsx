@@ -440,26 +440,36 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.25, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-              className="flex gap-3 justify-center"
+              className="flex flex-col items-center gap-3"
             >
-              <input
-                type="text"
-                value={interestInput}
-                onChange={(e) => setInterestInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddInterest()}
-                placeholder="e.g., Taylor Swift, AI news, NBA..."
-                className="input-dotted text-foreground placeholder:text-foreground/30 font-sans text-lg w-80 py-3"
-              />
-              <button
-                onClick={handleAddInterest}
-                disabled={!interestInput.trim()}
-                className={`px-6 py-3 border-2 font-sans text-sm tracking-wider uppercase transition-all duration-200
-                           ${interestInput.trim() 
-                             ? "border-foreground text-foreground hover:bg-foreground hover:text-background" 
-                             : "border-foreground/20 text-foreground/30 cursor-not-allowed"}`}
-              >
-                Add
-              </button>
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  value={interestInput}
+                  onChange={(e) => setInterestInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddInterest()}
+                  placeholder="e.g., Taylor Swift, AI news, NBA..."
+                  className="input-dotted text-foreground placeholder:text-foreground/30 font-sans text-lg w-80 py-3"
+                />
+                <button
+                  onClick={handleAddInterest}
+                  disabled={!interestInput.trim()}
+                  className={`px-6 py-3 border-2 font-sans text-sm tracking-wider uppercase transition-all duration-200
+                             ${interestInput.trim() 
+                               ? "border-foreground text-foreground hover:bg-foreground hover:text-background" 
+                               : "border-foreground/20 text-foreground/30 cursor-not-allowed"}`}
+                >
+                  Add
+                </button>
+              </div>
+              {interests.length > 0 && (
+                <button
+                  onClick={() => setInterests([])}
+                  className="text-sm font-sans text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+                >
+                  Clear all
+                </button>
+              )}
             </motion.div>
 
             {/* Word Cloud */}
