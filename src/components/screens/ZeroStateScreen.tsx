@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
-import { Eye, EyeOff, Instagram, Check } from "lucide-react";
+import { Eye, EyeOff, Instagram, Check, Loader2 } from "lucide-react";
 import { 
   PixelSun, 
   PixelMoon, 
@@ -94,6 +94,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [instagramPhase, setInstagramPhase] = useState<InstagramPhase>("trigger");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [usageCap, setUsageCap] = useState(10);
+  const [isValidating, setIsValidating] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!typingComplete) {
@@ -134,9 +136,23 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
     setStep("key");
   };
 
-  const handleInitialize = () => {
-    if (apiKey) {
-      // Save settings to localStorage
+  const handleInitialize = async () => {
+    if (!apiKey) return;
+    
+    setIsValidating(true);
+    setKeyError(null);
+    
+    try {
+      const response = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      
+      if (response.status === 401) {
+        setKeyError('Invalid API key. Please check and try again.');
+        return;
+      }
+      
+      // Valid key - save and proceed
       localStorage.setItem('kowalski_settings', JSON.stringify({
         apiKey,
         usageCap,
@@ -145,6 +161,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
         eveningTime,
       }));
       setStep("instagram");
+    } catch (error) {
+      setKeyError('Could not validate key. Check your connection.');
+    } finally {
+      setIsValidating(false);
     }
   };
 
@@ -408,10 +428,13 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 <input
                   type={showKey ? "text" : "password"}
                   value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
+                  onChange={(e) => {
+                    setApiKey(e.target.value);
+                    setKeyError(null);
+                  }}
                   placeholder="sk-..."
-                  className="w-full input-dotted text-foreground placeholder:text-foreground/30
-                             font-sans text-lg tracking-wider pr-12 py-4"
+                  className={`w-full input-dotted text-foreground placeholder:text-foreground/30
+                             font-sans text-lg tracking-wider pr-12 py-4 ${keyError ? 'border-destructive' : ''}`}
                 />
                 <button
                   onClick={() => setShowKey(!showKey)}
@@ -420,6 +443,15 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   {showKey ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
               </div>
+              {keyError && (
+                <motion.p
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-destructive text-sm font-sans text-center"
+                >
+                  {keyError}
+                </motion.p>
+              )}
             </motion.div>
 
             {/* Safety Limit Slider */}
@@ -477,16 +509,25 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             >
               <button
                 onClick={handleInitialize}
-                disabled={!apiKey}
+                disabled={!apiKey || isValidating}
                 className={`inline-flex items-center gap-3 px-8 py-4 border-2 font-sans text-sm tracking-wider uppercase transition-all duration-200
                            ${
-                             apiKey
+                             apiKey && !isValidating
                                ? "border-foreground text-foreground hover:bg-foreground hover:text-background cursor-pointer"
                                : "border-foreground/20 text-foreground/30 cursor-not-allowed"
                            }`}
               >
-                <span>Next</span>
-                <PixelArrow size={16} color="charcoal" />
+                {isValidating ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin text-foreground" />
+                    <span className="text-foreground">Validating...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Next</span>
+                    <PixelArrow size={16} color="charcoal" />
+                  </>
+                )}
               </button>
             </motion.div>
           </motion.div>
