@@ -93,11 +93,6 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
           Your analysis is ready
         </h1>
         
-        {formattedDate && (
-          <p className="text-muted-foreground font-sans text-sm">
-            Generated {formattedDate}
-          </p>
-        )}
 
         <motion.button
           initial={{ opacity: 0, y: 10 }}
