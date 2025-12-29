@@ -82,7 +82,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
             variant="ghost"
             size="icon"
             onClick={onClose}
-            className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+            className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
           >
             <ArrowLeft className="w-6 h-6" />
           </Button>
@@ -91,9 +91,9 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
             variant="ghost"
             size="icon"
             onClick={() => navigate("/archive", { state: { from: "gazette" } })}
-            className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+            className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
           >
-            <Archive className="w-10 h-10" />
+            <Archive className="w-8 h-8" />
           </Button>
         )}
       </motion.div>
@@ -109,9 +109,9 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           variant="ghost"
           size="icon"
           onClick={() => navigate("/settings", { state: { from: "gazette" } })}
-          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
         >
-          <Settings className="w-10 h-10" />
+          <Settings className="w-8 h-8" />
         </Button>
       </motion.div>
 
