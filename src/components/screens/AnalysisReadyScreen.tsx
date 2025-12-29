@@ -82,9 +82,9 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
         </h1>
         
         <motion.button
-          initial={{ opacity: 0, y: 15 }}
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ ...spring.snappy, delay: 0.35 }}
+          transition={{ duration: duration.slow, ease: ease.cinematic, delay: 0.4 }}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={onViewAnalysis}
