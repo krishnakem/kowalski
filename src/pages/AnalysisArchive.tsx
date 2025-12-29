@@ -551,9 +551,7 @@ const AnalysisArchive = () => {
             className="text-center mb-6"
           >
             <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-2 tracking-tight">
-              {viewMode === "months" || isSearching
-                ? "Analysis Archive"
-                : `${selectedMonthName} ${selectedYear}`}
+              Analysis Archive
             </h1>
 
             {/* Reserve space so the search bar doesn't jump when typing */}
@@ -592,6 +590,20 @@ const AnalysisArchive = () => {
               />
             </div>
           </motion.div>
+
+          {/* Month Subheading - only show in calendar view */}
+          {viewMode === "calendar" && selectedMonth !== null && !isSearching && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2, duration: 0.4 }}
+              className="text-center mb-8"
+            >
+              <h2 className="text-2xl font-serif text-foreground">
+                {selectedMonthName} {selectedYear}
+              </h2>
+            </motion.div>
+          )}
 
           {isSearching ? (
             /* Search Results - Flat list of all matching analyses */
