@@ -16,6 +16,7 @@ export interface SettingsData {
   hasOnboarded: boolean;
   analysisStatus: AnalysisStatus;
   lastAnalysisDate?: string;
+  location: string;
 }
 
 export const DEFAULT_SETTINGS: SettingsData = {
@@ -28,6 +29,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   interests: [],
   hasOnboarded: false,
   analysisStatus: "idle",
+  location: "",
 };
 
 // Zod schema for validation and coercion
@@ -42,6 +44,7 @@ const settingsSchema = z.object({
   hasOnboarded: z.boolean().catch(false),
   analysisStatus: z.enum(["idle", "working", "ready"]).catch("idle"),
   lastAnalysisDate: z.string().optional(),
+  location: z.string().catch(""),
 });
 
 const normalizeSettings = (raw: unknown): SettingsData => {
