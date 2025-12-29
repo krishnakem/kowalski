@@ -92,15 +92,16 @@ const Settings = () => {
   return (
     <div className="min-h-screen bg-background text-foreground py-16 px-6 relative">
       <motion.div
-        initial={{ opacity: 0, x: -10 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: duration.normal, ease: ease.cinematic }}
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3, duration: duration.slow, ease: ease.cinematic }}
+        className="absolute top-6 left-6 z-10"
       >
         <Button
           variant="ghost"
           size="icon"
           onClick={handleBack}
-          className="absolute top-6 left-6 text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
+          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
         >
           <ArrowLeft className="w-6 h-6" />
         </Button>
