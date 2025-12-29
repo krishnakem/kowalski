@@ -10,7 +10,12 @@ const Settings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from || "agent";
-  const { settings, isLoaded } = useSettings();
+  const { settings, resetSettings, isLoaded } = useSettings();
+
+  const handleDevReset = () => {
+    resetSettings();
+    navigate("/onboarding", { replace: true, state: {} });
+  };
 
   const handleBack = () => {
     navigate("/", { state: { screen: fromScreen } });
@@ -135,6 +140,13 @@ const Settings = () => {
           ))}
         </motion.div>
 
+        {/* Dev Reset Button */}
+        <button
+          onClick={handleDevReset}
+          className="text-xs text-muted-foreground/50 hover:text-muted-foreground underline mt-8"
+        >
+          Reset (dev only)
+        </button>
       </div>
     </div>
   );
