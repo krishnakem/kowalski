@@ -251,10 +251,10 @@ export const AnimatedPixelPenguin = ({ className, size = 160 }: { className?: st
       {/* Beak */}
       <rect x="23" y="14" width="2" height="1" fill="#F9F8F5" />
       
-      {/* Waving flipper - animated */}
+      {/* Waving flipper - animated with slower, more organic timing */}
       <motion.g
-        animate={{ rotate: [-15, 15, -15] }}
-        transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut" }}
+        animate={{ rotate: [-12, 12, -12] }}
+        transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
         style={{ transformOrigin: "28px 18px" }}
       >
         <rect x="28" y="16" width="2" height="4" fill="#1C1C1E" />
@@ -288,10 +288,10 @@ export const WavingPenguin = ({ className, size = 64 }: { className?: string; si
       {/* Beak */}
       <rect x="8" y="6" width="2" height="1" fill="#F9F8F5" />
       
-      {/* Waving flipper - animated */}
+      {/* Waving flipper - animated with slower, more organic timing */}
       <motion.g
-        animate={{ rotate: [-15, 15, -15] }}
-        transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut" }}
+        animate={{ rotate: [-12, 12, -12] }}
+        transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
         style={{ transformOrigin: "13px 10px" }}
       >
         <rect x="13" y="8" width="2" height="4" fill="#1C1C1E" />

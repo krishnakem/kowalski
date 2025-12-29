@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Settings, Archive } from "lucide-react";
 import { WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
+import { ease, duration, spring } from "@/lib/animations";
 
 
 interface AnalysisReadyScreenProps {
@@ -27,9 +28,9 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
 
       {/* Archive Button */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5, duration: 0.5 }}
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3, duration: duration.slow, ease: ease.cinematic }}
         className="absolute top-6 left-6"
       >
         <Button
@@ -44,9 +45,9 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
 
       {/* Settings Button */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5, duration: 0.5 }}
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3, duration: duration.slow, ease: ease.cinematic }}
         className="absolute top-6 right-6"
       >
         <Button
@@ -61,9 +62,9 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
 
       {/* Penguin */}
       <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.6 }}
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ ...spring.gentle, delay: 0.1 }}
         className="mb-8"
       >
         <WavingPenguin size={160} />
@@ -73,18 +74,17 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3, duration: 0.5 }}
+        transition={{ delay: 0.2, duration: duration.slow, ease: ease.cinematic }}
         className="text-center max-w-sm space-y-6"
       >
         <h1 className="text-4xl font-serif text-foreground">
           Your analysis is ready
         </h1>
         
-
         <motion.button
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5, duration: 0.4 }}
+          transition={{ ...spring.snappy, delay: 0.35 }}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={onViewAnalysis}

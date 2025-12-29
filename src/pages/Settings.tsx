@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { PixelSun, PixelMoon, PixelKey, PixelLightbulb } from "@/components/icons/PixelIcons";
 import { useSettings } from "@/hooks/useSettings";
+import { ease, duration, spring, stagger } from "@/lib/animations";
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -77,17 +78,30 @@ const Settings = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground py-16 px-6 relative">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={handleBack}
-        className="absolute top-6 left-6 text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
+      <motion.div
+        initial={{ opacity: 0, x: -10 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: duration.normal, ease: ease.cinematic }}
       >
-        <ArrowLeft className="w-6 h-6" />
-      </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleBack}
+          className="absolute top-6 left-6 text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
+        >
+          <ArrowLeft className="w-6 h-6" />
+        </Button>
+      </motion.div>
 
       <div className="max-w-md mx-auto space-y-8 text-center">
-        <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">Preferences</h1>
+        <motion.h1 
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight"
+        >
+          Preferences
+        </motion.h1>
 
         {/* Cards Grid */}
         <motion.div 
@@ -95,11 +109,12 @@ const Settings = () => {
           initial="hidden"
           animate="visible"
           variants={{
-            hidden: {},
+            hidden: { opacity: 0 },
             visible: {
+              opacity: 1,
               transition: {
-                staggerChildren: 0.08,
-                delayChildren: 0.1,
+                staggerChildren: stagger.fast,
+                delayChildren: 0.15,
               }
             }
           }}
@@ -108,19 +123,15 @@ const Settings = () => {
             <motion.button
               key={card.title}
               variants={{
-                hidden: { opacity: 0, y: 12, scale: 0.98 },
+                hidden: { opacity: 0, y: 15, scale: 0.98 },
                 visible: { 
                   opacity: 1, 
                   y: 0, 
                   scale: 1,
-                  transition: {
-                    type: "spring",
-                    stiffness: 400,
-                    damping: 25,
-                  }
+                  transition: spring.gentle,
                 }
               }}
-              whileHover={{ y: -3, boxShadow: "0 6px 16px rgba(0,0,0,0.08)" }}
+              whileHover={{ y: -4, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}
               whileTap={{ scale: 0.98 }}
               onClick={() => navigate(card.path, { state: { from: fromScreen } })}
               className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-3
@@ -130,7 +141,7 @@ const Settings = () => {
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: 0.2 + index * 0.08, type: "spring", stiffness: 300 }}
+                transition={{ ...spring.bouncy, delay: 0.25 + index * stagger.fast }}
               >
                 {card.icon}
               </motion.div>
