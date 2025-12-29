@@ -462,14 +462,15 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   Add
                 </button>
               </div>
-              {interests.length > 0 && (
-                <button
-                  onClick={() => setInterests([])}
-                  className="text-sm font-sans text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
-                >
-                  Clear all
-                </button>
-              )}
+              <button
+                onClick={() => setInterests([])}
+                className={`text-sm font-sans transition-colors underline underline-offset-2 h-5
+                           ${interests.length > 0 
+                             ? "text-muted-foreground hover:text-foreground" 
+                             : "text-transparent pointer-events-none"}`}
+              >
+                Clear all
+              </button>
             </motion.div>
 
             {/* Word Cloud */}
