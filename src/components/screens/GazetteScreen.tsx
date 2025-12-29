@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Settings, ArrowLeft } from "lucide-react";
+import { Settings, ArrowLeft, Archive } from "lucide-react";
 import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 
@@ -70,14 +70,14 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
 
   return (
     <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background relative">
-      {/* Back Button (for archived view) */}
-      {isArchived && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3, duration: 0.5 }}
-          className="absolute top-6 left-6"
-        >
+      {/* Back Button (for archived view) OR Archive Button (for live view) */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: isArchived ? 0.3 : 1, duration: 0.5 }}
+        className="absolute top-6 left-6"
+      >
+        {isArchived ? (
           <Button
             variant="ghost"
             size="icon"
@@ -86,8 +86,17 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           >
             <ArrowLeft className="w-6 h-6" />
           </Button>
-        </motion.div>
-      )}
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate("/archive", { state: { from: "gazette" } })}
+            className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+          >
+            <Archive className="w-10 h-10" />
+          </Button>
+        )}
+      </motion.div>
 
       {/* Settings Button */}
       <motion.div
