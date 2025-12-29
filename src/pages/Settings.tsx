@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, MapPin, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ const Settings = () => {
   const [isPersonalOpen, setIsPersonalOpen] = useState(false);
   const [editName, setEditName] = useState(settings.userName);
   const [editLocation, setEditLocation] = useState(settings.location);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
 
   const handleDevReset = () => {
     resetSettings();
@@ -45,6 +46,62 @@ const Settings = () => {
     setEditName(settings.userName);
     setEditLocation(settings.location);
     setIsPersonalOpen(true);
+  };
+
+  const handleDetectLocation = async () => {
+    if (!navigator.geolocation) {
+      toast.error("Geolocation is not supported by your browser");
+      return;
+    }
+
+    setIsDetectingLocation(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
+          );
+          const data = await response.json();
+          
+          // Try to get city, town, or village name
+          const city = data.address?.city || 
+                       data.address?.town || 
+                       data.address?.village || 
+                       data.address?.municipality ||
+                       data.address?.county;
+          
+          if (city) {
+            setEditLocation(city);
+            toast.success(`Location detected: ${city}`);
+          } else {
+            toast.error("Couldn't determine your city");
+          }
+        } catch (error) {
+          toast.error("Failed to detect location");
+        } finally {
+          setIsDetectingLocation(false);
+        }
+      },
+      (error) => {
+        setIsDetectingLocation(false);
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            toast.error("Location access denied");
+            break;
+          case error.POSITION_UNAVAILABLE:
+            toast.error("Location unavailable");
+            break;
+          case error.TIMEOUT:
+            toast.error("Location request timed out");
+            break;
+          default:
+            toast.error("Failed to get location");
+        }
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+    );
   };
 
   if (!isLoaded) {
@@ -217,12 +274,29 @@ const Settings = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="location">Location</Label>
-              <Input
-                id="location"
-                value={editLocation}
-                onChange={(e) => setEditLocation(e.target.value)}
-                placeholder="e.g. Cupertino"
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="location"
+                  value={editLocation}
+                  onChange={(e) => setEditLocation(e.target.value)}
+                  placeholder="e.g. Cupertino"
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={handleDetectLocation}
+                  disabled={isDetectingLocation}
+                  title="Detect my location"
+                >
+                  {isDetectingLocation ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <MapPin className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
             </div>
             <Button onClick={handlePersonalSave} className="w-full">
               Save
