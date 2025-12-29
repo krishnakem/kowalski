@@ -79,9 +79,9 @@ const PersonalSettings = () => {
 
   return (
     <SettingsLayout title="Personal">
-      <div className="space-y-8 text-left">
+      <div className="space-y-8">
         <div className="space-y-3">
-          <Label htmlFor="name" className="text-sm text-foreground font-sans">Name</Label>
+          <Label htmlFor="name" className="text-sm text-foreground font-sans block text-center">Name</Label>
           <input
             id="name"
             type="text"
@@ -93,7 +93,7 @@ const PersonalSettings = () => {
         </div>
 
         <div className="space-y-3">
-          <Label htmlFor="location" className="text-sm text-foreground font-sans">Location</Label>
+          <Label htmlFor="location" className="text-sm text-foreground font-sans block text-center">Location</Label>
           <div className="flex gap-2 items-end">
             <input
               id="location"
