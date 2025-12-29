@@ -4,6 +4,7 @@ import { Settings, Archive } from "lucide-react";
 import { WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import { ease, duration, spring } from "@/lib/animations";
+import { useSettings } from "@/hooks/useSettings";
 
 
 interface AnalysisReadyScreenProps {
@@ -13,6 +14,7 @@ interface AnalysisReadyScreenProps {
 
 const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReadyScreenProps) => {
   const navigate = useNavigate();
+  const { settings } = useSettings();
 
   const formattedDate = lastAnalysisDate
     ? new Date(lastAnalysisDate).toLocaleString("en-US", {
@@ -78,7 +80,7 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
         className="text-center max-w-sm space-y-6"
       >
         <h1 className="text-4xl font-serif text-foreground">
-          Your analysis is ready
+          {settings.userName?.trim() ? `${settings.userName.trim()}, your` : "Your"} analysis is ready
         </h1>
         
         <motion.button
