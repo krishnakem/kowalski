@@ -159,8 +159,25 @@ const AnalysisArchive = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.3 }}
-          className="min-h-screen bg-background"
+          className="min-h-screen bg-background relative"
         >
+          {/* Back Button */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3, duration: 0.5 }}
+            className="absolute top-6 left-6"
+          >
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleBack}
+              className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+            >
+              <ArrowLeft className="w-6 h-6" />
+            </Button>
+          </motion.div>
+
           {/* Header */}
           <motion.header
             initial={{ opacity: 0, y: -20 }}
@@ -168,15 +185,7 @@ const AnalysisArchive = () => {
             transition={{ duration: 0.4 }}
             className="pt-6 pb-8 px-6"
           >
-            <div className="max-w-2xl mx-auto relative">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleBack}
-                className="absolute left-0 top-1/2 -translate-y-1/2 text-muted-foreground hover:bg-transparent"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </Button>
+            <div className="max-w-2xl mx-auto">
               <h1 className="font-serif text-4xl md:text-5xl text-center text-foreground">
                 Analysis Archive
               </h1>
