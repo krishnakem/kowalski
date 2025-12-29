@@ -16,7 +16,7 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
 
   const handleDevReset = () => {
     resetSettings();
-    window.location.replace("/");
+    navigate("/onboarding", { replace: true, state: {} });
   };
 
   useEffect(() => {

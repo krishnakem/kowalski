@@ -19,8 +19,10 @@ const Index = () => {
     if (!isLoaded) return;
 
     const screenFromState = (location.state as { screen?: Screen })?.screen;
-    
-    if (screenFromState) {
+
+    // Only honor navigation-driven screen overrides for users who have onboarded.
+    // This prevents stale history state from forcing "gazette/agent/ready" after a dev reset.
+    if (screenFromState && (settings.hasOnboarded || screenFromState === "zero")) {
       setCurrentScreen(screenFromState);
       return;
     }
