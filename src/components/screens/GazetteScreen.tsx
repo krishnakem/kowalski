@@ -62,7 +62,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
   };
   
   const date = analysisData?.date || new Date();
-  const location = analysisData?.location || "Sunnyvale";
+  const location = analysisData?.location || settings.location || "Sunnyvale";
   const circleUpdates = analysisData?.circleUpdates || defaultCircleUpdates;
   const worldUpdates = analysisData?.worldUpdates || defaultWorldUpdates;
 
