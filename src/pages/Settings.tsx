@@ -10,11 +10,15 @@ const Settings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from || "agent";
-  const { settings, resetSettings } = useSettings();
+  const { settings, resetSettings, isLoaded } = useSettings();
 
   const handleBack = () => {
     navigate("/", { state: { screen: fromScreen } });
   };
+
+  if (!isLoaded) {
+    return <div className="min-h-screen bg-background" />;
+  }
 
   const handleResetToDefaults = () => {
     resetSettings();
