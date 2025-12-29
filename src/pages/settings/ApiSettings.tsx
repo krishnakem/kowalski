@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Label } from "@/components/ui/label";
@@ -9,39 +9,26 @@ import SettingsLayout from "@/components/layouts/SettingsLayout";
 
 const ApiSettings = () => {
   const { navigateBack } = useFromScreen();
-  const { settings, setSettings, saveSettings, isLoaded } = useSettings();
+  const { settings, setSettings, saveSettings } = useSettings();
   const [showApiKey, setShowApiKey] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
-  const originalApiKeyRef = useRef<string>("");
-
-  useEffect(() => {
-    if (isLoaded) {
-      originalApiKeyRef.current = (settings.apiKey || "").trim();
-    }
-  }, [isLoaded]);
 
   const handleSave = async () => {
-    const nextApiKey = (settings.apiKey || "").trim();
-    const apiKeyChanged = nextApiKey !== originalApiKeyRef.current;
+    const apiKeyToSave = (settings.apiKey || "").trim();
     
-    if (apiKeyChanged && nextApiKey) {
+    // If there's an API key, validate it first (same as onboarding)
+    if (apiKeyToSave) {
       setIsValidating(true);
       setKeyError(null);
       
       try {
         const response = await fetch('https://api.openai.com/v1/models', {
-          headers: { 'Authorization': `Bearer ${nextApiKey}` }
+          headers: { 'Authorization': `Bearer ${apiKeyToSave}` }
         });
         
-        if (!response.ok) {
-          let msg = 'Could not validate key. Please try again.';
-          if (response.status === 401 || response.status === 403) {
-            msg = 'Invalid API key. Please check and try again.';
-          } else if (response.status === 429) {
-            msg = 'Rate limited while validating. Please try again shortly.';
-          }
-          setKeyError(msg);
+        if (response.status === 401) {
+          setKeyError('Invalid API key. Please check and try again.');
           setIsValidating(false);
           return;
         }
@@ -54,8 +41,8 @@ const ApiSettings = () => {
       setIsValidating(false);
     }
     
-    saveSettings({ ...settings, apiKey: nextApiKey });
-    originalApiKeyRef.current = nextApiKey;
+    // Valid key (or empty) - save and proceed
+    saveSettings({ ...settings, apiKey: apiKeyToSave });
     toast.success("API settings saved");
     navigateBack("/settings");
   };
