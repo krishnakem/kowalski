@@ -6,6 +6,7 @@ import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
 import GazetteScreen from "@/components/screens/GazetteScreen";
 import AnalysisReadyScreen from "@/components/screens/AnalysisReadyScreen";
 import { useSettings } from "@/hooks/useSettings";
+import { pageTransition } from "@/lib/animations";
 
 type Screen = "zero" | "agent" | "ready" | "gazette";
 
@@ -77,8 +78,9 @@ const Index = () => {
         {currentScreen === "zero" && (
           <motion.div
             key="zero"
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5 }}
+            initial={pageTransition.initial}
+            animate={pageTransition.animate}
+            exit={pageTransition.exit}
           >
             <ZeroStateScreen onContinue={handleContinue} />
           </motion.div>
@@ -87,8 +89,9 @@ const Index = () => {
         {currentScreen === "agent" && (
           <motion.div
             key="agent"
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5 }}
+            initial={pageTransition.initial}
+            animate={pageTransition.animate}
+            exit={pageTransition.exit}
           >
             <AgentActiveScreen onComplete={handleAgentComplete} />
           </motion.div>
@@ -97,8 +100,9 @@ const Index = () => {
         {currentScreen === "ready" && (
           <motion.div
             key="ready"
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5 }}
+            initial={pageTransition.initial}
+            animate={pageTransition.animate}
+            exit={pageTransition.exit}
           >
             <AnalysisReadyScreen 
               onViewAnalysis={handleViewAnalysis}
@@ -110,8 +114,9 @@ const Index = () => {
         {currentScreen === "gazette" && (
           <motion.div
             key="gazette"
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5 }}
+            initial={pageTransition.initial}
+            animate={pageTransition.animate}
+            exit={pageTransition.exit}
           >
             <GazetteScreen onClose={handleClose} />
           </motion.div>

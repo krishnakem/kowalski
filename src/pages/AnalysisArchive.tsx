@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ease, duration, spring, stagger } from "@/lib/animations";
 
 interface ArchivedAnalysis {
   id: string;
@@ -423,7 +424,7 @@ const AnalysisArchive = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
+          transition={{ duration: duration.normal, ease: ease.cinematic }}
         >
           <GazetteScreen
             onClose={handleCloseAnalysis}
@@ -437,7 +438,7 @@ const AnalysisArchive = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
+          transition={{ duration: duration.normal, ease: ease.cinematic }}
           className="min-h-screen bg-background relative py-16 px-6"
         >
           {/* Back Button */}

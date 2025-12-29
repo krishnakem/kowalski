@@ -6,6 +6,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { useFromScreen } from "@/hooks/useFromScreen";
 import { WORD_POSITIONS } from "@/lib/constants";
 import SettingsLayout from "@/components/layouts/SettingsLayout";
+import { spring } from "@/lib/animations";
 
 const InterestsSettings = () => {
   const { navigateBack } = useFromScreen();
@@ -87,6 +88,7 @@ const InterestsSettings = () => {
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.8 }}
+                transition={spring.gentle}
                 onClick={() => handleRemoveInterest(interest)}
                 className="absolute font-serif text-foreground cursor-pointer select-none
                            hover:line-through hover:text-foreground/50 transition-all duration-200"

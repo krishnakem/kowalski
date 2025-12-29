@@ -6,6 +6,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { useFromScreen } from "@/hooks/useFromScreen";
 import { TIME_OPTIONS, MORNING_TIME_OPTIONS, EVENING_TIME_OPTIONS } from "@/lib/constants";
 import SettingsLayout from "@/components/layouts/SettingsLayout";
+import { spring } from "@/lib/animations";
 
 const ScheduleSettings = () => {
   const { navigateBack } = useFromScreen();
@@ -24,8 +25,9 @@ const ScheduleSettings = () => {
         <Label className="text-sm text-foreground font-sans">Analysis Frequency</Label>
         <div className="grid grid-cols-2 gap-4">
           <motion.button
-            whileHover={{ y: -2, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
-            transition={{ duration: 0.2 }}
+            whileHover={{ y: -3, boxShadow: "0 8px 20px rgba(0,0,0,0.1)" }}
+            whileTap={{ scale: 0.98 }}
+            transition={spring.snappy}
             onClick={() => setSettings({ ...settings, digestFrequency: 1 })}
             className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-4
                        transition-colors duration-200 bg-card ${
@@ -39,8 +41,9 @@ const ScheduleSettings = () => {
           </motion.button>
 
           <motion.button
-            whileHover={{ y: -2, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
-            transition={{ duration: 0.2 }}
+            whileHover={{ y: -3, boxShadow: "0 8px 20px rgba(0,0,0,0.1)" }}
+            whileTap={{ scale: 0.98 }}
+            transition={spring.snappy}
             onClick={() => setSettings({ ...settings, digestFrequency: 2 })}
             className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-4
                        transition-colors duration-200 bg-card ${

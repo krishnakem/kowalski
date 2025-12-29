@@ -4,6 +4,7 @@ import { Settings, ArrowLeft, Archive } from "lucide-react";
 import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
+import { ease, duration, spring, stagger } from "@/lib/animations";
 
 interface CircleUpdate {
   name: string;
@@ -81,9 +82,9 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
 
       {/* Back Button (for archived view) OR Archive Button (for live view) */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: isArchived ? 0.3 : 1, duration: 0.5 }}
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3, duration: duration.slow, ease: ease.cinematic }}
         className="absolute top-6 left-6"
       >
         {isArchived ? (
@@ -109,9 +110,9 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
 
       {/* Settings Button */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 1, duration: 0.5 }}
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3, duration: duration.slow, ease: ease.cinematic }}
         className="absolute top-6 right-6"
       >
         <Button
@@ -127,14 +128,14 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
       <motion.article
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
+        transition={{ duration: duration.slower, ease: ease.cinematic }}
         className="max-w-[650px] w-full"
       >
         {/* Masthead */}
         <motion.header
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2, duration: 0.6 }}
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15, duration: duration.slow, ease: ease.cinematic }}
           className="text-center mb-12"
         >
         <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
@@ -153,7 +154,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
         <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.6 }}
+          transition={{ delay: 0.25, duration: duration.slow, ease: ease.cinematic }}
           className="mb-12"
         >
           <p className="text-xs text-accent font-sans tracking-widest uppercase mb-3">
@@ -174,7 +175,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
         <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5, duration: 0.6 }}
+          transition={{ delay: 0.35, duration: duration.slow, ease: ease.cinematic }}
           className="mb-12"
         >
           <h2 className="text-2xl font-serif text-foreground mb-2">
@@ -188,9 +189,12 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
             {circleUpdates.map((item, index) => (
               <motion.li
                 key={index}
-                initial={{ opacity: 0, x: -10 }}
+                initial={{ opacity: 0, x: -15 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.6 + index * 0.1, duration: 0.4 }}
+                transition={{ 
+                  delay: 0.4 + index * stagger.normal, 
+                  ...spring.gentle 
+                }}
                 className="flex items-start gap-3 text-foreground font-sans"
               >
                 <span className="text-accent mt-0.5">•</span>
@@ -210,7 +214,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
         <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.8, duration: 0.6 }}
+          transition={{ delay: 0.5, duration: duration.slow, ease: ease.cinematic }}
           className="mb-12"
         >
           <h2 className="text-2xl font-serif text-foreground mb-2">
@@ -224,9 +228,12 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
             {worldUpdates.slice(1).map((item, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.9 + index * 0.15, duration: 0.4 }}
+                transition={{ 
+                  delay: 0.55 + index * stagger.slow, 
+                  ...spring.gentle 
+                }}
               >
                 <p className="text-xs text-accent font-sans tracking-widest uppercase mb-2">
                   {item.source}
@@ -244,9 +251,9 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
 
         {/* Footer - All Caught Up */}
         <motion.footer
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1.2, duration: 0.6 }}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.7, duration: duration.slow, ease: ease.cinematic }}
           className="text-center"
         >
           <div className="flex flex-col items-center gap-4">
@@ -260,6 +267,9 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
 
             {!isArchived && (
               <motion.button
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ ...spring.snappy, delay: 0.8 }}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleClose}
