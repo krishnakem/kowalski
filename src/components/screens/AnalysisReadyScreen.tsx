@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Settings, Archive } from "lucide-react";
 import { WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
-import { useSettings } from "@/hooks/useSettings";
+
 
 interface AnalysisReadyScreenProps {
   onViewAnalysis: () => void;
@@ -12,12 +12,6 @@ interface AnalysisReadyScreenProps {
 
 const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReadyScreenProps) => {
   const navigate = useNavigate();
-  const { resetSettings } = useSettings();
-
-  const handleDevReset = () => {
-    resetSettings();
-    navigate("/onboarding", { replace: true, state: {} });
-  };
 
   const formattedDate = lastAnalysisDate
     ? new Date(lastAnalysisDate).toLocaleString("en-US", {
@@ -30,13 +24,6 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
-      {/* Dev Reset Button */}
-      <button
-        onClick={handleDevReset}
-        className="absolute top-6 left-1/2 -translate-x-1/2 text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
-      >
-        Reset (dev only)
-      </button>
 
       {/* Archive Button */}
       <motion.div
