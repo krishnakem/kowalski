@@ -184,14 +184,14 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-lg w-full text-center space-y-12"
           >
             <div className="text-5xl leading-relaxed space-y-2">
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ duration: 0.4, delay: 0.2 }}
+                transition={{ duration: 0.5, delay: 0.2 }}
               >
                 <TypewriterText 
                   text="Social Media is a drug."
@@ -202,7 +202,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ duration: 0.4 }}
+                  transition={{ duration: 0.5 }}
                 >
                   <TypewriterText 
                     text="Kowalski gets high for you."
@@ -241,7 +241,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-xl w-full text-center space-y-12"
           >
             <motion.h2
@@ -302,7 +302,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.3 }}
+                  transition={{ duration: 0.5 }}
                   className="space-y-8"
                 >
                   <div className="space-y-6">
@@ -357,7 +357,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   <motion.button
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    transition={{ delay: 0.2 }}
+                    transition={{ delay: 0.2, duration: 0.5 }}
                     onClick={handleRoutineContinue}
                     className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground 
                                text-foreground font-sans text-sm tracking-wider uppercase
@@ -379,7 +379,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-md w-full space-y-12"
           >
             {/* Headline */}
@@ -472,7 +472,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, duration: 0.4 }}
+              transition={{ delay: 0.3, duration: 0.5 }}
               className="flex justify-center"
             >
               <button
@@ -512,7 +512,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <motion.div
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.3, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ delay: 0.3, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               >
                 <Instagram className="w-16 h-16 text-foreground" strokeWidth={1.5} />
               </motion.div>
@@ -520,7 +520,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <motion.div 
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ delay: 0.4, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="text-center space-y-4"
               >
                 <h2 className="text-5xl font-serif text-foreground">Connect Instagram</h2>
@@ -532,7 +532,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <motion.button
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ delay: 0.5, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 onClick={handleConnectClick}
                 className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
                            text-foreground font-sans text-sm tracking-wider uppercase
