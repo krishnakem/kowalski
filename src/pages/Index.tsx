@@ -13,7 +13,6 @@ const Index = () => {
   const location = useLocation();
   const { settings, isLoaded, patchSettings } = useSettings();
   const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
-  const [waitingForNextAnalysis, setWaitingForNextAnalysis] = useState(false);
 
   // Determine initial screen based on user state - only runs once on initial load
   useEffect(() => {
@@ -46,7 +45,6 @@ const Index = () => {
 
   const handleContinue = () => {
     patchSettings({ hasOnboarded: true, analysisStatus: "working" });
-    setWaitingForNextAnalysis(false);
     setCurrentScreen("agent");
   };
 
@@ -63,8 +61,9 @@ const Index = () => {
   };
 
   const handleClose = () => {
-    // User closed gazette - go back to ready screen so they can re-open or navigate
-    setCurrentScreen("ready");
+    // User closed gazette - show agent screen, timer will auto-complete to ready
+    patchSettings({ analysisStatus: "working" });
+    setCurrentScreen("agent");
   };
 
   // Show nothing until we determine the screen
@@ -91,10 +90,7 @@ const Index = () => {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <AgentActiveScreen 
-              onComplete={handleAgentComplete} 
-              autoComplete={!waitingForNextAnalysis}
-            />
+            <AgentActiveScreen onComplete={handleAgentComplete} />
           </motion.div>
         )}
 
