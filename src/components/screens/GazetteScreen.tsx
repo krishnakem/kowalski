@@ -1,21 +1,40 @@
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Settings } from "lucide-react";
+import { Settings, ArrowLeft } from "lucide-react";
 import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 
-interface GazetteScreenProps {
-  onClose: () => void;
+interface CircleUpdate {
+  name: string;
+  update: string;
 }
 
-const circleUpdates = [
+interface WorldUpdate {
+  source: string;
+  summary: string;
+}
+
+export interface AnalysisData {
+  date: Date;
+  location: string;
+  circleUpdates: CircleUpdate[];
+  worldUpdates: WorldUpdate[];
+}
+
+interface GazetteScreenProps {
+  onClose: () => void;
+  analysisData?: AnalysisData;
+  isArchived?: boolean;
+}
+
+const defaultCircleUpdates: CircleUpdate[] = [
   { name: "Sarah", update: "got engaged in Kyoto" },
   { name: "Mike", update: "posted 3 photos from the launch" },
   { name: "Elena", update: "started a new role at Stripe" },
   { name: "James", update: "is traveling through Portugal" },
 ];
 
-const worldUpdates = [
+const defaultWorldUpdates: WorldUpdate[] = [
   {
     source: "The Verge",
     summary: "Apple announced the M4 chip lineup with significant improvements to neural engine performance, promising 2x faster on-device AI processing.",
@@ -30,11 +49,16 @@ const worldUpdates = [
   },
 ];
 
-const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
+const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScreenProps) => {
   const navigate = useNavigate();
-  const today = new Date();
-  const dayName = today.toLocaleDateString("en-US", { weekday: "long" });
-  const monthDay = today.toLocaleDateString("en-US", { 
+  
+  const date = analysisData?.date || new Date();
+  const location = analysisData?.location || "Sunnyvale";
+  const circleUpdates = analysisData?.circleUpdates || defaultCircleUpdates;
+  const worldUpdates = analysisData?.worldUpdates || defaultWorldUpdates;
+
+  const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
+  const monthDay = date.toLocaleDateString("en-US", { 
     month: "short", 
     day: "numeric"
   });
@@ -46,6 +70,25 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
 
   return (
     <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background relative">
+      {/* Back Button (for archived view) */}
+      {isArchived && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3, duration: 0.5 }}
+          className="absolute top-6 left-6"
+        >
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+          >
+            <ArrowLeft className="w-6 h-6" />
+          </Button>
+        </motion.div>
+      )}
+
       {/* Settings Button */}
       <motion.div
         initial={{ opacity: 0 }}
@@ -81,7 +124,7 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
           </h1>
           <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic">
             <PixelPin size={14} />
-            <span>{monthDay} • Sunnyvale</span>
+            <span>{monthDay} • {location}</span>
           </div>
         </motion.header>
 
@@ -197,15 +240,17 @@ const GazetteScreen = ({ onClose }: GazetteScreenProps) => {
               Go do something meaningful.
             </p>
 
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={onClose}
-              className="mt-6 btn-ghost flex items-center gap-3"
-            >
-              <PixelClose size={16} />
-              <span>Close App</span>
-            </motion.button>
+            {!isArchived && (
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={onClose}
+                className="mt-6 btn-ghost flex items-center gap-3"
+              >
+                <PixelClose size={16} />
+                <span>Close App</span>
+              </motion.button>
+            )}
           </div>
         </motion.footer>
       </motion.article>
