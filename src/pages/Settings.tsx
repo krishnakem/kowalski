@@ -230,9 +230,8 @@ const Settings = () => {
               whileHover={{ y: -4, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}
               whileTap={{ scale: 0.98 }}
               onClick={() => card.onClick ? card.onClick() : navigate(card.path!, { state: { from: fromScreen } })}
-              className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-3
-                         transition-colors duration-200 bg-card border-foreground/20 hover:border-foreground cursor-pointer
-                         ${index === 3 ? "col-span-2 !aspect-auto py-8" : ""}`}
+              className="aspect-square border-2 p-6 flex flex-col items-center justify-center gap-3
+                         transition-colors duration-200 bg-card border-foreground/20 hover:border-foreground cursor-pointer"
             >
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
