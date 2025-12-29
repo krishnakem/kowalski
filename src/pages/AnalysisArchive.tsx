@@ -83,18 +83,20 @@ const AnalysisArchive = () => {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="sticky top-0 bg-background/95 backdrop-blur-sm z-10 border-b border-border"
+        className="pt-6 pb-8 px-6"
       >
-        <div className="max-w-2xl mx-auto px-6 py-4 flex items-center gap-4">
+        <div className="max-w-2xl mx-auto relative">
           <Button
             variant="ghost"
             size="icon"
             onClick={handleBack}
-            className="text-muted-foreground hover:text-foreground"
+            className="absolute left-0 top-1/2 -translate-y-1/2 text-muted-foreground hover:bg-transparent"
           >
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <h1 className="font-serif text-2xl text-foreground">Analysis Archive</h1>
+          <h1 className="font-serif text-4xl md:text-5xl text-center text-foreground">
+            Analysis Archive
+          </h1>
         </div>
       </motion.header>
 
