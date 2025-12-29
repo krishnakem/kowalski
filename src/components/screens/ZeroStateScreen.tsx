@@ -475,15 +475,31 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   const rotation = ((index * 7) % 25) - 12; // -12 to +12 degrees
                   const sizeClass = index % 3 === 0 ? "text-3xl" : index % 3 === 1 ? "text-2xl" : "text-xl";
                   
+                  // Unique floating animation parameters per word
+                  const floatDuration = 3 + (index % 3); // 3-5 seconds
+                  const floatDelay = (index * 0.4) % 2; // staggered start
+                  const floatX = ((index * 3) % 7) - 3; // -3 to +3 px
+                  const floatY = ((index * 5) % 9) - 4; // -4 to +4 px
+                  
                   return (
                     <motion.span
                       key={interest}
                       initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ opacity: 1, scale: 1 }}
+                      animate={{ 
+                        opacity: 1, 
+                        scale: 1,
+                        x: [0, floatX, -floatX * 0.5, 0],
+                        y: [0, floatY, -floatY * 0.5, 0],
+                      }}
                       exit={{ opacity: 0, scale: 0.5 }}
-                      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                      transition={{ 
+                        opacity: { duration: 0.3 },
+                        scale: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
+                        x: { duration: floatDuration, repeat: Infinity, ease: "easeInOut", delay: floatDelay },
+                        y: { duration: floatDuration * 1.1, repeat: Infinity, ease: "easeInOut", delay: floatDelay },
+                      }}
                       onClick={() => handleRemoveInterest(interest)}
-                      style={{ transform: `rotate(${rotation}deg)` }}
+                      style={{ rotate: rotation }}
                       className={`word-cloud-item font-serif ${sizeClass} text-foreground select-none`}
                     >
                       {interest}
