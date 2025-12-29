@@ -471,9 +471,9 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             >
               <AnimatePresence>
                 {interests.map((interest, index) => {
-                  // Golden ratio distribution for organic scatter
-                  const posX = ((index * 61.8) % 70) + 15; // 15-85% horizontal
-                  const posY = ((index * 38.2) % 55) + 22; // 22-77% vertical
+                  // Golden ratio distribution for organic scatter (tighter grouping)
+                  const posX = ((index * 61.8) % 40) + 30; // 30-70% horizontal
+                  const posY = ((index * 38.2) % 35) + 32; // 32-67% vertical
                   
                   // Consistent rotation and sizing
                   const rotation = ((index * 7) % 25) - 12; // -12 to +12 degrees
