@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 
 export const SETTINGS_KEY = "kowalski-settings";
 
+export type AnalysisStatus = "idle" | "working" | "ready";
+
 export interface SettingsData {
   digestFrequency: 1 | 2;
   morningTime: string;
@@ -9,6 +11,9 @@ export interface SettingsData {
   apiKey: string;
   usageCap: number;
   interests: string[];
+  hasOnboarded: boolean;
+  analysisStatus: AnalysisStatus;
+  lastAnalysisDate?: string;
 }
 
 export const DEFAULT_SETTINGS: SettingsData = {
@@ -18,6 +23,8 @@ export const DEFAULT_SETTINGS: SettingsData = {
   apiKey: "",
   usageCap: 10,
   interests: [],
+  hasOnboarded: false,
+  analysisStatus: "idle",
 };
 
 export const useSettings = () => {

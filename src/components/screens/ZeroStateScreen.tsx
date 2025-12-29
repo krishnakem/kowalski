@@ -196,6 +196,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
       // Auto-close after 1 second and proceed
       setTimeout(() => {
         setDialogOpen(false);
+        // Mark as onboarded and set to working when onboarding completes
+        patchSettings({ hasOnboarded: true, analysisStatus: "working" });
         onContinue();
       }, 1000);
     }, 3000);

@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Settings, ArrowLeft, Archive } from "lucide-react";
 import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
+import { useSettings } from "@/hooks/useSettings";
 
 interface CircleUpdate {
   name: string;
@@ -51,6 +52,13 @@ const defaultWorldUpdates: WorldUpdate[] = [
 
 const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScreenProps) => {
   const navigate = useNavigate();
+  const { patchSettings } = useSettings();
+
+  const handleClose = () => {
+    // Reset to idle when user closes the gazette
+    patchSettings({ analysisStatus: "idle" });
+    onClose();
+  };
   
   const date = analysisData?.date || new Date();
   const location = analysisData?.location || "Sunnyvale";
@@ -253,7 +261,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={onClose}
+                onClick={handleClose}
                 className="mt-6 btn-ghost flex items-center gap-3"
               >
                 <PixelClose size={16} />
