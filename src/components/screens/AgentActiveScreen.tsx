@@ -12,7 +12,12 @@ interface AgentActiveScreenProps {
 
 const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
-  const { patchSettings } = useSettings();
+  const { patchSettings, resetSettings } = useSettings();
+
+  const handleDevReset = () => {
+    resetSettings();
+    window.location.reload();
+  };
 
   useEffect(() => {
     // Set status to working when screen mounts
@@ -25,6 +30,14 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
+      {/* Dev Reset Button */}
+      <button
+        onClick={handleDevReset}
+        className="absolute top-6 left-1/2 -translate-x-1/2 text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
+      >
+        Reset (dev only)
+      </button>
+
       {/* Archive Button */}
       <motion.div
         initial={{ opacity: 0 }}
