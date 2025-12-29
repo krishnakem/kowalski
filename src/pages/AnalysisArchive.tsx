@@ -364,9 +364,9 @@ const AnalysisArchive = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2, duration: 0.6 }}
-            className="text-center mb-12"
+            className="text-center mb-6"
           >
-            <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
+            <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-2 tracking-tight">
               {viewMode === "months" || isSearching
                 ? "Analysis Archive"
                 : `${selectedMonthName} ${selectedYear}`}
