@@ -467,11 +467,15 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.35, duration: 0.5 }}
-              className="min-h-[200px] flex flex-wrap justify-center items-center gap-x-6 gap-y-4 px-4"
+              className="relative h-[280px] w-full"
             >
               <AnimatePresence>
                 {interests.map((interest, index) => {
-                  // Generate consistent random values based on index
+                  // Golden ratio distribution for organic scatter
+                  const posX = ((index * 61.8) % 70) + 15; // 15-85% horizontal
+                  const posY = ((index * 38.2) % 55) + 22; // 22-77% vertical
+                  
+                  // Consistent rotation and sizing
                   const rotation = ((index * 7) % 25) - 12; // -12 to +12 degrees
                   const sizeClass = index % 3 === 0 ? "text-3xl" : index % 3 === 1 ? "text-2xl" : "text-xl";
                   
@@ -499,8 +503,14 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                         y: { duration: floatDuration * 1.1, repeat: Infinity, ease: "easeInOut", delay: floatDelay },
                       }}
                       onClick={() => handleRemoveInterest(interest)}
-                      style={{ rotate: rotation }}
-                      className={`word-cloud-item font-serif ${sizeClass} text-foreground select-none`}
+                      style={{ 
+                        position: 'absolute',
+                        left: `${posX}%`,
+                        top: `${posY}%`,
+                        rotate: rotation,
+                        transform: 'translate(-50%, -50%)',
+                      }}
+                      className={`word-cloud-item font-serif ${sizeClass} text-foreground select-none whitespace-nowrap`}
                     >
                       {interest}
                     </motion.span>
@@ -509,7 +519,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               </AnimatePresence>
               
               {interests.length === 0 && (
-                <span className="text-muted-foreground/50 font-sans text-sm italic">
+                <span className="absolute inset-0 flex items-center justify-center text-muted-foreground/50 font-sans text-sm italic">
                   Your interests will appear here...
                 </span>
               )}
