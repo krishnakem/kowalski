@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Settings } from "lucide-react";
+import { Settings, Archive } from "lucide-react";
 import { AnimatedPixelPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 
@@ -20,6 +20,23 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
+      {/* Archive Button */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 1, duration: 0.5 }}
+        className="absolute top-6 left-6"
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate("/archive", { state: { from: "agent" } })}
+          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+        >
+          <Archive className="w-10 h-10" />
+        </Button>
+      </motion.div>
+
       {/* Settings Button */}
       <motion.div
         initial={{ opacity: 0 }}
