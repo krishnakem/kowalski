@@ -1,17 +1,7 @@
-import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, MapPin, Loader2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { toast } from "sonner";
 import { PixelSun, PixelMoon, PixelKey, PixelLightbulb, PixelUser } from "@/components/icons/PixelIcons";
 import { useSettings } from "@/hooks/useSettings";
 import { ease, duration, spring, stagger } from "@/lib/animations";
@@ -20,12 +10,7 @@ const Settings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from || "agent";
-  const { settings, patchSettings, resetSettings, isLoaded } = useSettings();
-  
-  const [isPersonalOpen, setIsPersonalOpen] = useState(false);
-  const [editName, setEditName] = useState(settings.userName);
-  const [editLocation, setEditLocation] = useState(settings.location);
-  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const { settings, resetSettings, isLoaded } = useSettings();
 
   const handleDevReset = () => {
     resetSettings();
@@ -34,74 +19,6 @@ const Settings = () => {
 
   const handleBack = () => {
     navigate("/", { state: { screen: fromScreen } });
-  };
-
-  const handlePersonalSave = () => {
-    patchSettings({ userName: editName, location: editLocation });
-    setIsPersonalOpen(false);
-    toast.success("Personal info updated");
-  };
-
-  const openPersonalDialog = () => {
-    setEditName(settings.userName);
-    setEditLocation(settings.location);
-    setIsPersonalOpen(true);
-  };
-
-  const handleDetectLocation = async () => {
-    if (!navigator.geolocation) {
-      toast.error("Geolocation is not supported by your browser");
-      return;
-    }
-
-    setIsDetectingLocation(true);
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
-          );
-          const data = await response.json();
-          
-          // Try to get city, town, or village name
-          const city = data.address?.city || 
-                       data.address?.town || 
-                       data.address?.village || 
-                       data.address?.municipality ||
-                       data.address?.county;
-          
-          if (city) {
-            setEditLocation(city);
-            toast.success(`Location detected: ${city}`);
-          } else {
-            toast.error("Couldn't determine your city");
-          }
-        } catch (error) {
-          toast.error("Failed to detect location");
-        } finally {
-          setIsDetectingLocation(false);
-        }
-      },
-      (error) => {
-        setIsDetectingLocation(false);
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            toast.error("Location access denied");
-            break;
-          case error.POSITION_UNAVAILABLE:
-            toast.error("Location unavailable");
-            break;
-          case error.TIMEOUT:
-            toast.error("Location request timed out");
-            break;
-          default:
-            toast.error("Failed to get location");
-        }
-      },
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
-    );
   };
 
   if (!isLoaded) {
@@ -143,7 +60,7 @@ const Settings = () => {
       title: "Personal",
       summary: getPersonalSummary(),
       icon: <PixelUser size={40} color="charcoal" />,
-      onClick: openPersonalDialog,
+      path: "/settings/personal",
     },
     {
       title: "Schedule",
@@ -229,7 +146,7 @@ const Settings = () => {
               }}
               whileHover={{ y: -4, boxShadow: "0 8px 24px rgba(0,0,0,0.1)" }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => card.onClick ? card.onClick() : navigate(card.path!, { state: { from: fromScreen } })}
+              onClick={() => navigate(card.path, { state: { from: fromScreen } })}
               className="aspect-square border-2 p-6 flex flex-col items-center justify-center gap-3
                          transition-colors duration-200 bg-card border-foreground/20 hover:border-foreground cursor-pointer"
             >
@@ -255,54 +172,6 @@ const Settings = () => {
         </button>
       </div>
 
-      {/* Personal Info Dialog */}
-      <Dialog open={isPersonalOpen} onOpenChange={setIsPersonalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-serif text-2xl">Personal Info</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-6 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder="Your name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="location">Location</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="location"
-                  value={editLocation}
-                  onChange={(e) => setEditLocation(e.target.value)}
-                  placeholder="e.g. Cupertino"
-                  className="flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={handleDetectLocation}
-                  disabled={isDetectingLocation}
-                  title="Detect my location"
-                >
-                  {isDetectingLocation ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <MapPin className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-            </div>
-            <Button onClick={handlePersonalSave} className="w-full">
-              Save
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
