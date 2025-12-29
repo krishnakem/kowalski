@@ -148,13 +148,20 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
         </motion.header>
 
         {/* Divider */}
-        <div className="divider mb-12" />
+        <motion.div 
+          initial={{ scaleX: 0 }}
+          whileInView={{ scaleX: 1 }}
+          viewport={{ once: true, margin: "-50px" }}
+          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          className="divider mb-12 origin-left"
+        />
 
         {/* Lead Story with Drop Cap */}
         <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25, duration: duration.slow, ease: ease.cinematic }}
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-80px" }}
+          transition={{ duration: duration.slow, ease: ease.cinematic }}
           className="mb-12"
         >
           <p className="text-xs text-accent font-sans tracking-widest uppercase mb-3">
@@ -169,13 +176,20 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
         </motion.section>
 
         {/* Divider */}
-        <div className="divider mb-12" />
+        <motion.div 
+          initial={{ scaleX: 0 }}
+          whileInView={{ scaleX: 1 }}
+          viewport={{ once: true, margin: "-50px" }}
+          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          className="divider mb-12 origin-left"
+        />
 
         {/* The Circle Section */}
         <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35, duration: duration.slow, ease: ease.cinematic }}
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-80px" }}
+          transition={{ duration: duration.slow, ease: ease.cinematic }}
           className="mb-12"
         >
           <h2 className="text-2xl font-serif text-foreground mb-2">
@@ -189,10 +203,11 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
             {circleUpdates.map((item, index) => (
               <motion.li
                 key={index}
-                initial={{ opacity: 0, x: -15 }}
-                animate={{ opacity: 1, x: 0 }}
+                initial={{ opacity: 0, x: -20 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true, margin: "-30px" }}
                 transition={{ 
-                  delay: 0.4 + index * stagger.normal, 
+                  delay: index * stagger.normal, 
                   ...spring.gentle 
                 }}
                 className="flex items-start gap-3 text-foreground font-sans"
@@ -208,13 +223,20 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
         </motion.section>
 
         {/* Divider */}
-        <div className="divider mb-12" />
+        <motion.div 
+          initial={{ scaleX: 0 }}
+          whileInView={{ scaleX: 1 }}
+          viewport={{ once: true, margin: "-50px" }}
+          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          className="divider mb-12 origin-left"
+        />
 
         {/* The World Section */}
         <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5, duration: duration.slow, ease: ease.cinematic }}
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-80px" }}
+          transition={{ duration: duration.slow, ease: ease.cinematic }}
           className="mb-12"
         >
           <h2 className="text-2xl font-serif text-foreground mb-2">
@@ -228,10 +250,11 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
             {worldUpdates.slice(1).map((item, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
                 transition={{ 
-                  delay: 0.55 + index * stagger.slow, 
+                  delay: index * stagger.slow, 
                   ...spring.gentle 
                 }}
               >
@@ -247,13 +270,20 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
         </motion.section>
 
         {/* Divider */}
-        <div className="divider mb-12" />
+        <motion.div 
+          initial={{ scaleX: 0 }}
+          whileInView={{ scaleX: 1 }}
+          viewport={{ once: true, margin: "-50px" }}
+          transition={{ duration: duration.slow, ease: ease.cinematic }}
+          className="divider mb-12 origin-left"
+        />
 
         {/* Footer - All Caught Up */}
         <motion.footer
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.7, duration: duration.slow, ease: ease.cinematic }}
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-80px" }}
+          transition={{ duration: duration.slow, ease: ease.cinematic }}
           className="text-center"
         >
           <div className="flex flex-col items-center gap-4">
