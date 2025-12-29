@@ -827,7 +827,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-              className="bg-background border-2 border-foreground rounded-3xl p-12 flex flex-col items-center gap-12"
+              className="bg-background rounded-3xl p-12 flex flex-col items-center gap-12"
             >
               <motion.div
                 initial={{ opacity: 0, scale: 0.8 }}
@@ -843,7 +843,9 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 transition={{ delay: 0.4, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="text-center space-y-4"
               >
-                <h2 className="text-5xl font-serif text-foreground">Connect Instagram</h2>
+                <h2 className="text-5xl font-serif text-foreground">
+                  Last step{userName.trim() ? `, ${userName.trim()}` : ""}, connect your Instagram
+                </h2>
                 <p className="text-muted-foreground text-sm font-sans">
                   Kowalski interacts with Instagram in a local sandbox. Your credentials never leave your device.
                 </p>
