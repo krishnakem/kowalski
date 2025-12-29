@@ -63,10 +63,12 @@ const InterestsSettings = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        const mergedInterests = parsed.interests?.length > 0 
-          ? parsed.interests 
-          : onboardingInterests;
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed, interests: mergedInterests });
+        // Merge interests from both sources (unique values only)
+        const combinedInterests = [...new Set([
+          ...(parsed.interests || []),
+          ...onboardingInterests
+        ])];
+        setSettings({ ...DEFAULT_SETTINGS, ...parsed, interests: combinedInterests });
       } catch (e) {
         console.error("Failed to parse settings:", e);
       }
