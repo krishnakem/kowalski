@@ -11,6 +11,7 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
+import { SETTINGS_KEY } from "@/hooks/useSettings";
 
 interface ZeroStateScreenProps {
   onContinue: () => void;
@@ -171,10 +172,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
       }
       
       // Valid key - save and proceed
-      localStorage.setItem('kowalski-settings', JSON.stringify({
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
         apiKey,
         usageCap,
-        digestCount,
+        digestFrequency: digestCount,
         morningTime,
         eveningTime,
         interests,

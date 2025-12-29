@@ -5,47 +5,23 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-
-interface SettingsData {
-  digestFrequency: 1 | 2;
-  morningTime: string;
-  eveningTime: string;
-  apiKey: string;
-  usageCap: number;
-  interests: string[];
-}
-
-const DEFAULT_SETTINGS: SettingsData = {
-  digestFrequency: 1,
-  morningTime: "8:00 AM",
-  eveningTime: "6:00 PM",
-  apiKey: "",
-  usageCap: 10,
-  interests: [],
-};
+import { useSettings } from "@/hooks/useSettings";
 
 const ApiSettings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from;
-  const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
+  const { settings, setSettings, saveSettings, isLoaded } = useSettings();
   const [showApiKey, setShowApiKey] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
   const originalApiKeyRef = useRef<string>("");
 
   useEffect(() => {
-    const saved = localStorage.getItem("kowalski-settings");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
-        originalApiKeyRef.current = parsed.apiKey || "";
-      } catch (e) {
-        console.error("Failed to parse settings:", e);
-      }
+    if (isLoaded) {
+      originalApiKeyRef.current = settings.apiKey || "";
     }
-  }, []);
+  }, [isLoaded, settings.apiKey]);
 
   const handleBack = () => {
     navigate("/settings", { state: { from: fromScreen } });
@@ -77,7 +53,7 @@ const ApiSettings = () => {
       setIsValidating(false);
     }
     
-    localStorage.setItem("kowalski-settings", JSON.stringify(settings));
+    saveSettings();
     originalApiKeyRef.current = settings.apiKey;
     toast.success("API settings saved");
     handleBack();

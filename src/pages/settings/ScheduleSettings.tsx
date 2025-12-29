@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
@@ -6,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { PixelSun, PixelMoon } from "@/components/icons/PixelIcons";
+import { useSettings } from "@/hooks/useSettings";
 
 const TIME_OPTIONS = [
   "6:00 AM", "6:30 AM", "7:00 AM", "7:30 AM", "8:00 AM", "8:30 AM",
@@ -16,48 +16,18 @@ const TIME_OPTIONS = [
   "9:00 PM", "9:30 PM", "10:00 PM"
 ];
 
-interface SettingsData {
-  digestFrequency: 1 | 2;
-  morningTime: string;
-  eveningTime: string;
-  apiKey: string;
-  usageCap: number;
-  interests: string[];
-}
-
-const DEFAULT_SETTINGS: SettingsData = {
-  digestFrequency: 1,
-  morningTime: "8:00 AM",
-  eveningTime: "6:00 PM",
-  apiKey: "",
-  usageCap: 10,
-  interests: [],
-};
-
 const ScheduleSettings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from;
-  const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("kowalski-settings");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
-      } catch (e) {
-        console.error("Failed to parse settings:", e);
-      }
-    }
-  }, []);
+  const { settings, setSettings, saveSettings } = useSettings();
 
   const handleBack = () => {
     navigate("/settings", { state: { from: fromScreen } });
   };
 
   const handleSave = () => {
-    localStorage.setItem("kowalski-settings", JSON.stringify(settings));
+    saveSettings();
     toast.success("Schedule saved");
     handleBack();
   };
