@@ -1,54 +1,23 @@
-import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { PixelSun, PixelMoon, PixelKey, PixelLightbulb } from "@/components/icons/PixelIcons";
-
-interface SettingsData {
-  digestFrequency: 1 | 2;
-  morningTime: string;
-  eveningTime: string;
-  apiKey: string;
-  usageCap: number;
-  interests: string[];
-}
-
-const DEFAULT_SETTINGS: SettingsData = {
-  digestFrequency: 1,
-  morningTime: "8:00 AM",
-  eveningTime: "6:00 PM",
-  apiKey: "",
-  usageCap: 10,
-  interests: [],
-};
+import { useSettings, DEFAULT_SETTINGS } from "@/hooks/useSettings";
 
 const Settings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from || "agent";
-  const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("kowalski-settings");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
-      } catch (e) {
-        console.error("Failed to parse settings:", e);
-      }
-    }
-  }, []);
+  const { settings, resetSettings } = useSettings();
 
   const handleBack = () => {
     navigate("/", { state: { screen: fromScreen } });
   };
 
   const handleResetToDefaults = () => {
-    localStorage.setItem("kowalski-settings", JSON.stringify(DEFAULT_SETTINGS));
-    setSettings(DEFAULT_SETTINGS);
+    resetSettings();
     toast.success("Settings reset to defaults");
   };
 

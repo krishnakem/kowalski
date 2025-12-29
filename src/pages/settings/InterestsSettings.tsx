@@ -1,28 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-
-interface SettingsData {
-  digestFrequency: 1 | 2;
-  morningTime: string;
-  eveningTime: string;
-  apiKey: string;
-  usageCap: number;
-  interests: string[];
-}
-
-const DEFAULT_SETTINGS: SettingsData = {
-  digestFrequency: 1,
-  morningTime: "8:00 AM",
-  eveningTime: "6:00 PM",
-  apiKey: "",
-  usageCap: 10,
-  interests: [],
-};
+import { useSettings } from "@/hooks/useSettings";
 
 const WORD_POSITIONS = [
   { x: 50, y: 20, size: 1.3, rotation: -3 },
@@ -43,20 +26,8 @@ const InterestsSettings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from;
-  const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
+  const { settings, setSettings, saveSettings } = useSettings();
   const [interestInput, setInterestInput] = useState("");
-
-  useEffect(() => {
-    const saved = localStorage.getItem("kowalski-settings");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
-      } catch (e) {
-        console.error("Failed to parse settings:", e);
-      }
-    }
-  }, []);
 
   const handleBack = () => {
     navigate("/settings", { state: { from: fromScreen } });
@@ -75,7 +46,7 @@ const InterestsSettings = () => {
   };
 
   const handleSave = () => {
-    localStorage.setItem("kowalski-settings", JSON.stringify(settings));
+    saveSettings();
     toast.success("Interests saved");
     handleBack();
   };
