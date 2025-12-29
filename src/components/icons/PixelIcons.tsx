@@ -152,6 +152,47 @@ export const PixelClose = ({ className, size = 24, color = "charcoal" }: PixelIc
   </svg>
 );
 
+export const PixelKey = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
+    {/* Key head (circle) */}
+    <rect x="5" y="6" width="6" height="2" fill={getColor(color)} />
+    <rect x="3" y="8" width="2" height="4" fill={getColor(color)} />
+    <rect x="11" y="8" width="2" height="4" fill={getColor(color)} />
+    <rect x="5" y="12" width="6" height="2" fill={getColor(color)} />
+    <rect x="6" y="9" width="4" height="2" fill={getColor(color)} opacity="0.3" />
+    {/* Key shaft */}
+    <rect x="13" y="10" width="6" height="2" fill={getColor(color)} />
+    {/* Key teeth */}
+    <rect x="17" y="12" width="2" height="2" fill={getColor(color)} />
+    <rect x="19" y="10" width="2" height="2" fill={getColor(color)} />
+    <rect x="21" y="12" width="2" height="2" fill={getColor(color)} />
+  </svg>
+);
+
+export const PixelLightbulb = ({ className, size = 24, color = "charcoal" }: PixelIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ imageRendering: "pixelated" }}>
+    {/* Bulb top */}
+    <rect x="9" y="3" width="6" height="2" fill={getColor(color)} />
+    <rect x="7" y="5" width="2" height="2" fill={getColor(color)} />
+    <rect x="15" y="5" width="2" height="2" fill={getColor(color)} />
+    <rect x="5" y="7" width="2" height="4" fill={getColor(color)} />
+    <rect x="17" y="7" width="2" height="4" fill={getColor(color)} />
+    {/* Bulb inner glow */}
+    <rect x="9" y="5" width="6" height="6" fill={getColor(color)} opacity="0.2" />
+    {/* Bulb bottom curve */}
+    <rect x="7" y="11" width="2" height="2" fill={getColor(color)} />
+    <rect x="15" y="11" width="2" height="2" fill={getColor(color)} />
+    <rect x="9" y="13" width="6" height="2" fill={getColor(color)} />
+    {/* Base/screw */}
+    <rect x="9" y="15" width="6" height="2" fill={getColor(color)} />
+    <rect x="10" y="17" width="4" height="2" fill={getColor(color)} />
+    <rect x="11" y="19" width="2" height="2" fill={getColor(color)} />
+    {/* Light rays */}
+    <rect x="3" y="8" width="2" height="2" fill={getColor(color)} opacity="0.4" />
+    <rect x="19" y="8" width="2" height="2" fill={getColor(color)} opacity="0.4" />
+  </svg>
+);
+
 // Animated Eye component for Agent screen
 export const AnimatedPixelEye = ({ className, size = 64 }: PixelIconProps) => (
   <motion.div
