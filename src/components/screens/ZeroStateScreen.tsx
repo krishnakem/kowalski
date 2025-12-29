@@ -97,6 +97,44 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [interestInput, setInterestInput] = useState("");
   const [userName, setUserName] = useState("");
   const [nameQuestionComplete, setNameQuestionComplete] = useState(false);
+  const [detectedLocation, setDetectedLocation] = useState<string | null>(null);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+
+  // Auto-detect location on mount
+  useEffect(() => {
+    const detectLocation = async () => {
+      setIsDetectingLocation(true);
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            timeout: 10000,
+            enableHighAccuracy: false,
+          });
+        });
+        
+        const { latitude, longitude } = position.coords;
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
+        );
+        const data = await response.json();
+        
+        const city = data.address?.city || data.address?.town || data.address?.village || "";
+        const country = data.address?.country || "";
+        const locationString = city && country ? `${city}, ${country}` : city || country;
+        
+        if (locationString) {
+          setDetectedLocation(locationString);
+          patchSettings({ location: locationString });
+        }
+      } catch (error) {
+        console.log("Location detection skipped or failed");
+      } finally {
+        setIsDetectingLocation(false);
+      }
+    };
+
+    detectLocation();
+  }, [patchSettings]);
 
   useEffect(() => {
     if (!typingComplete) {
