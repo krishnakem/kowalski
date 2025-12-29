@@ -53,7 +53,7 @@ const defaultWorldUpdates: WorldUpdate[] = [
 
 const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScreenProps) => {
   const navigate = useNavigate();
-  const { patchSettings } = useSettings();
+  const { settings, patchSettings } = useSettings();
 
   const handleClose = () => {
     // Reset to idle when user closes the gazette
@@ -139,7 +139,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
           className="text-center mb-12"
         >
         <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
-            The {dayName} Analysis
+            {settings.userName?.trim() ? `${settings.userName.trim()}'s Analysis` : `The ${dayName} Analysis`}
           </h1>
           <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic">
             <PixelPin size={14} />
