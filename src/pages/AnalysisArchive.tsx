@@ -546,7 +546,7 @@ const AnalysisArchive = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: duration.normal, ease: ease.cinematic }}
-          className="min-h-screen bg-background relative py-16 px-6"
+          className="min-h-screen bg-background relative py-10 px-6"
         >
           {/* Back Button */}
           <motion.div
@@ -570,7 +570,7 @@ const AnalysisArchive = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2, duration: 0.6 }}
-            className="text-center mb-6"
+            className="text-center mb-4"
           >
             <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-2 tracking-tight">
               Analysis Archive
@@ -596,7 +596,7 @@ const AnalysisArchive = () => {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15, duration: 0.4 }}
-            className="max-w-2xl mx-auto px-6 mb-6"
+            className="max-w-2xl mx-auto px-6 mb-4"
           >
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -619,7 +619,7 @@ const AnalysisArchive = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2, duration: 0.4 }}
-              className="flex items-center justify-center gap-6 mb-8"
+              className="flex items-center justify-center gap-6 mb-4"
             >
               <Button
                 variant="ghost"
@@ -848,7 +848,7 @@ const AnalysisArchive = () => {
             </>
           ) : (
             /* Calendar View for Selected Month */
-            <main className="max-w-2xl mx-auto px-6 py-8">
+            <main className="max-w-2xl mx-auto px-6 py-4">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
