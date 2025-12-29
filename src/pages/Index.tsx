@@ -37,8 +37,8 @@ const Index = () => {
           setCurrentScreen("ready");
           break;
         default:
-          // idle - show agent (will trigger new analysis)
-          setCurrentScreen("agent");
+          // idle - show zero state (waiting for next scheduled analysis)
+          setCurrentScreen("zero");
       }
     }
   }, [isLoaded, location.state, settings.hasOnboarded, settings.analysisStatus]);
@@ -62,7 +62,7 @@ const Index = () => {
 
   const handleClose = () => {
     patchSettings({ analysisStatus: "idle" });
-    setCurrentScreen("agent");
+    setCurrentScreen("zero");
   };
 
   // Show nothing until we determine the screen
