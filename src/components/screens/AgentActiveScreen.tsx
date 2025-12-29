@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Settings, Archive } from "lucide-react";
 import { AnimatedPixelPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
+import { useSettings } from "@/hooks/useSettings";
 
 interface AgentActiveScreenProps {
   onComplete: () => void;
@@ -11,12 +12,16 @@ interface AgentActiveScreenProps {
 
 const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
+  const { patchSettings } = useSettings();
 
   useEffect(() => {
+    // Set status to working when screen mounts
+    patchSettings({ analysisStatus: "working" });
+    
     // Auto-complete after 5 seconds
     const timer = setTimeout(onComplete, 5000);
     return () => clearTimeout(timer);
-  }, [onComplete]);
+  }, [onComplete, patchSettings]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
