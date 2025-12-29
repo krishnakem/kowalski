@@ -8,9 +8,10 @@ import { useSettings } from "@/hooks/useSettings";
 
 interface AgentActiveScreenProps {
   onComplete: () => void;
+  autoComplete?: boolean;
 }
 
-const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
+const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
   const { patchSettings } = useSettings();
 
@@ -18,11 +19,13 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
     // Set status to working when screen mounts
     patchSettings({ analysisStatus: "working" });
     
-    // Auto-complete after 5 seconds
-    const timer = setTimeout(onComplete, 5000);
-    return () => clearTimeout(timer);
+    // Only auto-complete after 5 seconds if autoComplete is true
+    if (autoComplete) {
+      const timer = setTimeout(onComplete, 5000);
+      return () => clearTimeout(timer);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onComplete]);
+  }, [onComplete, autoComplete]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">

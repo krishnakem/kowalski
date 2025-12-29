@@ -13,6 +13,7 @@ const Index = () => {
   const location = useLocation();
   const { settings, isLoaded, patchSettings } = useSettings();
   const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
+  const [waitingForNextAnalysis, setWaitingForNextAnalysis] = useState(false);
 
   // Determine initial screen based on user state
   useEffect(() => {
@@ -47,6 +48,7 @@ const Index = () => {
 
   const handleContinue = () => {
     patchSettings({ hasOnboarded: true, analysisStatus: "working" });
+    setWaitingForNextAnalysis(false);
     setCurrentScreen("agent");
   };
 
@@ -63,8 +65,9 @@ const Index = () => {
   };
 
   const handleClose = () => {
-    // Start a new analysis cycle for returning users
+    // User closed gazette - wait for next scheduled analysis
     patchSettings({ analysisStatus: "working" });
+    setWaitingForNextAnalysis(true);
     setCurrentScreen("agent");
   };
 
@@ -92,7 +95,10 @@ const Index = () => {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <AgentActiveScreen onComplete={handleAgentComplete} />
+            <AgentActiveScreen 
+              onComplete={handleAgentComplete} 
+              autoComplete={!waitingForNextAnalysis}
+            />
           </motion.div>
         )}
 
