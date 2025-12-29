@@ -86,16 +86,14 @@ const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScree
       >
         <p className="text-foreground font-sans text-lg leading-relaxed">
           Kowalski is working on curating your analysis.
-          <br />
-          <span className="text-foreground">We'll let you know when it's ready.</span>
         </p>
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.5, duration: duration.slow, ease: ease.cinematic }}
-          className="text-muted-foreground text-sm mt-4"
+          className="text-muted-foreground text-base mt-4"
         >
-          Next update: {nextAnalysis}
+          Your analysis will be ready {nextAnalysis.toLowerCase()}.
         </motion.p>
       </motion.div>
     </div>
