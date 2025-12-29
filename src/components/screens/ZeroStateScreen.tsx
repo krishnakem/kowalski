@@ -71,7 +71,7 @@ const TypewriterText = ({
           ? { duration: 0.3 } 
           : { duration: 0.5, repeat: Infinity, repeatType: "reverse" }
         }
-        className="inline-block w-3 h-6 bg-foreground ml-1 align-middle"
+        className="inline-block w-[3px] h-10 md:h-12 bg-foreground ml-1 align-middle"
       />
     </span>
   );
@@ -335,7 +335,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     <motion.span
                       animate={{ opacity: [1, 0] }}
                       transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
-                      className="inline-block w-3 h-6 bg-foreground ml-1 align-middle"
+                      className="inline-block w-[3px] h-10 md:h-12 bg-foreground ml-1 align-middle"
                     />
                   </motion.div>
                 )}
