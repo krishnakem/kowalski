@@ -61,8 +61,9 @@ const Index = () => {
   };
 
   const handleClose = () => {
-    patchSettings({ analysisStatus: "idle" });
-    setCurrentScreen("zero");
+    // Start a new analysis cycle for returning users
+    patchSettings({ analysisStatus: "working" });
+    setCurrentScreen("agent");
   };
 
   // Show nothing until we determine the screen
