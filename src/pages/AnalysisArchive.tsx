@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, ChevronDown } from "lucide-react";
+import { ArrowLeft, ChevronDown, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { WavingPenguin } from "@/components/icons/PixelIcons";
 import GazetteScreen, { AnalysisData } from "@/components/screens/GazetteScreen";
@@ -193,6 +194,31 @@ const AnalysisArchive = () => {
   const [selectedYear, setSelectedYear] = useState(2024);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("months");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Search filter function
+  const matchesSearch = (analysis: ArchivedAnalysis, query: string): boolean => {
+    if (!query.trim()) return true;
+    
+    const q = query.toLowerCase();
+    const dateStr = formatDate(analysis.data.date).toLowerCase();
+    const weekdayTitle = getWeekdayTitle(analysis.data.date).toLowerCase();
+    const location = analysis.data.location.toLowerCase();
+    const leadStory = analysis.leadStoryPreview.toLowerCase();
+    const sources = analysis.data.worldUpdates.map(u => u.source.toLowerCase()).join(" ");
+    const summaries = analysis.data.worldUpdates.map(u => u.summary.toLowerCase()).join(" ");
+    const circleNames = analysis.data.circleUpdates.map(u => u.name.toLowerCase()).join(" ");
+    
+    return (
+      dateStr.includes(q) ||
+      weekdayTitle.includes(q) ||
+      location.includes(q) ||
+      leadStory.includes(q) ||
+      sources.includes(q) ||
+      summaries.includes(q) ||
+      circleNames.includes(q)
+    );
+  };
 
   const handleBack = () => {
     if (viewMode === "analyses") {
@@ -221,24 +247,26 @@ const AnalysisArchive = () => {
     setViewMode("analyses");
   };
 
-  // Get analyses for selected month/year
+  // Get analyses for selected month/year with search filter
   const getAnalysesForMonth = (year: number, month: number) => {
     return archivedAnalyses.filter((analysis) => {
       const date = analysis.data.date;
-      return date.getFullYear() === year && date.getMonth() === month;
+      const matchesDate = date.getFullYear() === year && date.getMonth() === month;
+      return matchesDate && matchesSearch(analysis, searchQuery);
     });
   };
 
-  // Get months that have analyses for the selected year
+  // Get months that have analyses for the selected year (with search filter)
   const getMonthsWithAnalyses = (year: number) => {
-    const monthsSet = new Set<number>();
+    const monthsMap = new Map<number, number>();
     archivedAnalyses.forEach((analysis) => {
       const date = analysis.data.date;
-      if (date.getFullYear() === year) {
-        monthsSet.add(date.getMonth());
+      if (date.getFullYear() === year && matchesSearch(analysis, searchQuery)) {
+        const month = date.getMonth();
+        monthsMap.set(month, (monthsMap.get(month) || 0) + 1);
       }
     });
-    return monthsSet;
+    return monthsMap;
   };
 
   const monthsWithAnalyses = getMonthsWithAnalyses(selectedYear);
@@ -297,7 +325,7 @@ const AnalysisArchive = () => {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
-            className="pt-6 pb-8 px-6"
+            className="pt-6 pb-4 px-6"
           >
             <div className="max-w-2xl mx-auto">
               <h1 className="font-serif text-4xl md:text-5xl text-center text-foreground">
@@ -305,6 +333,25 @@ const AnalysisArchive = () => {
               </h1>
             </div>
           </motion.header>
+
+          {/* Search Bar */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15, duration: 0.4 }}
+            className="max-w-2xl mx-auto px-6 mb-6"
+          >
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search by date, source, or topic..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 bg-background border-border font-sans"
+              />
+            </div>
+          </motion.div>
 
           {viewMode === "months" ? (
             <>
@@ -352,8 +399,8 @@ const AnalysisArchive = () => {
                   className="grid grid-cols-3 md:grid-cols-4 gap-4"
                 >
                   {MONTHS.map((month, index) => {
-                    const hasAnalyses = monthsWithAnalyses.has(month.index);
-                    const analysesCount = getAnalysesForMonth(selectedYear, month.index).length;
+                    const analysesCount = monthsWithAnalyses.get(month.index) || 0;
+                    const hasAnalyses = analysesCount > 0;
                     
                     return (
                       <motion.button
@@ -384,7 +431,7 @@ const AnalysisArchive = () => {
                   })}
                 </motion.div>
 
-                {/* No analyses for year */}
+                {/* No analyses for year or search */}
                 {monthsWithAnalyses.size === 0 && (
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -392,13 +439,27 @@ const AnalysisArchive = () => {
                     transition={{ delay: 0.2, duration: 0.5 }}
                     className="flex flex-col items-center justify-center py-12 text-center"
                   >
-                    <WavingPenguin size={80} />
-                    <h2 className="font-serif text-xl text-foreground mt-6 mb-3">
-                      No Analyses in {selectedYear}
-                    </h2>
-                    <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
-                      Try selecting a different year.
-                    </p>
+                    {searchQuery.trim() ? (
+                      <>
+                        <Search className="w-12 h-12 text-muted-foreground mb-4" />
+                        <h2 className="font-serif text-xl text-foreground mb-3">
+                          No Results Found
+                        </h2>
+                        <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
+                          No analyses match "{searchQuery}" in {selectedYear}.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <WavingPenguin size={80} />
+                        <h2 className="font-serif text-xl text-foreground mt-6 mb-3">
+                          No Analyses in {selectedYear}
+                        </h2>
+                        <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
+                          Try selecting a different year.
+                        </p>
+                      </>
+                    )}
                   </motion.div>
                 )}
               </main>
@@ -413,13 +474,27 @@ const AnalysisArchive = () => {
                   transition={{ delay: 0.2, duration: 0.5 }}
                   className="flex flex-col items-center justify-center py-20 text-center"
                 >
-                  <WavingPenguin size={120} />
-                  <h2 className="font-serif text-xl text-foreground mt-8 mb-3">
-                    No Analyses
-                  </h2>
-                  <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
-                    No analyses found for {selectedMonthName} {selectedYear}.
-                  </p>
+                  {searchQuery.trim() ? (
+                    <>
+                      <Search className="w-12 h-12 text-muted-foreground mb-4" />
+                      <h2 className="font-serif text-xl text-foreground mb-3">
+                        No Results Found
+                      </h2>
+                      <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
+                        No analyses match "{searchQuery}" in {selectedMonthName} {selectedYear}.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <WavingPenguin size={120} />
+                      <h2 className="font-serif text-xl text-foreground mt-8 mb-3">
+                        No Analyses
+                      </h2>
+                      <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
+                        No analyses found for {selectedMonthName} {selectedYear}.
+                      </p>
+                    </>
+                  )}
                 </motion.div>
               ) : (
                 <motion.div
