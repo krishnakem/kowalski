@@ -6,6 +6,7 @@ import { AnimatedPixelPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
 import { ease, duration, spring } from "@/lib/animations";
+import { getNextAnalysisTime } from "@/lib/timeUtils";
 
 interface AgentActiveScreenProps {
   onComplete: () => void;
@@ -14,7 +15,8 @@ interface AgentActiveScreenProps {
 
 const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
-  const { patchSettings } = useSettings();
+  const { settings, patchSettings } = useSettings();
+  const nextAnalysis = getNextAnalysisTime(settings);
 
   useEffect(() => {
     // Set status to working when screen mounts
@@ -87,6 +89,14 @@ const AgentActiveScreen = ({ onComplete, autoComplete = true }: AgentActiveScree
           <br />
           <span className="text-foreground">We'll let you know when it's ready.</span>
         </p>
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5, duration: duration.slow, ease: ease.cinematic }}
+          className="text-muted-foreground text-sm mt-4"
+        >
+          Next update: {nextAnalysis}
+        </motion.p>
       </motion.div>
     </div>
   );
