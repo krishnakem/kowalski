@@ -16,7 +16,7 @@ const AgentActiveScreen = ({ onComplete }: AgentActiveScreenProps) => {
 
   const handleDevReset = () => {
     resetSettings();
-    window.location.reload();
+    window.location.replace("/");
   };
 
   useEffect(() => {

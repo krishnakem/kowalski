@@ -56,7 +56,7 @@ const GazetteScreen = ({ onClose, analysisData, isArchived = false }: GazetteScr
 
   const handleDevReset = () => {
     resetSettings();
-    window.location.reload();
+    window.location.replace("/");
   };
 
   const handleClose = () => {

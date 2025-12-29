@@ -16,7 +16,7 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
 
   const handleDevReset = () => {
     resetSettings();
-    window.location.reload();
+    window.location.replace("/");
   };
 
   const formattedDate = lastAnalysisDate
