@@ -29,7 +29,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   interests: [],
   hasOnboarded: false,
   analysisStatus: "idle",
-  location: "",
+  location: "Cupertino",
 };
 
 // Zod schema for validation and coercion
