@@ -171,7 +171,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
       }
       
       // Valid key - save and proceed
-      localStorage.setItem('kowalski_settings', JSON.stringify({
+      localStorage.setItem('kowalski-settings', JSON.stringify({
         apiKey,
         usageCap,
         digestCount,
