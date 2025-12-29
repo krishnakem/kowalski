@@ -301,7 +301,7 @@ const AnalysisArchive = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.3 }}
-          className="min-h-screen bg-background relative"
+          className="min-h-screen bg-background relative py-16 px-6"
         >
           {/* Back Button */}
           <motion.div
@@ -314,7 +314,7 @@ const AnalysisArchive = () => {
               variant="ghost"
               size="icon"
               onClick={handleBack}
-              className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+              className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
             >
               <ArrowLeft className="w-6 h-6" />
             </Button>
@@ -322,16 +322,14 @@ const AnalysisArchive = () => {
 
           {/* Header */}
           <motion.header
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-            className="pt-6 pb-4 px-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2, duration: 0.6 }}
+            className="text-center mb-12"
           >
-            <div className="max-w-2xl mx-auto">
-              <h1 className="font-serif text-4xl md:text-5xl text-center text-foreground">
-                {viewMode === "months" ? "Analysis Archive" : `${selectedMonthName} ${selectedYear}`}
-              </h1>
-            </div>
+            <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
+              {viewMode === "months" ? "Analysis Archive" : `${selectedMonthName} ${selectedYear}`}
+            </h1>
           </motion.header>
 
           {/* Search Bar */}
