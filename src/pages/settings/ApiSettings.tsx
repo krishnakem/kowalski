@@ -17,24 +17,31 @@ const ApiSettings = () => {
 
   useEffect(() => {
     if (isLoaded) {
-      originalApiKeyRef.current = settings.apiKey || "";
+      originalApiKeyRef.current = (settings.apiKey || "").trim();
     }
   }, [isLoaded]);
 
   const handleSave = async () => {
-    const apiKeyChanged = settings.apiKey !== originalApiKeyRef.current;
+    const nextApiKey = (settings.apiKey || "").trim();
+    const apiKeyChanged = nextApiKey !== originalApiKeyRef.current;
     
-    if (apiKeyChanged && settings.apiKey) {
+    if (apiKeyChanged && nextApiKey) {
       setIsValidating(true);
       setKeyError(null);
       
       try {
         const response = await fetch('https://api.openai.com/v1/models', {
-          headers: { 'Authorization': `Bearer ${settings.apiKey}` }
+          headers: { 'Authorization': `Bearer ${nextApiKey}` }
         });
         
-        if (response.status === 401) {
-          setKeyError('Invalid API key. Please check and try again.');
+        if (!response.ok) {
+          let msg = 'Could not validate key. Please try again.';
+          if (response.status === 401 || response.status === 403) {
+            msg = 'Invalid API key. Please check and try again.';
+          } else if (response.status === 429) {
+            msg = 'Rate limited while validating. Please try again shortly.';
+          }
+          setKeyError(msg);
           setIsValidating(false);
           return;
         }
@@ -47,8 +54,8 @@ const ApiSettings = () => {
       setIsValidating(false);
     }
     
-    saveSettings();
-    originalApiKeyRef.current = settings.apiKey;
+    saveSettings({ ...settings, apiKey: nextApiKey });
+    originalApiKeyRef.current = nextApiKey;
     toast.success("API settings saved");
     navigateBack("/settings");
   };
