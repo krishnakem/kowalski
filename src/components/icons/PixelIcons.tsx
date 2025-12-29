@@ -291,7 +291,7 @@ export const AnimatedPixelPenguin = ({ className, size = 160 }: { className?: st
 
 // Standalone waving penguin (matches the Mac screen penguin exactly)
 export const WavingPenguin = ({ className, size = 64 }: { className?: string; size?: number }) => (
-  <div className={className}>
+  <div className={className} style={{ willChange: "transform" }}>
     <svg width={size} height={size} viewBox="0 0 18 18" style={{ imageRendering: "pixelated" }}>
       {/* Body */}
       <rect x="5" y="8" width="8" height="10" fill="#1C1C1E" />
@@ -307,11 +307,18 @@ export const WavingPenguin = ({ className, size = 64 }: { className?: string; si
       {/* Beak */}
       <rect x="8" y="6" width="2" height="1" fill="#F9F8F5" />
       
-      {/* Waving flipper - animated with slower, more organic timing */}
+      {/* Waving flipper - smoother animation with GPU acceleration */}
       <motion.g
-        animate={{ rotate: [-12, 12, -12] }}
-        transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
-        style={{ transformOrigin: "13px 10px" }}
+        animate={{ rotate: [-10, 10, -10] }}
+        transition={{ 
+          duration: 1.4, 
+          repeat: Infinity, 
+          ease: [0.45, 0.05, 0.55, 0.95]
+        }}
+        style={{ 
+          transformOrigin: "13px 10px",
+          willChange: "transform"
+        }}
       >
         <rect x="13" y="8" width="2" height="4" fill="#1C1C1E" />
       </motion.g>
