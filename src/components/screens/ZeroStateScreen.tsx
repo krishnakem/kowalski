@@ -11,11 +11,19 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
-import { SETTINGS_KEY } from "@/hooks/useSettings";
+import { SETTINGS_KEY, DEFAULT_SETTINGS, SettingsData } from "@/hooks/useSettings";
 
 interface ZeroStateScreenProps {
   onContinue: () => void;
 }
+
+// Helper to save current onboarding state to localStorage
+const saveOnboardingProgress = (updates: Partial<SettingsData>) => {
+  const existing = localStorage.getItem(SETTINGS_KEY);
+  const current = existing ? JSON.parse(existing) : DEFAULT_SETTINGS;
+  const merged = { ...DEFAULT_SETTINGS, ...current, ...updates };
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+};
 
 type DigestCount = 1 | 2;
 type Step = "hook" | "routine" | "interests" | "key" | "instagram";
@@ -136,6 +144,12 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   };
 
   const handleRoutineContinue = () => {
+    // Save schedule settings before moving to interests
+    saveOnboardingProgress({
+      digestFrequency: digestCount || 1,
+      morningTime,
+      eveningTime,
+    });
     setStep("interests");
   };
 
@@ -152,6 +166,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   };
 
   const handleInterestsContinue = () => {
+    // Save interests before moving to API key step
+    saveOnboardingProgress({ interests });
     setStep("key");
   };
 
@@ -172,14 +188,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
       }
       
       // Valid key - save and proceed
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-        apiKey,
-        usageCap,
-        digestFrequency: digestCount,
-        morningTime,
-        eveningTime,
-        interests,
-      }));
+      saveOnboardingProgress({ apiKey, usageCap });
       setStep("instagram");
     } catch (error) {
       setKeyError('Could not validate key. Check your connection.');
@@ -581,7 +590,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
           >
             {/* Temporary dev skip button - DELETE BEFORE SHIPPING */}
             <button
-              onClick={() => setStep("instagram")}
+              onClick={() => {
+                saveOnboardingProgress({ usageCap });
+                setStep("instagram");
+              }}
               className="absolute -top-8 right-0 text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
             >
               Skip (dev only)
