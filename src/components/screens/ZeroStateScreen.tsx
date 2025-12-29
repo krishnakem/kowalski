@@ -471,9 +471,22 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             >
               <AnimatePresence>
                 {interests.map((interest, index) => {
-                  // Golden ratio distribution for organic scatter (tighter grouping)
-                  const posX = ((index * 61.8) % 40) + 30; // 30-70% horizontal
-                  const posY = ((index * 38.2) % 35) + 32; // 32-67% vertical
+                  // Predefined positions to avoid overlap while staying close
+                  const positions = [
+                    { x: 50, y: 30 },  // top center
+                    { x: 25, y: 45 },  // left
+                    { x: 75, y: 45 },  // right
+                    { x: 40, y: 60 },  // bottom left
+                    { x: 60, y: 60 },  // bottom right
+                    { x: 50, y: 75 },  // bottom center
+                    { x: 30, y: 25 },  // top left
+                    { x: 70, y: 25 },  // top right
+                    { x: 20, y: 65 },  // far left bottom
+                    { x: 80, y: 65 },  // far right bottom
+                  ];
+                  const pos = positions[index % positions.length];
+                  const posX = pos.x + ((index * 3) % 7) - 3; // slight offset
+                  const posY = pos.y + ((index * 5) % 5) - 2; // slight offset
                   
                   // Consistent rotation and sizing
                   const rotation = ((index * 7) % 25) - 12; // -12 to +12 degrees
