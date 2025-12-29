@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, ChevronDown, Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { WavingPenguin } from "@/components/icons/PixelIcons";
@@ -308,7 +308,79 @@ const MatchContextList = ({
   );
 };
 
-type ViewMode = "months" | "analyses";
+type ViewMode = "months" | "calendar";
+
+// Calendar component for month view
+const MonthCalendar = ({
+  year,
+  month,
+  analysesMap,
+  onDateClick,
+}: {
+  year: number;
+  month: number;
+  analysesMap: Map<number, ArchivedAnalysis[]>;
+  onDateClick: (analysis: ArchivedAnalysis) => void;
+}) => {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
+  const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  // Create array of day cells
+  const dayCells = [];
+  
+  // Empty cells for days before the first of the month
+  for (let i = 0; i < firstDayOfMonth; i++) {
+    dayCells.push(<div key={`empty-${i}`} className="aspect-square" />);
+  }
+  
+  // Day cells
+  for (let day = 1; day <= daysInMonth; day++) {
+    const analyses = analysesMap.get(day) || [];
+    const hasAnalysis = analyses.length > 0;
+    
+    dayCells.push(
+      <motion.button
+        key={day}
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: 0.01 * day, duration: 0.2 }}
+        disabled={!hasAnalysis}
+        onClick={() => hasAnalysis && onDateClick(analyses[0])}
+        className={`aspect-square flex flex-col items-center justify-center rounded-lg transition-all duration-200 relative
+          ${hasAnalysis 
+            ? "bg-primary/10 hover:bg-primary/20 cursor-pointer border-2 border-primary/30 hover:border-primary" 
+            : "text-muted-foreground/40 cursor-default"
+          }`}
+      >
+        <span className={`font-sans text-lg ${hasAnalysis ? "text-foreground font-medium" : ""}`}>
+          {day}
+        </span>
+        {hasAnalysis && (
+          <span className="absolute bottom-1 w-1.5 h-1.5 rounded-full bg-primary" />
+        )}
+      </motion.button>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-md mx-auto">
+      {/* Weekday headers */}
+      <div className="grid grid-cols-7 gap-2 mb-2">
+        {weekDays.map((day) => (
+          <div key={day} className="text-center font-sans text-xs text-muted-foreground uppercase tracking-wider py-2">
+            {day}
+          </div>
+        ))}
+      </div>
+      
+      {/* Calendar grid */}
+      <div className="grid grid-cols-7 gap-2">
+        {dayCells}
+      </div>
+    </div>
+  );
+};
 
 const AnalysisArchive = () => {
   const navigate = useNavigate();
@@ -347,7 +419,7 @@ const AnalysisArchive = () => {
   };
 
   const handleBack = () => {
-    if (viewMode === "analyses") {
+    if (viewMode === "calendar") {
       setViewMode("months");
       setSelectedMonth(null);
       return;
@@ -372,7 +444,7 @@ const AnalysisArchive = () => {
 
   const handleMonthClick = (monthIndex: number) => {
     setSelectedMonth(monthIndex);
-    setViewMode("analyses");
+    setViewMode("calendar");
   };
 
   // Get analyses for selected month/year with search filter
@@ -401,6 +473,19 @@ const AnalysisArchive = () => {
   const currentMonthAnalyses = selectedMonth !== null 
     ? getAnalysesForMonth(selectedYear, selectedMonth) 
     : [];
+
+  // Create a map of day -> analyses for the calendar
+  const analysesPerDay = useMemo(() => {
+    const dayMap = new Map<number, ArchivedAnalysis[]>();
+    if (selectedMonth === null) return dayMap;
+    
+    currentMonthAnalyses.forEach((analysis) => {
+      const day = analysis.data.date.getDate();
+      const existing = dayMap.get(day) || [];
+      dayMap.set(day, [...existing, analysis]);
+    });
+    return dayMap;
+  }, [selectedMonth, currentMonthAnalyses]);
 
   const selectedMonthName = selectedMonth !== null 
     ? MONTHS[selectedMonth].full 
@@ -694,78 +779,42 @@ const AnalysisArchive = () => {
               </main>
             </>
           ) : (
-            /* Analyses List for Selected Month */
+            /* Calendar View for Selected Month */
             <main className="max-w-2xl mx-auto px-6 py-8">
-              {currentMonthAnalyses.length === 0 ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2, duration: 0.5 }}
-                  className="flex flex-col items-center justify-center py-20 text-center"
-                >
-                  {searchQuery.trim() ? (
-                    <>
-                      <Search className="w-12 h-12 text-muted-foreground mb-4" />
-                      <h2 className="font-serif text-xl text-foreground mb-3">
-                        No Results Found
-                      </h2>
-                      <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
-                        No analyses match "{searchQuery}" in {selectedMonthName} {selectedYear}.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <WavingPenguin size={120} />
-                      <h2 className="font-serif text-xl text-foreground mt-8 mb-3">
-                        No Analyses
-                      </h2>
-                      <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
-                        No analyses found for {selectedMonthName} {selectedYear}.
-                      </p>
-                    </>
-                  )}
-                </motion.div>
-              ) : (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.2, duration: 0.4 }}
-                  className="space-y-6"
-                >
-                  {currentMonthAnalyses.map((analysis, index) => (
-                    <motion.article
-                      key={analysis.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.1 * (index + 1), duration: 0.4 }}
-                      className="group cursor-pointer"
-                      onClick={() => handleAnalysisClick(analysis)}
-                    >
-                      <div className="pb-6 border-b border-border">
-                        {/* Title */}
-                        <h2 className="font-serif text-xl text-foreground group-hover:text-primary transition-colors mb-1">
-                          {getWeekdayTitle(analysis.data.date)}
-                        </h2>
-                        
-                        {/* Date & Location */}
-                        <p className="font-sans text-xs text-muted-foreground uppercase tracking-wider mb-4">
-                          {formatDate(analysis.data.date)} • {analysis.data.location}
-                        </p>
-                        
-                        {/* Lead Story Preview */}
-                        <div className="flex gap-2">
-                          <span className="font-sans text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                            {analysis.data.worldUpdates[0].source}:
-                          </span>
-                          <p className="font-serif text-sm text-foreground/80 leading-relaxed line-clamp-2">
-                            {analysis.leadStoryPreview}
-                          </p>
-                        </div>
-                      </div>
-                    </motion.article>
-                  ))}
-                </motion.div>
-              )}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2, duration: 0.4 }}
+              >
+                <MonthCalendar
+                  year={selectedYear}
+                  month={selectedMonth!}
+                  analysesMap={analysesPerDay}
+                  onDateClick={handleAnalysisClick}
+                />
+                
+                {/* Legend */}
+                <div className="flex items-center justify-center gap-4 mt-8 text-sm font-sans text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-primary" />
+                    <span>Analysis available</span>
+                  </div>
+                </div>
+
+                {/* No analyses message */}
+                {currentMonthAnalyses.length === 0 && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.3, duration: 0.4 }}
+                    className="text-center mt-8"
+                  >
+                    <p className="text-muted-foreground font-sans text-sm">
+                      No analyses found for {selectedMonthName} {selectedYear}
+                    </p>
+                  </motion.div>
+                )}
+              </motion.div>
             </main>
           )}
         </motion.div>
