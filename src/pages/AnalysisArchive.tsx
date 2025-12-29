@@ -317,6 +317,7 @@ const AnalysisArchive = () => {
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("months");
   const [searchQuery, setSearchQuery] = useState("");
+  const [showAllResults, setShowAllResults] = useState(false);
 
   // Search filter function - searches through all analysis content
   const matchesSearch = (analysis: ArchivedAnalysis, query: string): boolean => {
@@ -497,7 +498,10 @@ const AnalysisArchive = () => {
                 type="text"
                 placeholder="Search by date, source, or topic..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setShowAllResults(false);
+                }}
                 className="pl-10 bg-background border-border font-sans"
               />
             </div>
@@ -528,7 +532,7 @@ const AnalysisArchive = () => {
                   transition={{ delay: 0.2, duration: 0.4 }}
                   className="space-y-6"
                 >
-                  {searchResults.map((analysis, index) => (
+                  {(showAllResults ? searchResults : searchResults.slice(0, 3)).map((analysis, index) => (
                     <motion.article
                       key={analysis.id}
                       initial={{ opacity: 0, y: 20 }}
@@ -561,6 +565,27 @@ const AnalysisArchive = () => {
                       </div>
                     </motion.article>
                   ))}
+                  
+                  {/* Show More/Less Results Button */}
+                  {searchResults.length > 3 && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: 0.3, duration: 0.4 }}
+                      className="flex justify-center pt-4"
+                    >
+                      <button
+                        onClick={() => setShowAllResults(!showAllResults)}
+                        className="text-sm text-primary hover:text-primary/80 font-sans font-medium transition-colors flex items-center gap-2 px-4 py-2 border border-primary/20 rounded-md hover:bg-primary/5"
+                      >
+                        {showAllResults ? (
+                          <>Show less</>
+                        ) : (
+                          <>Show {searchResults.length - 3} more results</>
+                        )}
+                      </button>
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
             </main>
