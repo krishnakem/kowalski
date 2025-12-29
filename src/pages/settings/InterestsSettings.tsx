@@ -9,8 +9,18 @@ import SettingsLayout from "@/components/layouts/SettingsLayout";
 
 const InterestsSettings = () => {
   const { navigateBack } = useFromScreen();
-  const { settings, setSettings, saveSettings } = useSettings();
+  const { settings, setSettings, saveSettings, isLoaded } = useSettings();
   const [interestInput, setInterestInput] = useState("");
+
+  if (!isLoaded) {
+    return (
+      <SettingsLayout title="Interests">
+        <div className="flex items-center justify-center h-48">
+          <p className="text-muted-foreground font-sans text-sm">Loading...</p>
+        </div>
+      </SettingsLayout>
+    );
+  }
 
   const handleAddInterest = () => {
     const trimmed = interestInput.trim();
