@@ -63,10 +63,8 @@ const Index = () => {
   };
 
   const handleClose = () => {
-    // User closed gazette - wait for next scheduled analysis
-    patchSettings({ analysisStatus: "working" });
-    setWaitingForNextAnalysis(true);
-    setCurrentScreen("agent");
+    // User closed gazette - go back to ready screen so they can re-open or navigate
+    setCurrentScreen("ready");
   };
 
   // Show nothing until we determine the screen
