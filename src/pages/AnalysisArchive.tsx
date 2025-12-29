@@ -223,7 +223,7 @@ const AnalysisArchive = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("months");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Search filter function
+  // Search filter function - searches through all analysis content
   const matchesSearch = (analysis: ArchivedAnalysis, query: string): boolean => {
     if (!query.trim()) return true;
     
@@ -235,6 +235,7 @@ const AnalysisArchive = () => {
     const sources = analysis.data.worldUpdates.map(u => u.source.toLowerCase()).join(" ");
     const summaries = analysis.data.worldUpdates.map(u => u.summary.toLowerCase()).join(" ");
     const circleNames = analysis.data.circleUpdates.map(u => u.name.toLowerCase()).join(" ");
+    const circleUpdates = analysis.data.circleUpdates.map(u => u.update.toLowerCase()).join(" ");
     
     return (
       dateStr.includes(q) ||
@@ -243,7 +244,8 @@ const AnalysisArchive = () => {
       leadStory.includes(q) ||
       sources.includes(q) ||
       summaries.includes(q) ||
-      circleNames.includes(q)
+      circleNames.includes(q) ||
+      circleUpdates.includes(q)
     );
   };
 
