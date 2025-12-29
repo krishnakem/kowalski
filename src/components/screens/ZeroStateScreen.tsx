@@ -529,6 +529,14 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   </>
                 )}
               </button>
+              
+              {/* Temporary dev skip button - DELETE BEFORE SHIPPING */}
+              <button
+                onClick={() => setStep("instagram")}
+                className="text-xs text-muted-foreground/50 hover:text-muted-foreground underline mt-4"
+              >
+                Skip for now (dev only)
+              </button>
             </motion.div>
           </motion.div>
         )}
