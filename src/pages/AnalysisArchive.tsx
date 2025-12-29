@@ -1,11 +1,11 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, Search, ChevronLeft, ChevronRight, ArrowLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { WavingPenguin } from "@/components/icons/PixelIcons";
-import GazetteScreen, { AnalysisData } from "@/components/screens/GazetteScreen";
+import GazetteScreen from "@/components/screens/GazetteScreen";
 import PageHeader from "@/components/layouts/PageHeader";
 import {
   DropdownMenu,
@@ -14,173 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ease, duration, spring, stagger } from "@/lib/animations";
-
-interface ArchivedAnalysis {
-  id: string;
-  data: AnalysisData;
-  leadStoryPreview: string;
-}
-
-// Mock data for demo purposes - expanded with more months
-const archivedAnalyses: ArchivedAnalysis[] = [
-  {
-    id: "1",
-    data: {
-      date: new Date("2025-12-27"),
-      location: "Sunnyvale",
-      circleUpdates: [
-        { name: "Sarah", update: "got engaged in Kyoto" },
-        { name: "Mike", update: "posted 3 photos from the launch" },
-        { name: "Elena", update: "started a new role at Stripe" },
-      ],
-      worldUpdates: [
-        {
-          source: "The Verge",
-          summary: "Apple's latest AI features transform how users interact with their devices, bringing contextual awareness to everyday tasks."
-        },
-        {
-          source: "Bloomberg",
-          summary: "Tech stocks rally as investors bet on continued AI momentum heading into the new year."
-        },
-        {
-          source: "Wired",
-          summary: "The future of wearables looks increasingly health-focused as new sensors enable continuous monitoring."
-        }
-      ]
-    },
-    leadStoryPreview: "Apple's latest AI features transform how users interact with their devices, bringing contextual awareness to everyday tasks."
-  },
-  {
-    id: "2",
-    data: {
-      date: new Date("2025-12-26"),
-      location: "Sunnyvale",
-      circleUpdates: [
-        { name: "James", update: "is traveling through Portugal" },
-        { name: "Lisa", update: "launched her new podcast" },
-      ],
-      worldUpdates: [
-        {
-          source: "TechCrunch",
-          summary: "The startup ecosystem sees renewed investor confidence as AI companies demonstrate sustainable business models."
-        },
-        {
-          source: "Reuters",
-          summary: "Global semiconductor demand expected to surge 15% in 2025 as AI workloads intensify."
-        },
-        {
-          source: "Ars Technica",
-          summary: "New open-source language models challenge proprietary alternatives in benchmark tests."
-        }
-      ]
-    },
-    leadStoryPreview: "The startup ecosystem sees renewed investor confidence as AI companies demonstrate sustainable business models."
-  },
-  {
-    id: "3",
-    data: {
-      date: new Date("2025-12-25"),
-      location: "Sunnyvale",
-      circleUpdates: [
-        { name: "David", update: "shared holiday photos from Colorado" },
-        { name: "Anna", update: "announced her engagement" },
-        { name: "Tom", update: "completed his marathon goal" },
-      ],
-      worldUpdates: [
-        {
-          source: "Wired",
-          summary: "Holiday tech gifts trend toward privacy-focused devices as consumers become more security conscious."
-        },
-        {
-          source: "The Verge",
-          summary: "Gaming consoles see record holiday sales as new exclusive titles drive demand."
-        },
-        {
-          source: "Engadget",
-          summary: "Smart home devices become mainstream with over 50% of households now owning at least one."
-        }
-      ]
-    },
-    leadStoryPreview: "Holiday tech gifts trend toward privacy-focused devices as consumers become more security conscious."
-  },
-  {
-    id: "4",
-    data: {
-      date: new Date("2025-11-15"),
-      location: "Sunnyvale",
-      circleUpdates: [
-        { name: "Rachel", update: "got promoted to senior engineer" },
-        { name: "Chris", update: "moved to Seattle" },
-      ],
-      worldUpdates: [
-        {
-          source: "TechCrunch",
-          summary: "November sees record venture capital deployment as investors rush to close end-of-year deals."
-        },
-        {
-          source: "Bloomberg",
-          summary: "Tech layoffs slow as companies stabilize after year of restructuring."
-        },
-        {
-          source: "Wired",
-          summary: "New AI regulations proposed in Congress spark industry debate."
-        }
-      ]
-    },
-    leadStoryPreview: "November sees record venture capital deployment as investors rush to close end-of-year deals."
-  },
-  {
-    id: "5",
-    data: {
-      date: new Date("2025-10-20"),
-      location: "Sunnyvale",
-      circleUpdates: [
-        { name: "Alex", update: "launched a new startup" },
-      ],
-      worldUpdates: [
-        {
-          source: "The Verge",
-          summary: "October brings major product launches as tech giants compete for holiday shopping season."
-        },
-        {
-          source: "Reuters",
-          summary: "Smartphone sales rebound after two-year decline."
-        },
-        {
-          source: "Ars Technica",
-          summary: "New browser technologies promise faster, more private web experience."
-        }
-      ]
-    },
-    leadStoryPreview: "October brings major product launches as tech giants compete for holiday shopping season."
-  }
-];
-
-const MONTHS = [
-  { short: "Jan", full: "January", index: 0 },
-  { short: "Feb", full: "February", index: 1 },
-  { short: "Mar", full: "March", index: 2 },
-  { short: "Apr", full: "April", index: 3 },
-  { short: "May", full: "May", index: 4 },
-  { short: "Jun", full: "June", index: 5 },
-  { short: "Jul", full: "July", index: 6 },
-  { short: "Aug", full: "August", index: 7 },
-  { short: "Sep", full: "September", index: 8 },
-  { short: "Oct", full: "October", index: 9 },
-  { short: "Nov", full: "November", index: 10 },
-  { short: "Dec", full: "December", index: 11 },
-];
-
-// Dynamically get years that have analyses
-const getAvailableYears = (): number[] => {
-  const yearsSet = new Set<number>();
-  archivedAnalyses.forEach((analysis) => {
-    yearsSet.add(analysis.data.date.getFullYear());
-  });
-  return Array.from(yearsSet).sort((a, b) => b - a); // Sort descending
-};
-
-const AVAILABLE_YEARS = getAvailableYears();
+import { useArchivedAnalyses, type ArchivedAnalysis } from "@/hooks/useArchivedAnalyses";
 
 const formatDate = (date: Date): string => {
   return date.toLocaleDateString("en-US", {
@@ -386,12 +220,23 @@ const MonthCalendar = ({
 const AnalysisArchive = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { analyses, getAvailableYears, MONTHS, isLoaded } = useArchivedAnalyses();
+  
+  const availableYears = useMemo(() => getAvailableYears(), [getAvailableYears]);
+  
   const [selectedAnalysis, setSelectedAnalysis] = useState<ArchivedAnalysis | null>(null);
-  const [selectedYear, setSelectedYear] = useState(AVAILABLE_YEARS[0] || 2024);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("months");
   const [searchQuery, setSearchQuery] = useState("");
   const [showAllResults, setShowAllResults] = useState(false);
+
+  // Set initial year when data loads
+  useEffect(() => {
+    if (availableYears.length > 0 && selectedYear === null) {
+      setSelectedYear(availableYears[0]);
+    }
+  }, [availableYears, selectedYear]);
 
   // Search filter function - searches through all analysis content
   const matchesSearch = (analysis: ArchivedAnalysis, query: string): boolean => {
@@ -449,18 +294,18 @@ const AnalysisArchive = () => {
   };
 
   // Get analyses for selected month/year with search filter
-  const getAnalysesForMonth = (year: number, month: number) => {
-    return archivedAnalyses.filter((analysis) => {
+  const getAnalysesForMonth = useCallback((year: number, month: number) => {
+    return analyses.filter((analysis) => {
       const date = analysis.data.date;
       const matchesDate = date.getFullYear() === year && date.getMonth() === month;
       return matchesDate && matchesSearch(analysis, searchQuery);
     });
-  };
+  }, [analyses, searchQuery]);
 
   // Get months that have analyses for the selected year (with search filter)
-  const getMonthsWithAnalyses = (year: number) => {
+  const getMonthsWithAnalyses = useCallback((year: number) => {
     const monthsMap = new Map<number, number>();
-    archivedAnalyses.forEach((analysis) => {
+    analyses.forEach((analysis) => {
       const date = analysis.data.date;
       if (date.getFullYear() === year && matchesSearch(analysis, searchQuery)) {
         const month = date.getMonth();
@@ -468,12 +313,25 @@ const AnalysisArchive = () => {
       }
     });
     return monthsMap;
-  };
+  }, [analyses, searchQuery]);
 
-  const monthsWithAnalyses = getMonthsWithAnalyses(selectedYear);
-  const currentMonthAnalyses = selectedMonth !== null 
-    ? getAnalysesForMonth(selectedYear, selectedMonth) 
-    : [];
+  // Check if a specific month has any analyses
+  const hasAnalysesInMonth = useCallback((year: number, month: number) => {
+    return analyses.some((analysis) => {
+      const date = analysis.data.date;
+      return date.getFullYear() === year && date.getMonth() === month;
+    });
+  }, [analyses]);
+
+  const monthsWithAnalyses = useMemo(() => 
+    selectedYear !== null ? getMonthsWithAnalyses(selectedYear) : new Map<number, number>()
+  , [selectedYear, getMonthsWithAnalyses]);
+  
+  const currentMonthAnalyses = useMemo(() =>
+    selectedMonth !== null && selectedYear !== null
+      ? getAnalysesForMonth(selectedYear, selectedMonth) 
+      : []
+  , [selectedMonth, selectedYear, getAnalysesForMonth]);
 
   // Create a map of day -> analyses for the calendar
   const analysesPerDay = useMemo(() => {
@@ -489,40 +347,38 @@ const AnalysisArchive = () => {
   }, [selectedMonth, currentMonthAnalyses]);
 
   // Check if adjacent months have analyses
-  const hasAnalysesInMonth = (year: number, month: number) => {
-    return archivedAnalyses.some((analysis) => {
-      const date = analysis.data.date;
-      return date.getFullYear() === year && date.getMonth() === month;
-    });
-  };
-
   const hasPrevMonth = useMemo(() => {
-    if (selectedMonth === null) return false;
+    if (selectedMonth === null || selectedYear === null) return false;
     const prevMonth = selectedMonth === 0 ? 11 : selectedMonth - 1;
     const prevYear = selectedMonth === 0 ? selectedYear - 1 : selectedYear;
     return hasAnalysesInMonth(prevYear, prevMonth);
-  }, [selectedMonth, selectedYear]);
+  }, [selectedMonth, selectedYear, hasAnalysesInMonth]);
 
   const hasNextMonth = useMemo(() => {
-    if (selectedMonth === null) return false;
+    if (selectedMonth === null || selectedYear === null) return false;
     const nextMonth = selectedMonth === 11 ? 0 : selectedMonth + 1;
     const nextYear = selectedMonth === 11 ? selectedYear + 1 : selectedYear;
     return hasAnalysesInMonth(nextYear, nextMonth);
-  }, [selectedMonth, selectedYear]);
+  }, [selectedMonth, selectedYear, hasAnalysesInMonth]);
 
   const selectedMonthName = selectedMonth !== null 
     ? MONTHS[selectedMonth].full 
     : "";
 
   // Get all matching analyses across all years when searching
-  const getAllMatchingAnalyses = () => {
-    return archivedAnalyses
+  const getAllMatchingAnalyses = useCallback(() => {
+    return analyses
       .filter((analysis) => matchesSearch(analysis, searchQuery))
       .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
-  };
+  }, [analyses, searchQuery]);
 
   const isSearching = searchQuery.trim().length > 0;
   const searchResults = isSearching ? getAllMatchingAnalyses() : [];
+
+  // Show loading state while data initializes
+  if (!isLoaded || selectedYear === null) {
+    return <div className="min-h-screen bg-background" />;
+  }
 
   return (
     <AnimatePresence mode="wait">
@@ -745,7 +601,7 @@ const AnalysisArchive = () => {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="bg-background border-border z-50">
-                      {AVAILABLE_YEARS.map((year) => (
+                      {availableYears.map((year) => (
                         <DropdownMenuItem
                           key={year}
                           onClick={() => setSelectedYear(year)}
