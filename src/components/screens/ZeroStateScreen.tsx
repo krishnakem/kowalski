@@ -845,7 +845,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               >
                 <h2 className="text-5xl font-serif text-foreground leading-tight">
                   Last step{userName.trim() ? ` ${userName.trim()}` : ""},<br />
-                  connect your Instagram.
+                  Connect your Instagram.
                 </h2>
                 <p className="text-muted-foreground text-sm font-sans">
                   Kowalski interacts with Instagram in a local sandbox. Your credentials never leave your device.
