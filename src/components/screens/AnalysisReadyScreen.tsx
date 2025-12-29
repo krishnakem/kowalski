@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/layouts/PageHeader";
 import { ease, duration, spring } from "@/lib/animations";
 import { useSettings } from "@/hooks/useSettings";
-import { getTimeOfDayGreeting, getNextAnalysisTime } from "@/lib/timeUtils";
+import { getTimeOfDayGreeting } from "@/lib/timeUtils";
 
 
 interface AnalysisReadyScreenProps {
@@ -19,7 +19,6 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
   const { settings } = useSettings();
 
   const greeting = getTimeOfDayGreeting();
-  const nextAnalysis = getNextAnalysisTime(settings);
 
   const title = settings.userName?.trim() 
     ? `${greeting}, ${settings.userName.trim()}` 
@@ -85,14 +84,6 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
           Your analysis is ready
         </motion.p>
 
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 0.6 }}
-          transition={{ delay: 0.5, duration: duration.slow }}
-          className="text-sm text-muted-foreground"
-        >
-          Next update: {nextAnalysis}
-        </motion.p>
         
         <motion.button
           initial={{ opacity: 0, y: 12 }}
