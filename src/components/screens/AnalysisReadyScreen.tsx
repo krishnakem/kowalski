@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Settings, Archive } from "lucide-react";
 import { WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
+import PageHeader from "@/components/layouts/PageHeader";
 import { ease, duration, spring } from "@/lib/animations";
 import { useSettings } from "@/hooks/useSettings";
 
@@ -25,42 +26,39 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
       })
     : null;
 
+  const title = settings.userName?.trim() 
+    ? `${settings.userName.trim()}, your analysis is ready` 
+    : "Your analysis is ready";
+
+  const leftAction = (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => navigate("/archive", { state: { from: "ready" } })}
+      className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
+    >
+      <Archive className="w-8 h-8" />
+    </Button>
+  );
+
+  const rightAction = (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => navigate("/settings", { state: { from: "ready" } })}
+      className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
+    >
+      <Settings className="w-8 h-8" />
+    </Button>
+  );
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
-
-      {/* Archive Button */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3, duration: duration.slow, ease: ease.cinematic }}
-        className="absolute top-6 left-6"
-      >
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => navigate("/archive", { state: { from: "ready" } })}
-          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-        >
-          <Archive className="w-8 h-8" />
-        </Button>
-      </motion.div>
-
-      {/* Settings Button */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3, duration: duration.slow, ease: ease.cinematic }}
-        className="absolute top-6 right-6"
-      >
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => navigate("/settings", { state: { from: "ready" } })}
-          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-        >
-          <Settings className="w-8 h-8" />
-        </Button>
-      </motion.div>
+      <PageHeader 
+        title="" 
+        leftAction={leftAction}
+        rightAction={rightAction}
+      />
 
       {/* Penguin */}
       <motion.div
@@ -80,7 +78,7 @@ const AnalysisReadyScreen = ({ onViewAnalysis, lastAnalysisDate }: AnalysisReady
         className="text-center max-w-sm space-y-6"
       >
         <h1 className="text-4xl font-serif text-foreground">
-          {settings.userName?.trim() ? `${settings.userName.trim()}, your analysis is ready` : "Your analysis is ready"}
+          {title}
         </h1>
         
         <motion.button

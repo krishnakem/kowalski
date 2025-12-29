@@ -1,7 +1,6 @@
 import { ReactNode } from "react";
-import { ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useFromScreen } from "@/hooks/useFromScreen";
+import PageHeader from "./PageHeader";
 
 interface SettingsLayoutProps {
   title: string;
@@ -20,17 +19,9 @@ const SettingsLayout = ({ title, children }: SettingsLayoutProps) => {
 
   return (
     <div className="min-h-screen bg-background text-foreground py-16 px-6 relative">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={handleBack}
-        className="absolute top-6 left-6 text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-      >
-        <ArrowLeft className="w-6 h-6" />
-      </Button>
+      <PageHeader title={title} onBack={handleBack} />
 
       <div className="max-w-md mx-auto space-y-8 text-center">
-        <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">{title}</h1>
         {children}
       </div>
     </div>

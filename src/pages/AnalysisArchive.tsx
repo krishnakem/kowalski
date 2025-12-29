@@ -1,11 +1,12 @@
 import { useState, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, ChevronDown, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { WavingPenguin } from "@/components/icons/PixelIcons";
 import GazetteScreen, { AnalysisData } from "@/components/screens/GazetteScreen";
+import PageHeader from "@/components/layouts/PageHeader";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -548,48 +549,12 @@ const AnalysisArchive = () => {
           transition={{ duration: duration.normal, ease: ease.cinematic }}
           className="min-h-screen bg-background relative py-16 px-6"
         >
-          {/* Back Button */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3, duration: 0.5 }}
-            className="absolute top-6 left-6 z-10"
-          >
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleBack}
-              className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-            >
-              <ArrowLeft className="w-6 h-6" />
-            </Button>
-          </motion.div>
 
-          {/* Header */}
-          <motion.header
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.2, duration: 0.6 }}
-            className="text-center mb-4"
-          >
-            <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-2 tracking-tight">
-              Analysis Archive
-            </h1>
-
-            {/* Reserve space so the search bar doesn't jump when typing */}
-            <p
-              className={`font-sans text-muted-foreground h-6 max-w-2xl mx-auto truncate transition-opacity ${
-                isSearching ? "opacity-100" : "opacity-0"
-              }`}
-              aria-live="polite"
-            >
-              {isSearching
-                ? `${searchResults.length} ${
-                    searchResults.length === 1 ? "result" : "results"
-                  } for "${searchQuery}"`
-                : "\u00A0"}
-            </p>
-          </motion.header>
+          <PageHeader 
+            title="Analysis Archive" 
+            onBack={handleBack}
+            subtitle={isSearching ? `${searchResults.length} ${searchResults.length === 1 ? "result" : "results"} for "${searchQuery}"` : undefined}
+          />
 
           {/* Search Bar */}
           <motion.div
