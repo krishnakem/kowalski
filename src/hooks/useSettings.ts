@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { z } from "zod";
 
 export const SETTINGS_KEY = "kowalski-settings";
 
@@ -27,6 +28,27 @@ export const DEFAULT_SETTINGS: SettingsData = {
   analysisStatus: "idle",
 };
 
+// Zod schema for validation and coercion
+const settingsSchema = z.object({
+  digestFrequency: z.coerce.number().pipe(z.union([z.literal(1), z.literal(2)])).catch(1),
+  morningTime: z.string().catch("8:00 AM"),
+  eveningTime: z.string().catch("6:00 PM"),
+  apiKey: z.string().catch(""),
+  usageCap: z.coerce.number().min(1).catch(10),
+  interests: z.array(z.string()).catch([]),
+  hasOnboarded: z.boolean().catch(false),
+  analysisStatus: z.enum(["idle", "working", "ready"]).catch("idle"),
+  lastAnalysisDate: z.string().optional(),
+});
+
+const normalizeSettings = (raw: unknown): SettingsData => {
+  const parsed = settingsSchema.safeParse(raw);
+  if (parsed.success) {
+    return { ...DEFAULT_SETTINGS, ...parsed.data };
+  }
+  return DEFAULT_SETTINGS;
+};
+
 export const useSettings = () => {
   const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -36,7 +58,7 @@ export const useSettings = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
+        setSettings(normalizeSettings(parsed));
       } catch (e) {
         console.error("Failed to parse settings:", e);
       }
@@ -62,7 +84,7 @@ export const useSettings = () => {
   const patchSettings = (updates: Partial<SettingsData>) => {
     const existing = localStorage.getItem(SETTINGS_KEY);
     const current = existing ? JSON.parse(existing) : DEFAULT_SETTINGS;
-    const merged = { ...DEFAULT_SETTINGS, ...current, ...updates };
+    const merged = normalizeSettings({ ...current, ...updates });
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
     setSettings(merged);
   };

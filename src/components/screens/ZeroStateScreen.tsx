@@ -12,7 +12,7 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { useSettings } from "@/hooks/useSettings";
-import { TIME_OPTIONS } from "@/lib/constants";
+import { TIME_OPTIONS, MORNING_TIME_OPTIONS, EVENING_TIME_OPTIONS } from "@/lib/constants";
 
 interface ZeroStateScreenProps {
   onContinue: () => void;
@@ -129,6 +129,16 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const handleRoutineSelect = (count: DigestCount) => {
     setDigestCount(count);
+    
+    // Clamp times to valid ranges when switching to twice daily
+    if (count === 2) {
+      if (!MORNING_TIME_OPTIONS.includes(morningTime)) {
+        setMorningTime("8:00 AM");
+      }
+      if (!EVENING_TIME_OPTIONS.includes(eveningTime)) {
+        setEveningTime("6:00 PM");
+      }
+    }
   };
 
   const handleRoutineContinue = () => {
@@ -357,7 +367,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                         className="bg-transparent border-2 border-foreground/20 px-6 py-3 font-sans text-foreground 
                                    focus:border-foreground outline-none transition-colors cursor-pointer"
                       >
-                        {TIME_OPTIONS.map((time) => (
+                        {(digestCount === 2 ? MORNING_TIME_OPTIONS : TIME_OPTIONS).map((time) => (
                           <option key={time} value={time} className="bg-background">
                             {time}
                           </option>
@@ -382,7 +392,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                           className="bg-transparent border-2 border-foreground/20 px-6 py-3 font-sans text-foreground 
                                      focus:border-foreground outline-none transition-colors cursor-pointer"
                         >
-                          {TIME_OPTIONS.map((time) => (
+                          {EVENING_TIME_OPTIONS.map((time) => (
                             <option key={time} value={time} className="bg-background">
                               {time}
                             </option>
