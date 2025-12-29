@@ -584,9 +584,9 @@ const AnalysisArchive = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2, duration: 0.4 }}
-              className="flex items-center justify-center gap-4 mb-4"
+              className="max-w-2xl mx-auto px-6 mb-4 relative"
             >
-              {/* Back to months button */}
+              {/* Back button aligned with search icon */}
               <Button
                 variant="ghost"
                 size="icon"
@@ -594,12 +594,13 @@ const AnalysisArchive = () => {
                   setViewMode("months");
                   setSelectedMonth(null);
                 }}
-                className="text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors"
+                className="absolute left-6 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground hover:bg-transparent transition-colors h-8 w-8"
               >
-                <ArrowLeft className="w-5 h-5" />
+                <ArrowLeft className="w-4 h-4" />
               </Button>
 
-              <div className="flex items-center gap-4">
+              {/* Centered month navigation */}
+              <div className="flex items-center justify-center gap-4">
                 <Button
                   variant="ghost"
                   size="icon"
