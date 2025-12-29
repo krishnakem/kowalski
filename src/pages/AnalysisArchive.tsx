@@ -24,7 +24,7 @@ const archivedAnalyses: ArchivedAnalysis[] = [
   {
     id: "1",
     data: {
-      date: new Date("2024-12-27"),
+      date: new Date("2025-12-27"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "Sarah", update: "got engaged in Kyoto" },
@@ -51,7 +51,7 @@ const archivedAnalyses: ArchivedAnalysis[] = [
   {
     id: "2",
     data: {
-      date: new Date("2024-12-26"),
+      date: new Date("2025-12-26"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "James", update: "is traveling through Portugal" },
@@ -77,7 +77,7 @@ const archivedAnalyses: ArchivedAnalysis[] = [
   {
     id: "3",
     data: {
-      date: new Date("2024-12-25"),
+      date: new Date("2025-12-25"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "David", update: "shared holiday photos from Colorado" },
@@ -104,7 +104,7 @@ const archivedAnalyses: ArchivedAnalysis[] = [
   {
     id: "4",
     data: {
-      date: new Date("2024-11-15"),
+      date: new Date("2025-11-15"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "Rachel", update: "got promoted to senior engineer" },
@@ -130,7 +130,7 @@ const archivedAnalyses: ArchivedAnalysis[] = [
   {
     id: "5",
     data: {
-      date: new Date("2024-10-20"),
+      date: new Date("2025-10-20"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "Alex", update: "launched a new startup" },
