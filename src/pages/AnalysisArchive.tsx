@@ -313,7 +313,7 @@ const AnalysisArchive = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [selectedAnalysis, setSelectedAnalysis] = useState<ArchivedAnalysis | null>(null);
-  const [selectedYear, setSelectedYear] = useState(2024);
+  const [selectedYear, setSelectedYear] = useState(AVAILABLE_YEARS[0] || 2024);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("months");
   const [searchQuery, setSearchQuery] = useState("");
