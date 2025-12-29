@@ -48,32 +48,13 @@ const InterestsSettings = () => {
 
   useEffect(() => {
     const saved = localStorage.getItem("kowalski-settings");
-    const onboardingSettings = localStorage.getItem("kowalski_settings");
-    let onboardingInterests: string[] = [];
-    
-    if (onboardingSettings) {
-      try {
-        const parsed = JSON.parse(onboardingSettings);
-        onboardingInterests = parsed.interests || [];
-      } catch (e) {
-        console.error("Failed to parse onboarding settings:", e);
-      }
-    }
-    
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Merge interests from both sources (unique values only)
-        const combinedInterests = [...new Set([
-          ...(parsed.interests || []),
-          ...onboardingInterests
-        ])];
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed, interests: combinedInterests });
+        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
       } catch (e) {
         console.error("Failed to parse settings:", e);
       }
-    } else if (onboardingInterests.length > 0) {
-      setSettings(prev => ({ ...prev, interests: onboardingInterests }));
     }
   }, []);
 
