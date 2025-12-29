@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, ChevronDown, Search } from "lucide-react";
@@ -192,6 +192,24 @@ const formatDate = (date: Date): string => {
 const getWeekdayTitle = (date: Date): string => {
   const weekday = date.toLocaleDateString("en-US", { weekday: "long" });
   return `The ${weekday} Analysis`;
+};
+
+// Highlight matching text in search results
+const highlightMatch = (text: string, query: string): React.ReactNode => {
+  if (!query.trim()) return text;
+  
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+  const parts = text.split(regex);
+  
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <mark key={i} className="bg-primary/20 text-foreground rounded-sm px-0.5">
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
 };
 
 type ViewMode = "months" | "analyses";
@@ -424,17 +442,17 @@ const AnalysisArchive = () => {
                     >
                       <div className="pb-6 border-b border-border">
                         <h2 className="font-serif text-xl text-foreground group-hover:text-primary transition-colors mb-1">
-                          {getWeekdayTitle(analysis.data.date)}
+                          {highlightMatch(getWeekdayTitle(analysis.data.date), searchQuery)}
                         </h2>
                         <p className="font-sans text-xs text-muted-foreground uppercase tracking-wider mb-4">
-                          {formatDate(analysis.data.date)} • {analysis.data.location}
+                          {highlightMatch(formatDate(analysis.data.date), searchQuery)} • {highlightMatch(analysis.data.location, searchQuery)}
                         </p>
                         <div className="flex gap-2">
                           <span className="font-sans text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                            {analysis.data.worldUpdates[0].source}:
+                            {highlightMatch(analysis.data.worldUpdates[0].source, searchQuery)}:
                           </span>
                           <p className="font-serif text-sm text-foreground/80 leading-relaxed line-clamp-2">
-                            {analysis.leadStoryPreview}
+                            {highlightMatch(analysis.leadStoryPreview, searchQuery)}
                           </p>
                         </div>
                       </div>
