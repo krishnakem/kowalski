@@ -62,20 +62,20 @@ const Settings = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground p-6 md:p-12 relative">
+    <div className="min-h-screen bg-background text-foreground py-16 px-6 relative">
       {/* Back Button */}
       <Button
         variant="ghost"
         size="icon"
         onClick={handleBack}
-        className="absolute top-6 left-6 text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity"
+        className="absolute top-6 left-6 text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
       >
         <ArrowLeft className="w-6 h-6" />
       </Button>
 
       <div className="max-w-md mx-auto space-y-8 text-center">
         {/* Header */}
-        <h1 className="font-serif text-4xl md:text-5xl text-center">Settings</h1>
+        <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">Settings</h1>
 
         {/* Analysis Frequency */}
         <div className="space-y-3">
