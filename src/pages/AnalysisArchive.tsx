@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { WavingPenguin } from "@/components/icons/PixelIcons";
 import GazetteScreen, { AnalysisData } from "@/components/screens/GazetteScreen";
@@ -114,6 +115,7 @@ const AnalysisArchive = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [selectedAnalysis, setSelectedAnalysis] = useState<ArchivedAnalysis | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const handleBack = () => {
     const from = location.state?.from;
@@ -134,7 +136,32 @@ const AnalysisArchive = () => {
 
   // For demo: toggle between empty and populated state
   const showEmptyState = false; // Change to true to see empty state
-  const analyses = showEmptyState ? [] : archivedAnalyses;
+  
+  // Filter analyses based on search query
+  const filteredAnalyses = archivedAnalyses.filter((analysis) => {
+    if (!searchQuery.trim()) return true;
+    
+    const query = searchQuery.toLowerCase();
+    const dateStr = formatDate(analysis.data.date).toLowerCase();
+    const weekdayTitle = getWeekdayTitle(analysis.data.date).toLowerCase();
+    const location = analysis.data.location.toLowerCase();
+    const leadStory = analysis.leadStoryPreview.toLowerCase();
+    const sources = analysis.data.worldUpdates.map(u => u.source.toLowerCase()).join(" ");
+    const summaries = analysis.data.worldUpdates.map(u => u.summary.toLowerCase()).join(" ");
+    const circleNames = analysis.data.circleUpdates.map(u => u.name.toLowerCase()).join(" ");
+    
+    return (
+      dateStr.includes(query) ||
+      weekdayTitle.includes(query) ||
+      location.includes(query) ||
+      leadStory.includes(query) ||
+      sources.includes(query) ||
+      summaries.includes(query) ||
+      circleNames.includes(query)
+    );
+  });
+
+  const analyses = showEmptyState ? [] : filteredAnalyses;
 
   return (
     <AnimatePresence mode="wait">
@@ -192,8 +219,43 @@ const AnalysisArchive = () => {
             </div>
           </motion.header>
 
+          {/* Search Bar */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, duration: 0.4 }}
+            className="max-w-2xl mx-auto px-6 mb-6"
+          >
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search by date, source, or topic..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 bg-background border-border font-sans"
+              />
+            </div>
+          </motion.div>
+
           <main className="max-w-2xl mx-auto px-6 py-8">
-            {analyses.length === 0 ? (
+            {analyses.length === 0 && searchQuery.trim() ? (
+              /* No Results State */
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2, duration: 0.5 }}
+                className="flex flex-col items-center justify-center py-20 text-center"
+              >
+                <Search className="w-12 h-12 text-muted-foreground mb-4" />
+                <h2 className="font-serif text-xl text-foreground mb-3">
+                  No Results Found
+                </h2>
+                <p className="text-muted-foreground font-sans text-sm max-w-xs leading-relaxed">
+                  No analyses match "{searchQuery}". Try a different search term.
+                </p>
+              </motion.div>
+            ) : analyses.length === 0 ? (
               /* Empty State */
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
