@@ -40,8 +40,9 @@ const Settings = memo(() => {
   const handleDevReset = useCallback(() => {
     resetSettings();
     clearAnalyses();
-    navigate("/", { replace: true, state: {} });
-  }, [resetSettings, clearAnalyses, navigate]);
+    // Hard reload to ensure all in-memory state is cleared
+    window.location.assign("/");
+  }, [resetSettings, clearAnalyses]);
 
   const handleSeedDemo = useCallback(() => {
     seedDemoAnalyses(settings, 7);

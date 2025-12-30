@@ -457,7 +457,33 @@ const AnalysisArchive = () => {
   const searchResults = isSearching ? getAllMatchingAnalyses() : [];
 
   // Show loading state while data initializes
-  if (!isLoaded || selectedYear === null) {
+  if (!isLoaded) {
+    return <div className="min-h-screen bg-background" />;
+  }
+
+  // Empty state
+  if (analyses.length === 0) {
+    return (
+      <motion.div
+        key="archive-empty"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: duration.normal, ease: ease.cinematic }}
+        className="min-h-screen bg-background relative py-16 px-6"
+      >
+        <PageHeader title="Analysis Archive" onBack={handleBack} />
+
+        <main className="max-w-2xl mx-auto px-6 py-16 text-center">
+          <h2 className="font-serif text-2xl text-foreground mb-3">No analyses yet</h2>
+          <p className="text-muted-foreground font-sans text-sm max-w-sm mx-auto">
+            Your archive will appear here after you’ve generated analyses.
+          </p>
+        </main>
+      </motion.div>
+    );
+  }
+
+  if (selectedYear === null) {
     return <div className="min-h-screen bg-background" />;
   }
 
