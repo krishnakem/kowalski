@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { Eye, EyeOff, Instagram, Check, Loader2 } from "lucide-react";
-import { 
-  PixelSun, 
-  PixelMoon, 
+import {
+  PixelSun,
+  PixelMoon,
   PixelArrow,
   WavingPenguin
 } from "../icons/PixelIcons";
@@ -22,12 +22,12 @@ type DigestCount = 1 | 2;
 type Step = "hook" | "name" | "routine" | "interests" | "key" | "instagram";
 type InstagramPhase = "trigger" | "connecting" | "success";
 
-const TypewriterText = ({ 
-  text, 
+const TypewriterText = ({
+  text,
   onComplete,
-  speed = 90 
-}: { 
-  text: string; 
+  speed = 90
+}: {
+  text: string;
   onComplete: () => void;
   speed?: number;
 }) => {
@@ -40,25 +40,25 @@ const TypewriterText = ({
     hasStarted.current = true;
 
     let index = 0;
-    
+
     const typeNext = () => {
       if (index < text.length) {
         setDisplayedText(text.slice(0, index + 1));
         const char = text[index];
         index++;
-        
+
         // Variable delay for natural feel
         let delay = speed + Math.random() * 30; // Base + slight randomness
         if (char === '.' || char === ',' || char === '!') delay += 150; // Pause after punctuation
         if (char === ' ') delay -= 10; // Faster for spaces
-        
+
         setTimeout(typeNext, delay);
       } else {
         setIsComplete(true);
         onComplete();
       }
     };
-    
+
     typeNext();
   }, [text, speed, onComplete]);
 
@@ -67,8 +67,8 @@ const TypewriterText = ({
       {displayedText}
       <motion.span
         animate={{ opacity: isComplete ? 0 : [1, 0] }}
-        transition={isComplete 
-          ? { duration: 0.3 } 
+        transition={isComplete
+          ? { duration: 0.3 }
           : { duration: 0.5, repeat: Infinity, repeatType: "reverse" }
         }
         className="inline-block w-[3px] h-10 md:h-12 bg-foreground ml-1 align-middle"
@@ -136,7 +136,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const handleRoutineSelect = (count: DigestCount) => {
     setDigestCount(count);
-    
+
     // Clamp times to valid ranges when switching to twice daily
     if (count === 2) {
       if (!MORNING_TIME_OPTIONS.includes(morningTime)) {
@@ -178,20 +178,20 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const handleInitialize = async () => {
     if (!apiKey) return;
-    
+
     setIsValidating(true);
     setKeyError(null);
-    
+
     try {
       const response = await fetch('https://api.openai.com/v1/models', {
         headers: { 'Authorization': `Bearer ${apiKey}` }
       });
-      
+
       if (response.status === 401) {
         setKeyError('Invalid API key. Please check and try again.');
         return;
       }
-      
+
       // Valid key - save and proceed
       patchSettings({ apiKey, usageCap });
       setStep("instagram");
@@ -202,22 +202,66 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
     }
   };
 
+  const webviewRef = useRef<Electron.WebviewTag>(null);
+
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) return;
+
+    const checkLoginStatus = async (event?: any) => {
+      // Use the event URL if available (fastest), fallback to asking the webview
+      const currentUrl = event?.url || webview.getURL();
+      console.log('Checking URL:', currentUrl);
+
+      // 1. Exact Root Match (Most common for successful login)
+      const isRoot = currentUrl === 'https://www.instagram.com/' || currentUrl === 'https://www.instagram.com';
+
+      // 2. "Not Login" Heuristic (Backup)
+      const isInstagram = currentUrl.includes('instagram.com');
+      const isLoginOrChallenge = currentUrl.includes('/accounts/login') ||
+        currentUrl.includes('/challenge/') ||
+        currentUrl.includes('/two_factor/');
+
+      if ((isRoot) || (isInstagram && !isLoginOrChallenge)) {
+        console.log('Login Detected! Moving to success state...');
+
+        // IMMEDIATE: Hiding Webview / Showing Success
+        setInstagramPhase("success");
+
+        try {
+          await (window as any).api.saveLoginSession();
+
+          setTimeout(() => {
+            setDialogOpen(false);
+            patchSettings({ hasOnboarded: true, analysisStatus: "working" });
+            onContinue();
+          }, 500); // reduced delay
+        } catch (err) {
+          console.error('Failed to save session', err);
+        }
+      }
+    };
+
+    // Listen to multiple events for reliability
+    webview.addEventListener('did-navigate', checkLoginStatus);
+    webview.addEventListener('did-navigate-in-page', checkLoginStatus);
+    webview.addEventListener('dom-ready', checkLoginStatus);
+
+    // Polling fallback: Check constantly for instant reaction
+    const pollInterval = setInterval(checkLoginStatus, 200);
+
+    return () => {
+      webview.removeEventListener('did-navigate', checkLoginStatus);
+      webview.removeEventListener('did-navigate-in-page', checkLoginStatus);
+      webview.removeEventListener('dom-ready', checkLoginStatus);
+      clearInterval(pollInterval);
+    };
+  }, [dialogOpen]);
+
   const handleConnectClick = () => {
     setDialogOpen(true);
     setInstagramPhase("connecting");
-    
-    // Simulate login with 3 second timer
-    setTimeout(() => {
-      setInstagramPhase("success");
-      
-      // Auto-close after 1 second and proceed
-      setTimeout(() => {
-        setDialogOpen(false);
-        // Mark as onboarded and set to working when onboarding completes
-        patchSettings({ hasOnboarded: true, analysisStatus: "working" });
-        onContinue();
-      }, 1000);
-    }, 3000);
+    // No longer calling startAgent here, the webview handles it
   };
 
   return (
@@ -244,12 +288,12 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             className="max-w-lg w-full text-center space-y-12"
           >
             <div className="text-5xl leading-relaxed space-y-2">
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.5, delay: 0.2 }}
               >
-                <TypewriterText 
+                <TypewriterText
                   text="Social Media is a drug."
                   onComplete={() => setFirstLineComplete(true)}
                 />
@@ -260,7 +304,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.5 }}
                 >
-                  <TypewriterText 
+                  <TypewriterText
                     text="Kowalski gets high for you."
                     onComplete={() => setTypingComplete(true)}
                   />
@@ -397,11 +441,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 transition={{ duration: 0.2 }}
                 onClick={() => handleRoutineSelect(1)}
                 className={`aspect-square border-2 p-8 flex flex-col items-center justify-center gap-6
-                           transition-colors duration-200 bg-card ${
-                             digestCount === 1 
-                               ? "border-foreground" 
-                               : "border-foreground/20 hover:border-foreground"
-                           }`}
+                           transition-colors duration-200 bg-card ${digestCount === 1
+                    ? "border-foreground"
+                    : "border-foreground/20 hover:border-foreground"
+                  }`}
               >
                 <PixelSun size={48} color="charcoal" />
                 <span className="font-sans text-foreground text-lg">Once a day</span>
@@ -413,11 +456,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 transition={{ duration: 0.2 }}
                 onClick={() => handleRoutineSelect(2)}
                 className={`aspect-square border-2 p-8 flex flex-col items-center justify-center gap-6
-                           transition-colors duration-200 bg-card ${
-                             digestCount === 2 
-                               ? "border-foreground" 
-                               : "border-foreground/20 hover:border-foreground"
-                           }`}
+                           transition-colors duration-200 bg-card ${digestCount === 2
+                    ? "border-foreground"
+                    : "border-foreground/20 hover:border-foreground"
+                  }`}
               >
                 <div className="flex items-center gap-2">
                   <PixelSun size={40} color="charcoal" />
@@ -548,9 +590,9 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   onClick={handleAddInterest}
                   disabled={!interestInput.trim()}
                   className={`px-6 py-3 border-2 font-sans text-sm tracking-wider uppercase transition-all duration-200
-                             ${interestInput.trim() 
-                               ? "border-foreground text-foreground hover:bg-foreground hover:text-background" 
-                               : "border-foreground/20 text-foreground/30 cursor-not-allowed"}`}
+                             ${interestInput.trim()
+                      ? "border-foreground text-foreground hover:bg-foreground hover:text-background"
+                      : "border-foreground/20 text-foreground/30 cursor-not-allowed"}`}
                 >
                   Add
                 </button>
@@ -558,9 +600,9 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               <button
                 onClick={() => setInterests([])}
                 className={`text-sm font-sans transition-colors underline underline-offset-2 h-5
-                           ${interests.length > 0 
-                             ? "text-muted-foreground hover:text-foreground" 
-                             : "text-transparent pointer-events-none"}`}
+                           ${interests.length > 0
+                    ? "text-muted-foreground hover:text-foreground"
+                    : "text-transparent pointer-events-none"}`}
               >
                 Clear all
               </button>
@@ -591,36 +633,36 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   const pos = positions[index % positions.length];
                   const posX = pos.x + ((index * 3) % 7) - 3; // slight offset
                   const posY = pos.y + ((index * 5) % 5) - 2; // slight offset
-                  
+
                   // Consistent rotation and sizing
                   const rotation = ((index * 7) % 25) - 12; // -12 to +12 degrees
                   const sizeClass = index % 3 === 0 ? "text-3xl" : index % 3 === 1 ? "text-2xl" : "text-xl";
-                  
+
                   // Unique floating animation parameters per word
                   const floatDuration = 3 + (index % 3); // 3-5 seconds
                   const floatDelay = (index * 0.4) % 2; // staggered start
                   const floatX = ((index * 3) % 7) - 3; // -3 to +3 px
                   const floatY = ((index * 5) % 9) - 4; // -4 to +4 px
-                  
+
                   return (
                     <motion.span
                       key={interest}
                       initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ 
-                        opacity: 1, 
+                      animate={{
+                        opacity: 1,
                         scale: 1,
                         x: [0, floatX, -floatX * 0.5, 0],
                         y: [0, floatY, -floatY * 0.5, 0],
                       }}
                       exit={{ opacity: 0, scale: 0.5 }}
-                      transition={{ 
+                      transition={{
                         opacity: { duration: 0.3 },
                         scale: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
                         x: { duration: floatDuration, repeat: Infinity, ease: "easeInOut", delay: floatDelay },
                         y: { duration: floatDuration * 1.1, repeat: Infinity, ease: "easeInOut", delay: floatDelay },
                       }}
                       onClick={() => handleRemoveInterest(interest)}
-                      style={{ 
+                      style={{
                         position: 'absolute',
                         left: `${posX}%`,
                         top: `${posY}%`,
@@ -634,7 +676,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   );
                 })}
               </AnimatePresence>
-              
+
               {interests.length === 0 && (
                 <span className="absolute inset-0 flex items-center justify-center text-muted-foreground/50 font-sans text-sm italic">
                   Your interests will appear here...
@@ -790,11 +832,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 onClick={handleInitialize}
                 disabled={!apiKey || isValidating}
                 className={`inline-flex items-center gap-3 px-8 py-4 border-2 font-sans text-sm tracking-wider uppercase transition-all duration-200
-                           ${
-                             apiKey && !isValidating
-                               ? "border-foreground text-foreground hover:bg-foreground hover:text-background cursor-pointer"
-                               : "border-foreground/20 text-foreground/30 cursor-not-allowed"
-                           }`}
+                           ${apiKey && !isValidating
+                    ? "border-foreground text-foreground hover:bg-foreground hover:text-background cursor-pointer"
+                    : "border-foreground/20 text-foreground/30 cursor-not-allowed"
+                  }`}
               >
                 {isValidating ? (
                   <>
@@ -836,8 +877,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               >
                 <Instagram className="w-16 h-16 text-foreground" strokeWidth={1.5} />
               </motion.div>
-              
-              <motion.div 
+
+              <motion.div
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.4, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
@@ -851,7 +892,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   Kowalski interacts with Instagram in a local sandbox. Your credentials never leave your device.
                 </p>
               </motion.div>
-              
+
               <motion.button
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -867,8 +908,8 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             </motion.div>
 
             {/* Browser View Dialog */}
-            <Dialog open={dialogOpen} onOpenChange={() => {}}>
-              <DialogContent className="bg-background border-0 rounded-3xl p-0 max-w-2xl overflow-hidden [&>button]:hidden" overlayClassName="bg-background">
+            <Dialog open={dialogOpen} onOpenChange={() => { }}>
+              <DialogContent className="border-0 p-0 w-[90%] h-[85%] max-w-none bg-black rounded-[20px] overflow-hidden [&>button]:hidden shadow-2xl" overlayClassName="bg-transparent backdrop-blur-none">
                 <AnimatePresence mode="wait">
                   {instagramPhase === "connecting" && (
                     <motion.div
@@ -877,29 +918,16 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.3 }}
-                      className="p-6"
+                      className="w-full h-full flex flex-col"
                     >
-                      <div className="border-4 border-foreground rounded-3xl overflow-hidden">
-                        <div className="aspect-video bg-background flex flex-col items-center justify-center gap-6 p-8">
-                          <Instagram className="w-12 h-12 text-foreground" strokeWidth={1.5} />
-                          <span className="font-sans text-foreground text-lg">Secure Login Window</span>
-                          
-                          {/* Loading dots */}
-                          <div className="flex gap-2">
-                            {[0, 1, 2].map((i) => (
-                              <motion.div
-                                key={i}
-                                className="w-2 h-2 bg-foreground rounded-full"
-                                animate={{ opacity: [0.3, 1, 0.3] }}
-                                transition={{
-                                  duration: 1,
-                                  repeat: Infinity,
-                                  delay: i * 0.2,
-                                }}
-                              />
-                            ))}
-                          </div>
-                        </div>
+                      <div className="flex-1 w-full h-full bg-black flex items-center justify-center overflow-hidden">
+                        <webview
+                          ref={webviewRef}
+                          src="https://www.instagram.com/accounts/login/"
+                          style={{ width: '100%', height: '100%' }}
+                          // @ts-ignore - webview tag is not fully typed in React
+                          partition="persist:instagram"
+                        />
                       </div>
                     </motion.div>
                   )}
@@ -916,7 +944,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                       <motion.div
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
-                        transition={{ 
+                        transition={{
                           type: "spring",
                           stiffness: 200,
                           damping: 15,
@@ -926,7 +954,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                       >
                         <Check className="w-10 h-10 text-foreground" strokeWidth={2.5} />
                       </motion.div>
-                      
+
                       <h3 className="text-2xl font-serif text-foreground text-center">
                         Connection Established.
                       </h3>

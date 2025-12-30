@@ -11,9 +11,9 @@ import { ease, duration, spring, stagger } from "@/lib/animations";
 // Animation variants defined outside component
 const cardHiddenVisible = {
   hidden: { opacity: 0, y: 15, scale: 0.98 },
-  visible: { 
-    opacity: 1, 
-    y: 0, 
+  visible: {
+    opacity: 1,
+    y: 0,
     scale: 1,
     transition: spring.gentle,
   }
@@ -37,7 +37,12 @@ const Settings = memo(() => {
   const { settings, resetSettings, isLoaded } = useSettings();
   const { clearAnalyses, seedDemoAnalyses } = useArchivedAnalyses();
 
-  const handleDevReset = useCallback(() => {
+  const handleDevReset = useCallback(async () => {
+    try {
+      await (window as any).api.resetSession();
+    } catch (e) {
+      console.error("Failed to reset session:", e);
+    }
     resetSettings();
     clearAnalyses();
     // Hard reload to ensure all in-memory state is cleared
@@ -143,7 +148,7 @@ const Settings = memo(() => {
       </motion.div>
 
       <div className="max-w-md mx-auto space-y-8 text-center">
-        <motion.h1 
+        <motion.h1
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: duration.slow, ease: ease.cinematic }}
@@ -153,7 +158,7 @@ const Settings = memo(() => {
         </motion.h1>
 
         {/* Cards Grid */}
-        <motion.div 
+        <motion.div
           className="grid grid-cols-2 gap-4"
           initial="hidden"
           animate="visible"
