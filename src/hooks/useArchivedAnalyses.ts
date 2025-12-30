@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { AnalysisData } from "@/components/screens/GazetteScreen";
-import { archivedAnalyses as mockData, MONTHS } from "@/lib/data/archiveData";
+import { MONTHS } from "@/lib/data/archiveData";
 import { generateScheduledDemoAnalyses } from "@/lib/generateDemoAnalyses";
 import type { SettingsData } from "@/hooks/useSettings";
 
@@ -68,25 +68,16 @@ const deserializeAnalyses = (json: string): ArchivedAnalysis[] => {
   }
 };
 
-const isUserGenerated = (analysis: ArchivedAnalysis) => analysis.id.startsWith("analysis-");
-
-// Initialize with mock data, converting dates properly.
-// If prior demo data exists in localStorage, keep any user-generated analyses,
-// but refresh demo mock data so development changes are reflected.
+// Initialize from localStorage only - no auto-seeding of mock data
 const getInitialAnalyses = (): ArchivedAnalysis[] => {
   const stored = localStorage.getItem(STORAGE_KEY);
 
   if (stored) {
-    const storedAnalyses = deserializeAnalyses(stored);
-    const userAnalyses = storedAnalyses.filter(isUserGenerated);
-    const merged = enforceMaxPerDay([...userAnalyses, ...mockData]);
-    localStorage.setItem(STORAGE_KEY, serializeAnalyses(merged));
-    return merged;
+    return deserializeAnalyses(stored);
   }
 
-  const seeded = enforceMaxPerDay(mockData);
-  localStorage.setItem(STORAGE_KEY, serializeAnalyses(seeded));
-  return seeded;
+  // No stored data - return empty (user starts fresh)
+  return [];
 };
 
 export const useArchivedAnalyses = () => {
