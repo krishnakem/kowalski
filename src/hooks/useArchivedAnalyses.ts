@@ -9,44 +9,82 @@ export interface ArchivedAnalysis {
 }
 
 const STORAGE_KEY = "kowalski-archived-analyses";
+const MAX_ANALYSES_PER_DAY = 2;
+
+const getDayKey = (date: Date): string => {
+  // Local day key (matches UI expectations)
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+};
+
+const enforceMaxPerDay = (analyses: ArchivedAnalysis[]): ArchivedAnalysis[] => {
+  const dayMap = new Map<string, ArchivedAnalysis[]>();
+
+  analyses.forEach((analysis) => {
+    const key = getDayKey(analysis.data.date);
+    const existing = dayMap.get(key) || [];
+    dayMap.set(key, [...existing, analysis]);
+  });
+
+  const flattened: ArchivedAnalysis[] = [];
+  dayMap.forEach((group) => {
+    const sorted = [...group].sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+    flattened.push(...sorted.slice(0, MAX_ANALYSES_PER_DAY));
+  });
+
+  // Keep global ordering newest-first
+  return flattened.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+};
 
 // Serialize analyses for localStorage (dates need special handling)
 const serializeAnalyses = (analyses: ArchivedAnalysis[]): string => {
-  return JSON.stringify(analyses.map(a => ({
-    ...a,
-    data: {
-      ...a.data,
-      date: a.data.date.toISOString()
-    }
-  })));
+  return JSON.stringify(
+    analyses.map((a) => ({
+      ...a,
+      data: {
+        ...a.data,
+        date: a.data.date.toISOString(),
+      },
+    }))
+  );
 };
 
 // Deserialize analyses from localStorage
 const deserializeAnalyses = (json: string): ArchivedAnalysis[] => {
   try {
     const parsed = JSON.parse(json);
-    return parsed.map((a: { id: string; data: AnalysisData & { date: string }; leadStoryPreview: string }) => ({
-      ...a,
-      data: {
-        ...a.data,
-        date: new Date(a.data.date)
-      }
-    }));
+    return parsed.map(
+      (a: { id: string; data: AnalysisData & { date: string }; leadStoryPreview: string }) => ({
+        ...a,
+        data: {
+          ...a.data,
+          date: new Date(a.data.date),
+        },
+      })
+    );
   } catch {
     return [];
   }
 };
 
-// Initialize with mock data, converting dates properly
+const isUserGenerated = (analysis: ArchivedAnalysis) => analysis.id.startsWith("analysis-");
+
+// Initialize with mock data, converting dates properly.
+// If prior demo data exists in localStorage, keep any user-generated analyses,
+// but refresh demo mock data so development changes are reflected.
 const getInitialAnalyses = (): ArchivedAnalysis[] => {
   const stored = localStorage.getItem(STORAGE_KEY);
+
   if (stored) {
-    const analyses = deserializeAnalyses(stored);
-    if (analyses.length > 0) return analyses;
+    const storedAnalyses = deserializeAnalyses(stored);
+    const userAnalyses = storedAnalyses.filter(isUserGenerated);
+    const merged = enforceMaxPerDay([...userAnalyses, ...mockData]);
+    localStorage.setItem(STORAGE_KEY, serializeAnalyses(merged));
+    return merged;
   }
-  // First time: seed with mock data
-  localStorage.setItem(STORAGE_KEY, serializeAnalyses(mockData));
-  return mockData;
+
+  const seeded = enforceMaxPerDay(mockData);
+  localStorage.setItem(STORAGE_KEY, serializeAnalyses(seeded));
+  return seeded;
 };
 
 export const useArchivedAnalyses = () => {
@@ -62,12 +100,11 @@ export const useArchivedAnalyses = () => {
     const newAnalysis: ArchivedAnalysis = {
       id: `analysis-${Date.now()}`,
       data: analysisData,
-      leadStoryPreview: analysisData.worldUpdates[0]?.summary || "No summary available"
+      leadStoryPreview: analysisData.worldUpdates[0]?.summary || "No summary available",
     };
 
-    setAnalyses(prev => {
-      // Allow multiple analyses per day - just prepend the new one
-      const updated = [newAnalysis, ...prev];
+    setAnalyses((prev) => {
+      const updated = enforceMaxPerDay([newAnalysis, ...prev]);
       localStorage.setItem(STORAGE_KEY, serializeAnalyses(updated));
       return updated;
     });
