@@ -44,8 +44,8 @@ const Settings = memo(() => {
     window.location.assign("/");
   }, [resetSettings, clearAnalyses]);
 
-  const handleSeedDemo = useCallback(() => {
-    seedDemoAnalyses(settings, 7);
+  const handleSeedDemo = useCallback(async () => {
+    await seedDemoAnalyses(settings, 7);
   }, [seedDemoAnalyses, settings]);
 
   const handleBack = useCallback(() => {

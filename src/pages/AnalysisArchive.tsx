@@ -302,9 +302,10 @@ const AnalysisArchive = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { analyses, getAvailableYears, MONTHS, isLoaded } = useArchivedAnalyses();
-  
-  const availableYears = useMemo(() => getAvailableYears(), [getAvailableYears]);
-  
+
+  // Memoize available years (getAvailableYears now returns stable reference)
+  const availableYears = getAvailableYears();
+
   const [selectedAnalysis, setSelectedAnalysis] = useState<ArchivedAnalysis | null>(null);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
@@ -319,39 +320,47 @@ const AnalysisArchive = () => {
     }
   }, [availableYears, selectedYear]);
 
-  // Search filter function - searches through all analysis content
-  const matchesSearch = (analysis: ArchivedAnalysis, query: string): boolean => {
+  // Memoized search filter
+  const matchesSearch = useCallback((analysis: ArchivedAnalysis, query: string): boolean => {
     if (!query.trim()) return true;
-    
-    const q = query.toLowerCase();
-    const dateStr = formatDate(analysis.data.date).toLowerCase();
-    const weekdayTitle = getWeekdayTitle(analysis.data.date).toLowerCase();
-    const location = analysis.data.location.toLowerCase();
-    const leadStory = analysis.leadStoryPreview.toLowerCase();
-    const sources = analysis.data.worldUpdates.map(u => u.source.toLowerCase()).join(" ");
-    const summaries = analysis.data.worldUpdates.map(u => u.summary.toLowerCase()).join(" ");
-    const circleNames = analysis.data.circleUpdates.map(u => u.name.toLowerCase()).join(" ");
-    const circleUpdates = analysis.data.circleUpdates.map(u => u.update.toLowerCase()).join(" ");
-    
-    return (
-      dateStr.includes(q) ||
-      weekdayTitle.includes(q) ||
-      location.includes(q) ||
-      leadStory.includes(q) ||
-      sources.includes(q) ||
-      summaries.includes(q) ||
-      circleNames.includes(q) ||
-      circleUpdates.includes(q)
-    );
-  };
 
-  const handleBack = () => {
+    const q = query.toLowerCase();
+    const { data, leadStoryPreview } = analysis;
+
+    // Early returns for common matches
+    if (leadStoryPreview.toLowerCase().includes(q)) return true;
+    if (data.location.toLowerCase().includes(q)) return true;
+
+    const dateStr = formatDate(data.date).toLowerCase();
+    if (dateStr.includes(q)) return true;
+
+    const weekdayTitle = getWeekdayTitle(data.date).toLowerCase();
+    if (weekdayTitle.includes(q)) return true;
+
+    // Check world updates
+    for (const u of data.worldUpdates) {
+      if (u.source.toLowerCase().includes(q) || u.summary.toLowerCase().includes(q)) {
+        return true;
+      }
+    }
+
+    // Check circle updates
+    for (const u of data.circleUpdates) {
+      if (u.name.toLowerCase().includes(q) || u.update.toLowerCase().includes(q)) {
+        return true;
+      }
+    }
+
+    return false;
+  }, []);
+
+  const handleBack = useCallback(() => {
     if (viewMode === "calendar") {
       setViewMode("months");
       setSelectedMonth(null);
       return;
     }
-    const from = location.state?.from;
+    const from = (location.state as { from?: string })?.from;
     if (from === "agent") {
       navigate("/", { state: { screen: "agent" } });
     } else if (from === "gazette") {
@@ -359,71 +368,69 @@ const AnalysisArchive = () => {
     } else {
       navigate(-1);
     }
-  };
+  }, [viewMode, location.state, navigate]);
 
-  const handleAnalysisClick = (analysis: ArchivedAnalysis) => {
+  const handleAnalysisClick = useCallback((analysis: ArchivedAnalysis) => {
     setSelectedAnalysis(analysis);
-  };
+  }, []);
 
-  const handleCloseAnalysis = () => {
+  const handleCloseAnalysis = useCallback(() => {
     setSelectedAnalysis(null);
-  };
+  }, []);
 
-  const handleMonthClick = (monthIndex: number) => {
+  const handleMonthClick = useCallback((monthIndex: number) => {
     setSelectedMonth(monthIndex);
     setViewMode("calendar");
-  };
+  }, []);
 
-  // Get analyses for selected month/year with search filter
-  const getAnalysesForMonth = useCallback((year: number, month: number) => {
+  // Memoized filtered analyses for month/year
+  const currentMonthAnalyses = useMemo(() => {
+    if (selectedMonth === null || selectedYear === null) return [];
     return analyses.filter((analysis) => {
       const date = analysis.data.date;
-      const matchesDate = date.getFullYear() === year && date.getMonth() === month;
-      return matchesDate && matchesSearch(analysis, searchQuery);
+      return (
+        date.getFullYear() === selectedYear &&
+        date.getMonth() === selectedMonth &&
+        matchesSearch(analysis, searchQuery)
+      );
     });
-  }, [analyses, searchQuery]);
+  }, [analyses, selectedYear, selectedMonth, searchQuery, matchesSearch]);
 
-  // Get months that have analyses for the selected year (with search filter)
-  const getMonthsWithAnalyses = useCallback((year: number) => {
+  // Memoized months with analyses count
+  const monthsWithAnalyses = useMemo(() => {
+    if (selectedYear === null) return new Map<number, number>();
     const monthsMap = new Map<number, number>();
-    analyses.forEach((analysis) => {
+    for (const analysis of analyses) {
       const date = analysis.data.date;
-      if (date.getFullYear() === year && matchesSearch(analysis, searchQuery)) {
+      if (date.getFullYear() === selectedYear && matchesSearch(analysis, searchQuery)) {
         const month = date.getMonth();
         monthsMap.set(month, (monthsMap.get(month) || 0) + 1);
       }
-    });
+    }
     return monthsMap;
-  }, [analyses, searchQuery]);
+  }, [analyses, selectedYear, searchQuery, matchesSearch]);
 
-  // Check if a specific month has any analyses
-  const hasAnalysesInMonth = useCallback((year: number, month: number) => {
-    return analyses.some((analysis) => {
-      const date = analysis.data.date;
-      return date.getFullYear() === year && date.getMonth() === month;
-    });
-  }, [analyses]);
-
-  const monthsWithAnalyses = useMemo(() => 
-    selectedYear !== null ? getMonthsWithAnalyses(selectedYear) : new Map<number, number>()
-  , [selectedYear, getMonthsWithAnalyses]);
-  
-  const currentMonthAnalyses = useMemo(() =>
-    selectedMonth !== null && selectedYear !== null
-      ? getAnalysesForMonth(selectedYear, selectedMonth) 
-      : []
-  , [selectedMonth, selectedYear, getAnalysesForMonth]);
+  // Check if a specific month has any analyses (unfiltered)
+  const hasAnalysesInMonth = useCallback(
+    (year: number, month: number) =>
+      analyses.some((a) => a.data.date.getFullYear() === year && a.data.date.getMonth() === month),
+    [analyses]
+  );
 
   // Create a map of day -> analyses for the calendar
   const analysesPerDay = useMemo(() => {
     const dayMap = new Map<number, ArchivedAnalysis[]>();
     if (selectedMonth === null) return dayMap;
-    
-    currentMonthAnalyses.forEach((analysis) => {
+
+    for (const analysis of currentMonthAnalyses) {
       const day = analysis.data.date.getDate();
-      const existing = dayMap.get(day) || [];
-      dayMap.set(day, [...existing, analysis]);
-    });
+      const existing = dayMap.get(day);
+      if (existing) {
+        existing.push(analysis);
+      } else {
+        dayMap.set(day, [analysis]);
+      }
+    }
     return dayMap;
   }, [selectedMonth, currentMonthAnalyses]);
 
@@ -446,15 +453,15 @@ const AnalysisArchive = () => {
     ? MONTHS[selectedMonth].full 
     : "";
 
-  // Get all matching analyses across all years when searching
-  const getAllMatchingAnalyses = useCallback(() => {
+  // Memoized search results (only computed when searching)
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
     return analyses
       .filter((analysis) => matchesSearch(analysis, searchQuery))
       .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
-  }, [analyses, searchQuery]);
+  }, [analyses, searchQuery, matchesSearch]);
 
   const isSearching = searchQuery.trim().length > 0;
-  const searchResults = isSearching ? getAllMatchingAnalyses() : [];
 
   // Show loading state while data initializes
   if (!isLoaded) {
