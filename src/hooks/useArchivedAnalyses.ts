@@ -66,10 +66,8 @@ export const useArchivedAnalyses = () => {
     };
 
     setAnalyses(prev => {
-      // Check if we already have an analysis for this date
-      const dateStr = analysisData.date.toDateString();
-      const filtered = prev.filter(a => a.data.date.toDateString() !== dateStr);
-      const updated = [newAnalysis, ...filtered];
+      // Allow multiple analyses per day - just prepend the new one
+      const updated = [newAnalysis, ...prev];
       localStorage.setItem(STORAGE_KEY, serializeAnalyses(updated));
       return updated;
     });
