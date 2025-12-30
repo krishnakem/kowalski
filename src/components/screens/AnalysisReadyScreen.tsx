@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/layouts/PageHeader";
 import { ease, duration, spring } from "@/lib/animations";
 import { useSettings } from "@/hooks/useSettings";
+import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { getTimeOfDayGreeting } from "@/lib/timeUtils";
 
 
@@ -23,6 +24,8 @@ const buttonEntranceTransition = { duration: duration.slow, ease: ease.cinematic
 const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: AnalysisReadyScreenProps) => {
   const navigate = useNavigate();
   const { settings } = useSettings();
+  const { analyses } = useArchivedAnalyses();
+  const hasArchivedAnalyses = analyses.length > 0;
 
   const greeting = getTimeOfDayGreeting();
 
@@ -38,7 +41,7 @@ const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: Analysis
     navigate("/settings", { state: { from: "ready" } });
   }, [navigate]);
 
-  const leftAction = (
+  const leftAction = hasArchivedAnalyses ? (
     <Button
       variant="ghost"
       size="icon"
@@ -47,7 +50,7 @@ const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: Analysis
     >
       <Archive className="w-8 h-8" />
     </Button>
-  );
+  ) : null;
 
   const rightAction = (
     <Button

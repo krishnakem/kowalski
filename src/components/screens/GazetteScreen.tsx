@@ -5,6 +5,7 @@ import { Settings, ArrowLeft, Archive } from "lucide-react";
 import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
+import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { ease, duration, spring, stagger } from "@/lib/animations";
 import { defaultCircleUpdates, defaultWorldUpdates, type CircleUpdate, type WorldUpdate } from "@/lib/data/gazetteData";
 
@@ -31,6 +32,8 @@ const sectionTransition = { duration: duration.slow, ease: ease.cinematic };
 const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: GazetteScreenProps) => {
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
+  const { analyses } = useArchivedAnalyses();
+  const hasArchivedAnalyses = analyses.length > 0;
   const containerRef = useRef<HTMLDivElement>(null);
   
   // Parallax scroll effects
@@ -76,33 +79,35 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
   return (
     <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background relative">
 
-      {/* Back Button (for archived view) OR Archive Button (for live view) */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={buttonEntranceTransition}
-        className="absolute top-6 left-6"
-      >
-        {isArchived ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-          >
-            <ArrowLeft className="w-6 h-6" />
-          </Button>
-        ) : (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleNavigateToArchive}
-            className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-          >
-            <Archive className="w-8 h-8" />
-          </Button>
-        )}
-      </motion.div>
+      {/* Back Button (for archived view) OR Archive Button (for live view, only if archives exist) */}
+      {(isArchived || hasArchivedAnalyses) && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={buttonEntranceTransition}
+          className="absolute top-6 left-6"
+        >
+          {isArchived ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
+            >
+              <ArrowLeft className="w-6 h-6" />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleNavigateToArchive}
+              className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
+            >
+              <Archive className="w-8 h-8" />
+            </Button>
+          )}
+        </motion.div>
+      )}
 
       {/* Settings Button */}
       <motion.div
