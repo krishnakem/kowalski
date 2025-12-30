@@ -13,8 +13,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { ease, duration, spring, stagger } from "@/lib/animations";
 import { useArchivedAnalyses, type ArchivedAnalysis } from "@/hooks/useArchivedAnalyses";
+
+// Format time for display
+const formatTime = (date: Date): string => {
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+};
 
 const formatDate = (date: Date): string => {
   return date.toLocaleDateString("en-US", {
@@ -161,6 +175,96 @@ const MonthCalendar = ({
   const firstDayOfMonth = new Date(year, month, 1).getDay();
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+  // Day cell component with popover for multiple analyses
+  const DayCell = ({ day, analyses }: { day: number; analyses: ArchivedAnalysis[] }) => {
+    const hasAnalysis = analyses.length > 0;
+    const hasMultiple = analyses.length > 1;
+    
+    // Sort analyses by time (newest first)
+    const sortedAnalyses = [...analyses].sort(
+      (a, b) => b.data.date.getTime() - a.data.date.getTime()
+    );
+
+    const cellContent = (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: 0.01 * day, duration: 0.2 }}
+        className={`aspect-square flex flex-col items-center justify-center rounded-lg transition-all duration-200 relative
+          ${hasAnalysis 
+            ? "bg-primary/10 hover:bg-primary/20 cursor-pointer border-2 border-primary/30 hover:border-primary" 
+            : "text-muted-foreground/40 cursor-default"
+          }`}
+      >
+        <span className={`font-sans text-lg ${hasAnalysis ? "text-foreground font-medium" : ""}`}>
+          {day}
+        </span>
+        {hasAnalysis && (
+          <div className="absolute bottom-1 flex gap-0.5">
+            {/* Show dots for each analysis (max 3 visible) */}
+            {sortedAnalyses.slice(0, 3).map((_, i) => (
+              <span key={i} className="w-1.5 h-1.5 rounded-full bg-primary" />
+            ))}
+            {analyses.length > 3 && (
+              <span className="text-[8px] text-primary font-medium ml-0.5">+{analyses.length - 3}</span>
+            )}
+          </div>
+        )}
+      </motion.div>
+    );
+
+    if (!hasAnalysis) {
+      return cellContent;
+    }
+
+    if (!hasMultiple) {
+      return (
+        <button onClick={() => onDateClick(analyses[0])}>
+          {cellContent}
+        </button>
+      );
+    }
+
+    // Multiple analyses - show popover
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <button>{cellContent}</button>
+        </PopoverTrigger>
+        <PopoverContent 
+          className="w-64 p-2 bg-background border-border" 
+          align="center"
+          sideOffset={8}
+        >
+          <div className="space-y-1">
+            <p className="text-xs font-sans text-muted-foreground px-2 py-1">
+              {analyses.length} analyses
+            </p>
+            {sortedAnalyses.map((analysis) => (
+              <button
+                key={analysis.id}
+                onClick={() => onDateClick(analysis)}
+                className="w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-sans text-sm text-foreground group-hover:text-primary transition-colors">
+                    {formatTime(analysis.data.date)}
+                  </span>
+                  <span className="text-xs text-muted-foreground font-sans">
+                    {analysis.data.worldUpdates[0]?.source}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground font-sans mt-1 line-clamp-1">
+                  {analysis.leadStoryPreview}
+                </p>
+              </button>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+    );
+  };
+
   // Create array of day cells
   const dayCells = [];
   
@@ -172,30 +276,7 @@ const MonthCalendar = ({
   // Day cells
   for (let day = 1; day <= daysInMonth; day++) {
     const analyses = analysesMap.get(day) || [];
-    const hasAnalysis = analyses.length > 0;
-    
-    dayCells.push(
-      <motion.button
-        key={day}
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 0.01 * day, duration: 0.2 }}
-        disabled={!hasAnalysis}
-        onClick={() => hasAnalysis && onDateClick(analyses[0])}
-        className={`aspect-square flex flex-col items-center justify-center rounded-lg transition-all duration-200 relative
-          ${hasAnalysis 
-            ? "bg-primary/10 hover:bg-primary/20 cursor-pointer border-2 border-primary/30 hover:border-primary" 
-            : "text-muted-foreground/40 cursor-default"
-          }`}
-      >
-        <span className={`font-sans text-lg ${hasAnalysis ? "text-foreground font-medium" : ""}`}>
-          {day}
-        </span>
-        {hasAnalysis && (
-          <span className="absolute bottom-1 w-1.5 h-1.5 rounded-full bg-primary" />
-        )}
-      </motion.button>
-    );
+    dayCells.push(<DayCell key={day} day={day} analyses={analyses} />);
   }
 
   return (
@@ -537,7 +618,7 @@ const AnalysisArchive = () => {
                           {highlightMatch(getWeekdayTitle(analysis.data.date), searchQuery)}
                         </h2>
                         <p className="font-sans text-xs text-muted-foreground uppercase tracking-wider mb-4">
-                          {highlightMatch(formatDate(analysis.data.date), searchQuery)} • {highlightMatch(analysis.data.location, searchQuery)}
+                          {highlightMatch(formatDate(analysis.data.date), searchQuery)} at {formatTime(analysis.data.date)} • {highlightMatch(analysis.data.location, searchQuery)}
                         </p>
                         <div className="flex gap-2">
                           <span className="font-sans text-xs font-medium text-muted-foreground uppercase tracking-wide">
