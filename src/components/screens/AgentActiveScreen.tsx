@@ -22,9 +22,9 @@ const subtextTransition = { delay: 0.5, duration: duration.slow, ease: ease.cine
 const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
-  const { analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
+  const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
   const nextAnalysis = getNextAnalysisTime(settings);
-  const hasArchivedAnalyses = archivesLoaded && analyses.length > 0;
+  const showArchiveButton = archivesLoaded && hasPastAnalyses;
 
   useEffect(() => {
     patchSettings({ analysisStatus: "working" });
@@ -46,8 +46,8 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
 
-      {/* Archive Button - only show if there are archived analyses */}
-      {hasArchivedAnalyses && (
+      {/* Archive Button - only show if there are past analyses in the archive */}
+      {showArchiveButton && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}

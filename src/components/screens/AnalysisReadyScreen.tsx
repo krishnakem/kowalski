@@ -24,8 +24,8 @@ const buttonEntranceTransition = { duration: duration.slow, ease: ease.cinematic
 const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: AnalysisReadyScreenProps) => {
   const navigate = useNavigate();
   const { settings } = useSettings();
-  const { analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
-  const hasArchivedAnalyses = archivesLoaded && analyses.length > 0;
+  const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
+  const showArchiveButton = archivesLoaded && hasPastAnalyses;
 
   const greeting = getTimeOfDayGreeting();
 
@@ -41,7 +41,7 @@ const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: Analysis
     navigate("/settings", { state: { from: "ready" } });
   }, [navigate]);
 
-  const leftAction = hasArchivedAnalyses ? (
+  const leftAction = showArchiveButton ? (
     <Button
       variant="ghost"
       size="icon"

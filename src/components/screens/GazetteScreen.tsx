@@ -32,8 +32,8 @@ const sectionTransition = { duration: duration.slow, ease: ease.cinematic };
 const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: GazetteScreenProps) => {
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
-  const { analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
-  const hasArchivedAnalyses = archivesLoaded && analyses.length > 0;
+  const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
+  const hasArchivedAnalyses = archivesLoaded && hasPastAnalyses;
   const containerRef = useRef<HTMLDivElement>(null);
   
   // Parallax scroll effects
