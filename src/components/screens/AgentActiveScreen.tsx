@@ -22,9 +22,9 @@ const subtextTransition = { delay: 0.5, duration: duration.slow, ease: ease.cine
 const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
-  const { analyses } = useArchivedAnalyses();
+  const { analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
   const nextAnalysis = getNextAnalysisTime(settings);
-  const hasArchivedAnalyses = analyses.length > 0;
+  const hasArchivedAnalyses = archivesLoaded && analyses.length > 0;
 
   useEffect(() => {
     patchSettings({ analysisStatus: "working" });
