@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { z } from "zod";
+import { getApiKey, setApiKey as setSecureApiKey, clearSecureData } from "@/lib/secureStorage";
 
 export const SETTINGS_KEY = "kowalski-settings";
 
@@ -55,31 +56,55 @@ const normalizeSettings = (raw: unknown): SettingsData => {
   return DEFAULT_SETTINGS;
 };
 
+/**
+ * Separate API key from other settings for storage.
+ * API key goes to sessionStorage (secure), everything else to localStorage.
+ */
+const separateApiKey = (data: SettingsData): { apiKey: string; rest: Omit<SettingsData, 'apiKey'> & { apiKey: '' } } => {
+  const { apiKey, ...rest } = data;
+  return { apiKey, rest: { ...rest, apiKey: '' } };
+};
+
 export const useSettings = () => {
   const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
+    // Load non-sensitive settings from localStorage
     const saved = localStorage.getItem(SETTINGS_KEY);
+    let loadedSettings = DEFAULT_SETTINGS;
+    
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        setSettings(normalizeSettings(parsed));
+        loadedSettings = normalizeSettings(parsed);
       } catch (e) {
         console.error("Failed to parse settings:", e);
       }
     }
+    
+    // Load API key from secure sessionStorage
+    const secureApiKey = getApiKey();
+    setSettings({ ...loadedSettings, apiKey: secureApiKey });
     setIsLoaded(true);
   }, []);
 
   const saveSettings = (newSettings?: SettingsData) => {
     const toSave = newSettings || settings;
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(toSave));
+    const { apiKey, rest } = separateApiKey(toSave);
+    
+    // Save non-sensitive data to localStorage (without API key)
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(rest));
+    
+    // Save API key to secure sessionStorage
+    setSecureApiKey(apiKey);
+    
     if (newSettings) setSettings(newSettings);
   };
 
   const resetSettings = () => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(DEFAULT_SETTINGS));
+    clearSecureData(); // Clear API key from sessionStorage
     setSettings(DEFAULT_SETTINGS);
   };
 
@@ -90,8 +115,20 @@ export const useSettings = () => {
   const patchSettings = useCallback((updates: Partial<SettingsData>) => {
     const existing = localStorage.getItem(SETTINGS_KEY);
     const current = existing ? JSON.parse(existing) : DEFAULT_SETTINGS;
-    const merged = normalizeSettings({ ...current, ...updates });
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+    
+    // Get current API key from secure storage
+    const currentApiKey = getApiKey();
+    const currentWithApiKey = { ...current, apiKey: currentApiKey };
+    
+    const merged = normalizeSettings({ ...currentWithApiKey, ...updates });
+    const { apiKey, rest } = separateApiKey(merged);
+    
+    // Save non-sensitive data to localStorage
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(rest));
+    
+    // Save API key to secure sessionStorage
+    setSecureApiKey(apiKey);
+    
     setSettings(merged);
   }, []);
 
