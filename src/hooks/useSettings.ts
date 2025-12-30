@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { z } from "zod";
 
 export const SETTINGS_KEY = "kowalski-settings";
@@ -87,13 +87,13 @@ export const useSettings = () => {
    * Patch settings with partial updates - merges with existing settings and saves.
    * Useful for incremental saves during onboarding.
    */
-  const patchSettings = (updates: Partial<SettingsData>) => {
+  const patchSettings = useCallback((updates: Partial<SettingsData>) => {
     const existing = localStorage.getItem(SETTINGS_KEY);
     const current = existing ? JSON.parse(existing) : DEFAULT_SETTINGS;
     const merged = normalizeSettings({ ...current, ...updates });
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
     setSettings(merged);
-  };
+  }, []);
 
   return { settings, setSettings, saveSettings, resetSettings, patchSettings, isLoaded };
 };
