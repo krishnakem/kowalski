@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { AnalysisData } from "@/components/screens/GazetteScreen";
 import { MONTHS } from "@/lib/data/archiveData";
 import { generateScheduledDemoAnalyses } from "@/lib/generateDemoAnalyses";
@@ -137,11 +137,23 @@ export const useArchivedAnalyses = () => {
     return Array.from(yearsSet).sort((a, b) => b - a);
   }, [analyses]);
 
+  const hasPastAnalyses = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    return analyses.some((analysis) => {
+      const d = new Date(analysis.data.date);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime() < todayStart.getTime();
+    });
+  }, [analyses]);
+
   return { 
     analyses, 
     addAnalysis, 
     clearAnalyses,
     seedDemoAnalyses,
+    hasPastAnalyses,
     isLoaded,
     getAvailableYears: getAvailableYearsFromAnalyses,
     MONTHS 
