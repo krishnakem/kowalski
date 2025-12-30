@@ -8,16 +8,15 @@ export interface ArchivedAnalysis {
 
 // Mock data for demo purposes - expanded with more months
 export const archivedAnalyses: ArchivedAnalysis[] = [
-  // December 27 - Multiple analyses on same day (morning and evening)
+  // December 29 - Two analyses (max 2 per day)
   {
-    id: "1a",
+    id: "dec29-pm",
     data: {
-      date: new Date("2025-12-27T18:30:00"),
+      date: new Date("2025-12-29T18:30:00"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "Sarah", update: "got engaged in Kyoto" },
         { name: "Mike", update: "posted 3 photos from the launch" },
-        { name: "Elena", update: "started a new role at Stripe" },
       ],
       worldUpdates: [
         {
@@ -37,9 +36,9 @@ export const archivedAnalyses: ArchivedAnalysis[] = [
     leadStoryPreview: "Apple's latest AI features transform how users interact with their devices, bringing contextual awareness to everyday tasks."
   },
   {
-    id: "1b",
+    id: "dec29-am",
     data: {
-      date: new Date("2025-12-27T08:00:00"),
+      date: new Date("2025-12-29T08:00:00"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "James", update: "shared sunrise photos from the beach" },
@@ -62,14 +61,15 @@ export const archivedAnalyses: ArchivedAnalysis[] = [
     },
     leadStoryPreview: "Morning markets show optimism as Asian trading closes higher across the board."
   },
-  // December 26 - Three analyses on same day
+  // December 28 - Two analyses
   {
-    id: "2a",
+    id: "dec28-pm",
     data: {
-      date: new Date("2025-12-26T20:00:00"),
+      date: new Date("2025-12-28T20:00:00"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "Lisa", update: "launched her new podcast" },
+        { name: "Carlos", update: "shared photos from his family gathering" },
       ],
       worldUpdates: [
         {
@@ -85,13 +85,12 @@ export const archivedAnalyses: ArchivedAnalysis[] = [
     leadStoryPreview: "Evening roundup: The best tech deals from Boxing Day sales around the world."
   },
   {
-    id: "2b",
+    id: "dec28-am",
     data: {
-      date: new Date("2025-12-26T14:00:00"),
+      date: new Date("2025-12-28T09:00:00"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "James", update: "is traveling through Portugal" },
-        { name: "Carlos", update: "shared photos from his family gathering" },
       ],
       worldUpdates: [
         {
@@ -101,38 +100,14 @@ export const archivedAnalyses: ArchivedAnalysis[] = [
         {
           source: "Reuters",
           summary: "Global semiconductor demand expected to surge 15% in 2025 as AI workloads intensify."
-        },
-        {
-          source: "Ars Technica",
-          summary: "New open-source language models challenge proprietary alternatives in benchmark tests."
         }
       ]
     },
     leadStoryPreview: "The startup ecosystem sees renewed investor confidence as AI companies demonstrate sustainable business models."
   },
+  // December 25 - Single analysis
   {
-    id: "2c",
-    data: {
-      date: new Date("2025-12-26T07:30:00"),
-      location: "Sunnyvale",
-      circleUpdates: [
-        { name: "Nina", update: "completed her morning yoga streak - 100 days!" },
-      ],
-      worldUpdates: [
-        {
-          source: "Bloomberg",
-          summary: "Asian markets open strong following Christmas holiday break."
-        },
-        {
-          source: "NYT",
-          summary: "Post-holiday travel surge begins as airports see record passenger numbers."
-        }
-      ]
-    },
-    leadStoryPreview: "Asian markets open strong following Christmas holiday break."
-  },
-  {
-    id: "3",
+    id: "dec25",
     data: {
       date: new Date("2025-12-25T09:00:00"),
       location: "Sunnyvale",
@@ -158,37 +133,11 @@ export const archivedAnalyses: ArchivedAnalysis[] = [
     },
     leadStoryPreview: "Holiday tech gifts trend toward privacy-focused devices as consumers become more security conscious."
   },
+  // November 15 - Single analysis
   {
-    id: "3",
+    id: "nov15",
     data: {
-      date: new Date("2025-12-25"),
-      location: "Sunnyvale",
-      circleUpdates: [
-        { name: "David", update: "shared holiday photos from Colorado" },
-        { name: "Anna", update: "announced her engagement" },
-        { name: "Tom", update: "completed his marathon goal" },
-      ],
-      worldUpdates: [
-        {
-          source: "Wired",
-          summary: "Holiday tech gifts trend toward privacy-focused devices as consumers become more security conscious."
-        },
-        {
-          source: "The Verge",
-          summary: "Gaming consoles see record holiday sales as new exclusive titles drive demand."
-        },
-        {
-          source: "Engadget",
-          summary: "Smart home devices become mainstream with over 50% of households now owning at least one."
-        }
-      ]
-    },
-    leadStoryPreview: "Holiday tech gifts trend toward privacy-focused devices as consumers become more security conscious."
-  },
-  {
-    id: "4",
-    data: {
-      date: new Date("2025-11-15"),
+      date: new Date("2025-11-15T10:00:00"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "Rachel", update: "got promoted to senior engineer" },
@@ -211,10 +160,11 @@ export const archivedAnalyses: ArchivedAnalysis[] = [
     },
     leadStoryPreview: "November sees record venture capital deployment as investors rush to close end-of-year deals."
   },
+  // October 20 - Single analysis
   {
-    id: "5",
+    id: "oct20",
     data: {
-      date: new Date("2025-10-20"),
+      date: new Date("2025-10-20T14:00:00"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "Alex", update: "launched a new startup" },
