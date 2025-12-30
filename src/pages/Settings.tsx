@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { PixelSun, PixelMoon, PixelKey, PixelLightbulb, PixelUser } from "@/components/icons/PixelIcons";
 import { useSettings } from "@/hooks/useSettings";
+import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { ease, duration, spring, stagger } from "@/lib/animations";
 
 // Animation variants defined outside component
@@ -34,11 +35,17 @@ const Settings = memo(() => {
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from || "agent";
   const { settings, resetSettings, isLoaded } = useSettings();
+  const { clearAnalyses, seedDemoAnalyses } = useArchivedAnalyses();
 
   const handleDevReset = useCallback(() => {
     resetSettings();
-    navigate("/onboarding", { replace: true, state: {} });
-  }, [resetSettings, navigate]);
+    clearAnalyses();
+    navigate("/", { replace: true, state: {} });
+  }, [resetSettings, clearAnalyses, navigate]);
+
+  const handleSeedDemo = useCallback(() => {
+    seedDemoAnalyses(settings, 7);
+  }, [seedDemoAnalyses, settings]);
 
   const handleBack = useCallback(() => {
     navigate("/", { state: { screen: fromScreen } });
@@ -174,13 +181,21 @@ const Settings = memo(() => {
           ))}
         </motion.div>
 
-        {/* Dev Reset Button */}
-        <button
-          onClick={handleDevReset}
-          className="text-xs text-muted-foreground/50 hover:text-muted-foreground underline mt-8"
-        >
-          Reset (dev only)
-        </button>
+        {/* Dev Buttons */}
+        <div className="flex flex-col items-center gap-2 mt-8">
+          <button
+            onClick={handleSeedDemo}
+            className="text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
+          >
+            Seed demo analyses (dev)
+          </button>
+          <button
+            onClick={handleDevReset}
+            className="text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
+          >
+            Reset all (dev)
+          </button>
+        </div>
       </div>
 
     </div>
