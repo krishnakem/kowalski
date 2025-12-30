@@ -5,6 +5,7 @@ import { Settings, Archive } from "lucide-react";
 import { AnimatedPixelPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
+import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { ease, duration, spring } from "@/lib/animations";
 import { getNextAnalysisTime } from "@/lib/timeUtils";
 
@@ -21,7 +22,9 @@ const subtextTransition = { delay: 0.5, duration: duration.slow, ease: ease.cine
 const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
+  const { analyses } = useArchivedAnalyses();
   const nextAnalysis = getNextAnalysisTime(settings);
+  const hasArchivedAnalyses = analyses.length > 0;
 
   useEffect(() => {
     patchSettings({ analysisStatus: "working" });
@@ -43,22 +46,24 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
 
-      {/* Archive Button */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={buttonEntranceTransition}
-        className="absolute top-6 left-6"
-      >
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleNavigateToArchive}
-          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
+      {/* Archive Button - only show if there are archived analyses */}
+      {hasArchivedAnalyses && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={buttonEntranceTransition}
+          className="absolute top-6 left-6"
         >
-          <Archive className="w-8 h-8" />
-        </Button>
-      </motion.div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleNavigateToArchive}
+            className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
+          >
+            <Archive className="w-8 h-8" />
+          </Button>
+        </motion.div>
+      )}
 
       {/* Settings Button */}
       <motion.div
