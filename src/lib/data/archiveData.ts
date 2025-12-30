@@ -8,10 +8,11 @@ export interface ArchivedAnalysis {
 
 // Mock data for demo purposes - expanded with more months
 export const archivedAnalyses: ArchivedAnalysis[] = [
+  // December 27 - Multiple analyses on same day (morning and evening)
   {
-    id: "1",
+    id: "1a",
     data: {
-      date: new Date("2025-12-27"),
+      date: new Date("2025-12-27T18:30:00"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "Sarah", update: "got engaged in Kyoto" },
@@ -36,13 +37,61 @@ export const archivedAnalyses: ArchivedAnalysis[] = [
     leadStoryPreview: "Apple's latest AI features transform how users interact with their devices, bringing contextual awareness to everyday tasks."
   },
   {
-    id: "2",
+    id: "1b",
     data: {
-      date: new Date("2025-12-26"),
+      date: new Date("2025-12-27T08:00:00"),
+      location: "Sunnyvale",
+      circleUpdates: [
+        { name: "James", update: "shared sunrise photos from the beach" },
+        { name: "Priya", update: "ran her first 10K" },
+      ],
+      worldUpdates: [
+        {
+          source: "NYT",
+          summary: "Morning markets show optimism as Asian trading closes higher across the board."
+        },
+        {
+          source: "TechCrunch",
+          summary: "Early reports suggest holiday gadget sales exceeded expectations."
+        },
+        {
+          source: "Reuters",
+          summary: "Supply chain improvements lead to shorter delivery times this holiday season."
+        }
+      ]
+    },
+    leadStoryPreview: "Morning markets show optimism as Asian trading closes higher across the board."
+  },
+  // December 26 - Three analyses on same day
+  {
+    id: "2a",
+    data: {
+      date: new Date("2025-12-26T20:00:00"),
+      location: "Sunnyvale",
+      circleUpdates: [
+        { name: "Lisa", update: "launched her new podcast" },
+      ],
+      worldUpdates: [
+        {
+          source: "Wired",
+          summary: "Evening roundup: The best tech deals from Boxing Day sales around the world."
+        },
+        {
+          source: "Engadget",
+          summary: "Smart home devices dominate post-holiday returns as gift recipients upgrade."
+        }
+      ]
+    },
+    leadStoryPreview: "Evening roundup: The best tech deals from Boxing Day sales around the world."
+  },
+  {
+    id: "2b",
+    data: {
+      date: new Date("2025-12-26T14:00:00"),
       location: "Sunnyvale",
       circleUpdates: [
         { name: "James", update: "is traveling through Portugal" },
-        { name: "Lisa", update: "launched her new podcast" },
+        { name: "Carlos", update: "shared photos from his family gathering" },
       ],
       worldUpdates: [
         {
@@ -60,6 +109,54 @@ export const archivedAnalyses: ArchivedAnalysis[] = [
       ]
     },
     leadStoryPreview: "The startup ecosystem sees renewed investor confidence as AI companies demonstrate sustainable business models."
+  },
+  {
+    id: "2c",
+    data: {
+      date: new Date("2025-12-26T07:30:00"),
+      location: "Sunnyvale",
+      circleUpdates: [
+        { name: "Nina", update: "completed her morning yoga streak - 100 days!" },
+      ],
+      worldUpdates: [
+        {
+          source: "Bloomberg",
+          summary: "Asian markets open strong following Christmas holiday break."
+        },
+        {
+          source: "NYT",
+          summary: "Post-holiday travel surge begins as airports see record passenger numbers."
+        }
+      ]
+    },
+    leadStoryPreview: "Asian markets open strong following Christmas holiday break."
+  },
+  {
+    id: "3",
+    data: {
+      date: new Date("2025-12-25T09:00:00"),
+      location: "Sunnyvale",
+      circleUpdates: [
+        { name: "David", update: "shared holiday photos from Colorado" },
+        { name: "Anna", update: "announced her engagement" },
+        { name: "Tom", update: "completed his marathon goal" },
+      ],
+      worldUpdates: [
+        {
+          source: "Wired",
+          summary: "Holiday tech gifts trend toward privacy-focused devices as consumers become more security conscious."
+        },
+        {
+          source: "The Verge",
+          summary: "Gaming consoles see record holiday sales as new exclusive titles drive demand."
+        },
+        {
+          source: "Engadget",
+          summary: "Smart home devices become mainstream with over 50% of households now owning at least one."
+        }
+      ]
+    },
+    leadStoryPreview: "Holiday tech gifts trend toward privacy-focused devices as consumers become more security conscious."
   },
   {
     id: "3",
