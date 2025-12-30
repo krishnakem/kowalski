@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import type { AnalysisData } from "@/components/screens/GazetteScreen";
-import { archivedAnalyses as mockData, MONTHS, getAvailableYears } from "@/lib/data/archiveData";
+import { archivedAnalyses as mockData, MONTHS } from "@/lib/data/archiveData";
+import { generateScheduledDemoAnalyses } from "@/lib/generateDemoAnalyses";
+import type { SettingsData } from "@/hooks/useSettings";
 
 export interface ArchivedAnalysis {
   id: string;
@@ -112,6 +114,30 @@ export const useArchivedAnalyses = () => {
     return newAnalysis;
   }, []);
 
+  const clearAnalyses = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    setAnalyses([]);
+  }, []);
+
+  /**
+   * Generate and seed demo analyses based on user schedule settings.
+   * Useful for demo/testing purposes.
+   */
+  const seedDemoAnalyses = useCallback((settings: SettingsData, daysBack: number = 7) => {
+    const demoData = generateScheduledDemoAnalyses(settings, daysBack);
+    const newAnalyses: ArchivedAnalysis[] = demoData.map((data, index) => ({
+      id: `analysis-demo-${Date.now()}-${index}`,
+      data,
+      leadStoryPreview: data.worldUpdates[0]?.summary || "No summary available",
+    }));
+
+    setAnalyses((prev) => {
+      const updated = enforceMaxPerDay([...newAnalyses, ...prev]);
+      localStorage.setItem(STORAGE_KEY, serializeAnalyses(updated));
+      return updated;
+    });
+  }, []);
+
   const getAvailableYearsFromAnalyses = useCallback((): number[] => {
     const yearsSet = new Set<number>();
     analyses.forEach((analysis) => {
@@ -123,6 +149,8 @@ export const useArchivedAnalyses = () => {
   return { 
     analyses, 
     addAnalysis, 
+    clearAnalyses,
+    seedDemoAnalyses,
     isLoaded,
     getAvailableYears: getAvailableYearsFromAnalyses,
     MONTHS 
