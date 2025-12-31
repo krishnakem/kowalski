@@ -18,47 +18,47 @@ export default {
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
       colors: {
-        border: "hsl(var(--border))",
+        border: "#E6E6E6",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        background: "#F9F8F5", // Paper
+        foreground: "#1C1C1E", // Ink
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: "#1C1C1E", // Ink
+          foreground: "#F9F8F5", // Paper
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: "#F5F3EE", // Card
+          foreground: "#1C1C1E", // Ink
         },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: "#E3E1DC",
+          foreground: "#1C1C1E",
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: "#1C1C1E",
+          foreground: "#F9F8F5",
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: "#F5F3EE",
+          foreground: "#1C1C1E",
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: "#F5F3EE",
+          foreground: "#1C1C1E",
         },
         ink: "#1C1C1E",
         paper: "#F9F8F5",
         cornflower: "#5A72A0",
       },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        lg: "0rem",
+        md: "0rem",
+        sm: "0rem",
       },
       keyframes: {
         "accordion-down": {

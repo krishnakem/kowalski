@@ -35,7 +35,7 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
   const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
   const hasArchivedAnalyses = archivesLoaded && hasPastAnalyses;
   const containerRef = useRef<HTMLDivElement>(null);
-  
+
   // Parallax scroll effects
   const { scrollY } = useScroll();
   const headerY = useTransform(scrollY, [0, 300], [0, 50]);
@@ -54,7 +54,7 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
   const handleNavigateToSettings = useCallback(() => {
     navigate("/settings", { state: { from: "gazette" } });
   }, [navigate]);
-  
+
   const date = analysisData?.date || new Date();
   const location = analysisData?.location || settings.location || "Cupertino";
   const circleUpdates = analysisData?.circleUpdates || defaultCircleUpdates;
@@ -137,8 +137,8 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={headerTransition}
-          style={{ 
-            y: headerY, 
+          style={{
+            y: headerY,
             opacity: headerOpacity,
             scale: headerScale,
             willChange: "transform, opacity"
@@ -155,7 +155,7 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
         </motion.header>
 
         {/* Divider */}
-        <motion.div 
+        <motion.div
           initial={{ scaleX: 0 }}
           whileInView={{ scaleX: 1 }}
           viewport={{ once: true, margin: "-50px" }}
@@ -183,7 +183,7 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
         </motion.section>
 
         {/* Divider */}
-        <motion.div 
+        <motion.div
           initial={{ scaleX: 0 }}
           whileInView={{ scaleX: 1 }}
           viewport={{ once: true, margin: "-50px" }}
@@ -213,9 +213,9 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
                 initial={{ opacity: 0, x: -20 }}
                 whileInView={{ opacity: 1, x: 0 }}
                 viewport={{ once: true, margin: "-30px" }}
-                transition={{ 
-                  delay: index * stagger.normal, 
-                  ...spring.gentle 
+                transition={{
+                  delay: index * stagger.normal,
+                  ...spring.gentle
                 }}
                 className="flex items-start gap-3 text-foreground font-sans"
               >
@@ -230,7 +230,7 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
         </motion.section>
 
         {/* Divider */}
-        <motion.div 
+        <motion.div
           initial={{ scaleX: 0 }}
           whileInView={{ scaleX: 1 }}
           viewport={{ once: true, margin: "-50px" }}
@@ -260,9 +260,9 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-50px" }}
-                transition={{ 
-                  delay: index * stagger.slow, 
-                  ...spring.gentle 
+                transition={{
+                  delay: index * stagger.slow,
+                  ...spring.gentle
                 }}
               >
                 <p className="text-xs text-accent font-sans tracking-widest uppercase mb-2">
@@ -277,7 +277,7 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
         </motion.section>
 
         {/* Divider */}
-        <motion.div 
+        <motion.div
           initial={{ scaleX: 0 }}
           whileInView={{ scaleX: 1 }}
           viewport={{ once: true, margin: "-50px" }}
@@ -291,31 +291,13 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-80px" }}
           transition={sectionTransition}
-          className="text-center"
+          className="text-center mb-10"
         >
           <div className="flex flex-col items-center gap-4">
             <WavingPenguin size={48} />
             <p className="text-xl font-serif text-foreground italic tracking-tight">
               You are all caught up.
             </p>
-            <p className="text-muted-foreground text-sm font-sans">
-              Go do something meaningful.
-            </p>
-
-            {!isArchived && (
-              <motion.button
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...spring.snappy, delay: 0.8 }}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleClose}
-                className="mt-6 btn-ghost flex items-center gap-3"
-              >
-                <PixelClose size={16} />
-                <span>Close App</span>
-              </motion.button>
-            )}
           </div>
         </motion.footer>
       </motion.article>

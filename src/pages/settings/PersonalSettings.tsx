@@ -4,17 +4,21 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 import { useSettings } from "@/hooks/useSettings";
-import { useFromScreen } from "@/hooks/useFromScreen";
+// import { useFromScreen } from "@/hooks/useFromScreen"; // Unused
 import SettingsLayout from "@/components/layouts/SettingsLayout";
+import { InstagramConnectModal } from "@/components/modals/InstagramConnectModal";
 
 const PersonalSettings = () => {
-  const { navigateBack } = useFromScreen();
+  const navigate = useNavigate();
+  // const { navigateBack } = useFromScreen();
   const { settings, isLoaded, patchSettings } = useSettings();
-  
+
   const [editName, setEditName] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
 
   // Sync state when settings are loaded
   useEffect(() => {
@@ -28,7 +32,7 @@ const PersonalSettings = () => {
   const handleSave = () => {
     patchSettings({ userName: editName, location: editLocation });
     toast.success("Personal info saved");
-    navigateBack("/settings");
+    navigate(-1);
   };
 
   const handleDetectLocation = async () => {
@@ -47,13 +51,13 @@ const PersonalSettings = () => {
             `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
           );
           const data = await response.json();
-          
-          const city = data.address?.city || 
-                       data.address?.town || 
-                       data.address?.village || 
-                       data.address?.municipality ||
-                       data.address?.county;
-          
+
+          const city = data.address?.city ||
+            data.address?.town ||
+            data.address?.village ||
+            data.address?.municipality ||
+            data.address?.county;
+
           if (city) {
             setEditLocation(city);
             toast.success(`Location detected: ${city}`);
@@ -138,6 +142,69 @@ const PersonalSettings = () => {
         >
           Save
         </button>
+
+        {/* Instagram Switch Account */}
+        <div className="pt-8 border-t border-border space-y-4">
+          <Label className="text-sm text-foreground font-sans">Instagram Account</Label>
+          <div className="bg-card p-4 flex items-center justify-between border border-border/50">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="font-sans text-sm text-muted-foreground">Session Active</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await (window as any).api.clearInstagramSession();
+                  toast.success("Logged out. Please sign in.");
+                  setIsLoginOpen(true); // Open Modal
+                } catch (e) {
+                  toast.error("Failed to switch account");
+                }
+              }}
+              className="text-xs h-8"
+            >
+              SWITCH ACCOUNT
+            </Button>
+          </div>
+        </div>
+
+        {/* Debug Tools (Temporary) */}
+        <div className="mt-10 pt-4 border-t border-dashed border-border/40">
+          <Label className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-sans mb-3 block">
+            Debug Tools (Temporary)
+          </Label>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={async () => {
+              try {
+                // @ts-ignore
+                const result = await window.api.testHeadless();
+                toast.info("Test Result: " + result);
+              } catch (e) {
+                toast.error("Test failed");
+              }
+            }}
+            className="text-xs h-8 text-muted-foreground hover:text-foreground hover:bg-transparent px-0 justify-start"
+          >
+            ▶ TEST CONNECTION (HEADED)
+          </Button>
+        </div>
+
+        {/* Login Modal */}
+        <InstagramConnectModal
+          isOpen={isLoginOpen}
+          onClose={() => setIsLoginOpen(false)}
+          onSuccess={() => {
+            // Session captured.
+            // We wait for auto-close (handled by modal prop)
+            // But we might want to refresh checking status?
+            // The UI says "Session Active" statically right now, which is fine since we just logged in.
+          }}
+          autoCloseDelay={5000} // 5 Seconds wait
+        />
       </div>
     </SettingsLayout>
   );

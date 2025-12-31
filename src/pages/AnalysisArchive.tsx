@@ -47,10 +47,10 @@ const getWeekdayTitle = (date: Date): string => {
 // Highlight matching text in search results
 const highlightMatch = (text: string, query: string): React.ReactNode => {
   if (!query.trim()) return text;
-  
+
   const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
   const parts = text.split(regex);
-  
+
   return parts.map((part, i) =>
     regex.test(part) ? (
       <mark key={i} className="bg-primary/20 text-foreground rounded-sm px-0.5">
@@ -70,62 +70,62 @@ interface MatchContext {
 
 const getMatchContext = (analysis: ArchivedAnalysis, query: string): MatchContext[] => {
   if (!query.trim()) return [];
-  
+
   const q = query.toLowerCase();
   const contexts: MatchContext[] = [];
   const snippetLength = 60;
-  
+
   const extractSnippet = (text: string, field: string) => {
     const lowerText = text.toLowerCase();
     const matchIndex = lowerText.indexOf(q);
     if (matchIndex === -1) return;
-    
+
     const start = Math.max(0, matchIndex - snippetLength / 2);
     const end = Math.min(text.length, matchIndex + q.length + snippetLength / 2);
     let snippet = text.slice(start, end);
-    
+
     if (start > 0) snippet = "..." + snippet;
     if (end < text.length) snippet = snippet + "...";
-    
+
     contexts.push({ field, snippet });
   };
-  
+
   // Check each field for matches
   analysis.data.worldUpdates.forEach((update, i) => {
     if (update.summary.toLowerCase().includes(q)) {
       extractSnippet(update.summary, `${update.source}`);
     }
   });
-  
+
   analysis.data.circleUpdates.forEach((update) => {
     if (update.update.toLowerCase().includes(q)) {
       extractSnippet(update.update, `${update.name}'s Update`);
     }
   });
-  
+
   if (analysis.data.location.toLowerCase().includes(q)) {
     extractSnippet(analysis.data.location, "Location");
   }
-  
+
   // Return all contexts (no limit)
   return contexts;
 };
 
 // Collapsible match context component
-const MatchContextList = ({ 
-  contexts, 
-  searchQuery 
-}: { 
-  contexts: MatchContext[]; 
+const MatchContextList = ({
+  contexts,
+  searchQuery
+}: {
+  contexts: MatchContext[];
   searchQuery: string;
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const visibleCount = 3;
   const hasMore = contexts.length > visibleCount;
   const displayedContexts = isExpanded ? contexts : contexts.slice(0, visibleCount);
-  
+
   if (contexts.length === 0) return null;
-  
+
   return (
     <div className="mt-4 space-y-2">
       {displayedContexts.map((context, ctxIndex) => (
@@ -179,7 +179,7 @@ const MonthCalendar = ({
   const DayCell = ({ day, analyses }: { day: number; analyses: ArchivedAnalysis[] }) => {
     const hasAnalysis = analyses.length > 0;
     const hasMultiple = analyses.length > 1;
-    
+
     // Sort analyses by time (newest first)
     const sortedAnalyses = [...analyses].sort(
       (a, b) => b.data.date.getTime() - a.data.date.getTime()
@@ -191,8 +191,8 @@ const MonthCalendar = ({
         animate={{ opacity: 1, scale: 1 }}
         transition={{ delay: 0.01 * day, duration: 0.2 }}
         className={`aspect-square flex flex-col items-center justify-center rounded-lg transition-all duration-200 relative
-          ${hasAnalysis 
-            ? "bg-primary/10 hover:bg-primary/20 cursor-pointer border-2 border-primary/30 hover:border-primary" 
+          ${hasAnalysis
+            ? "bg-primary/10 hover:bg-primary/20 cursor-pointer border-2 border-primary/30 hover:border-primary"
             : "text-muted-foreground/40 cursor-default"
           }`}
       >
@@ -231,8 +231,8 @@ const MonthCalendar = ({
         <PopoverTrigger asChild>
           <button>{cellContent}</button>
         </PopoverTrigger>
-        <PopoverContent 
-          className="w-64 p-2 bg-background border-border" 
+        <PopoverContent
+          className="w-64 p-2 bg-background border-border"
           align="center"
           sideOffset={8}
         >
@@ -267,12 +267,12 @@ const MonthCalendar = ({
 
   // Create array of day cells
   const dayCells = [];
-  
+
   // Empty cells for days before the first of the month
   for (let i = 0; i < firstDayOfMonth; i++) {
     dayCells.push(<div key={`empty-${i}`} className="aspect-square" />);
   }
-  
+
   // Day cells
   for (let day = 1; day <= daysInMonth; day++) {
     const analyses = analysesMap.get(day) || [];
@@ -289,7 +289,7 @@ const MonthCalendar = ({
           </div>
         ))}
       </div>
-      
+
       {/* Calendar grid */}
       <div className="grid grid-cols-7 gap-2">
         {dayCells}
@@ -360,15 +360,9 @@ const AnalysisArchive = () => {
       setSelectedMonth(null);
       return;
     }
-    const from = (location.state as { from?: string })?.from;
-    if (from === "agent") {
-      navigate("/", { state: { screen: "agent" } });
-    } else if (from === "gazette") {
-      navigate("/", { state: { screen: "gazette" } });
-    } else {
-      navigate(-1);
-    }
-  }, [viewMode, location.state, navigate]);
+    // Standard dynamic back navigation
+    navigate(-1);
+  }, [viewMode, navigate]);
 
   const handleAnalysisClick = useCallback((analysis: ArchivedAnalysis) => {
     setSelectedAnalysis(analysis);
@@ -449,8 +443,8 @@ const AnalysisArchive = () => {
     return hasAnalysesInMonth(nextYear, nextMonth);
   }, [selectedMonth, selectedYear, hasAnalysesInMonth]);
 
-  const selectedMonthName = selectedMonth !== null 
-    ? MONTHS[selectedMonth].full 
+  const selectedMonthName = selectedMonth !== null
+    ? MONTHS[selectedMonth].full
     : "";
 
   // Memoized search results (only computed when searching)
@@ -520,8 +514,8 @@ const AnalysisArchive = () => {
           className="min-h-screen bg-background relative py-16 px-6"
         >
 
-          <PageHeader 
-            title="Analysis Archive" 
+          <PageHeader
+            title="Analysis Archive"
             onBack={handleBack}
             subtitle={isSearching ? `${searchResults.length} ${searchResults.length === 1 ? "result" : "results"} for "${searchQuery}"` : undefined}
           />
@@ -587,11 +581,11 @@ const AnalysisArchive = () => {
                 >
                   <ChevronLeft className="w-6 h-6" />
                 </Button>
-                
+
                 <h2 className="text-2xl font-serif text-foreground min-w-[200px] text-center">
                   {selectedMonthName} {selectedYear}
                 </h2>
-                
+
                 <Button
                   variant="ghost"
                   size="icon"
@@ -661,16 +655,16 @@ const AnalysisArchive = () => {
                             {highlightMatch(analysis.leadStoryPreview, searchQuery)}
                           </p>
                         </div>
-                        
+
                         {/* Match Context Snippets */}
-                        <MatchContextList 
-                          contexts={getMatchContext(analysis, searchQuery)} 
-                          searchQuery={searchQuery} 
+                        <MatchContextList
+                          contexts={getMatchContext(analysis, searchQuery)}
+                          searchQuery={searchQuery}
                         />
                       </div>
                     </motion.article>
                   ))}
-                  
+
                   {/* Show More/Less Results Button */}
                   {searchResults.length > 3 && (
                     <motion.div
@@ -719,9 +713,8 @@ const AnalysisArchive = () => {
                         <DropdownMenuItem
                           key={year}
                           onClick={() => setSelectedYear(year)}
-                          className={`font-sans cursor-pointer ${
-                            year === selectedYear ? "font-medium" : ""
-                          }`}
+                          className={`font-sans cursor-pointer ${year === selectedYear ? "font-medium" : ""
+                            }`}
                         >
                           {year}
                         </DropdownMenuItem>
@@ -741,7 +734,7 @@ const AnalysisArchive = () => {
                 >
                   {MONTHS.filter(month => monthsWithAnalyses.has(month.index)).map((month, index) => {
                     const analysesCount = monthsWithAnalyses.get(month.index) || 0;
-                    
+
                     return (
                       <motion.button
                         key={month.short}
@@ -811,7 +804,7 @@ const AnalysisArchive = () => {
                   analysesMap={analysesPerDay}
                   onDateClick={handleAnalysisClick}
                 />
-                
+
                 {/* Legend */}
                 <div className="flex items-center justify-center gap-4 mt-8 text-sm font-sans text-muted-foreground">
                   <div className="flex items-center gap-2">

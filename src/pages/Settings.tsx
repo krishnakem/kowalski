@@ -54,12 +54,12 @@ const Settings = memo(() => {
   }, [seedDemoAnalyses, settings]);
 
   const handleBack = useCallback(() => {
-    navigate("/", { state: { screen: fromScreen } });
-  }, [navigate, fromScreen]);
+    navigate(-1);
+  }, [navigate]);
 
   const handleCardClick = useCallback((path: string) => {
-    navigate(path, { state: { from: fromScreen } });
-  }, [navigate, fromScreen]);
+    navigate(path);
+  }, [navigate]);
 
   if (!isLoaded) {
     return <div className="min-h-screen bg-background" />;

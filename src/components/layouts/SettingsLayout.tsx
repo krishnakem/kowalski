@@ -1,5 +1,6 @@
 import { ReactNode, memo } from "react";
-import { useFromScreen } from "@/hooks/useFromScreen";
+import { useNavigate } from "react-router-dom";
+// import { useFromScreen } from "@/hooks/useFromScreen"; // Unused
 import PageHeader from "./PageHeader";
 
 interface SettingsLayoutProps {
@@ -11,10 +12,10 @@ interface SettingsLayoutProps {
  * Reusable layout for settings pages with back button and title.
  */
 const SettingsLayout = memo(({ title, children }: SettingsLayoutProps) => {
-  const { navigateBack } = useFromScreen();
+  const navigate = useNavigate();
 
   const handleBack = () => {
-    navigateBack("/settings");
+    navigate(-1);
   };
 
   return (

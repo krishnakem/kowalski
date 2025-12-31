@@ -7,6 +7,7 @@ import {
   PixelArrow,
   WavingPenguin
 } from "../icons/PixelIcons";
+import { Button } from "../ui/button";
 import {
   Dialog,
   DialogContent,
@@ -78,7 +79,7 @@ const TypewriterText = ({
 };
 
 const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
-  const { patchSettings } = useSettings();
+  const { settings, patchSettings, isLoaded } = useSettings();
   const [step, setStep] = useState<Step>("hook");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -97,6 +98,19 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [interestInput, setInterestInput] = useState("");
   const [userName, setUserName] = useState("");
   const [nameQuestionComplete, setNameQuestionComplete] = useState(false);
+
+  // Hydrate from settings once loaded
+  useEffect(() => {
+    if (isLoaded) {
+      if (settings.userName) setUserName(settings.userName);
+      if (settings.apiKey) setApiKey(settings.apiKey);
+      if (settings.interests?.length) setInterests(settings.interests);
+      if (settings.digestFrequency) setDigestCount(settings.digestFrequency as DigestCount);
+      if (settings.morningTime) setMorningTime(settings.morningTime);
+      if (settings.eveningTime) setEveningTime(settings.eveningTime);
+      if (settings.usageCap) setUsageCap(settings.usageCap);
+    }
+  }, [isLoaded, settings]);
 
   useEffect(() => {
     if (!typingComplete) {
@@ -204,58 +218,38 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
   const webviewRef = useRef<Electron.WebviewTag>(null);
 
+  // EFFECT 1: Handle Login Success (Global Listener)
+  // Independent of webview Ref - listens as soon as dialog opens
+  useEffect(() => {
+    if (!dialogOpen) return;
+
+    console.log("👂 Frontend: Attaching 'login-success' listener...");
+
+    // @ts-ignore
+    const removeListener = window.api.onLoginSuccess(() => {
+      console.log("🎉 FRONTEND RECEIVED SUCCESS SIGNAL! Transitioning...");
+      setInstagramPhase("success");
+
+      // setTimeout(() => {
+      //   patchSettings({ hasOnboarded: true, analysisStatus: "working" });
+      //   onContinue();
+      //   setTimeout(() => setDialogOpen(false), 50);
+      // }, 1500);
+    });
+
+    return () => {
+      console.log("Frontend: Removing 'login-success' listener");
+      if (removeListener) removeListener();
+    };
+  }, [dialogOpen]);
+
+  // EFFECT 2: Webview Setup (Ref dependent)
   useEffect(() => {
     const webview = webviewRef.current;
     if (!webview) return;
 
-    const checkLoginStatus = async (event?: any) => {
-      // Use the event URL if available (fastest), fallback to asking the webview
-      const currentUrl = event?.url || webview.getURL();
-      console.log('Checking URL:', currentUrl);
-
-      // 1. Exact Root Match (Most common for successful login)
-      const isRoot = currentUrl === 'https://www.instagram.com/' || currentUrl === 'https://www.instagram.com';
-
-      // 2. "Not Login" Heuristic (Backup)
-      const isInstagram = currentUrl.includes('instagram.com');
-      const isLoginOrChallenge = currentUrl.includes('/accounts/login') ||
-        currentUrl.includes('/challenge/') ||
-        currentUrl.includes('/two_factor/');
-
-      if ((isRoot) || (isInstagram && !isLoginOrChallenge)) {
-        console.log('Login Detected! Moving to success state...');
-
-        // IMMEDIATE: Hiding Webview / Showing Success
-        setInstagramPhase("success");
-
-        try {
-          await (window as any).api.saveLoginSession();
-
-          setTimeout(() => {
-            setDialogOpen(false);
-            patchSettings({ hasOnboarded: true, analysisStatus: "working" });
-            onContinue();
-          }, 500); // reduced delay
-        } catch (err) {
-          console.error('Failed to save session', err);
-        }
-      }
-    };
-
-    // Listen to multiple events for reliability
-    webview.addEventListener('did-navigate', checkLoginStatus);
-    webview.addEventListener('did-navigate-in-page', checkLoginStatus);
-    webview.addEventListener('dom-ready', checkLoginStatus);
-
-    // Polling fallback: Check constantly for instant reaction
-    const pollInterval = setInterval(checkLoginStatus, 200);
-
-    return () => {
-      webview.removeEventListener('did-navigate', checkLoginStatus);
-      webview.removeEventListener('did-navigate-in-page', checkLoginStatus);
-      webview.removeEventListener('dom-ready', checkLoginStatus);
-      clearInterval(pollInterval);
-    };
+    // Any webview-specific setup goes here (listeners on the DOM element itself)
+    // Currently empty as we use the Main process for detection
   }, [dialogOpen]);
 
   const handleConnectClick = () => {
@@ -909,7 +903,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
 
             {/* Browser View Dialog */}
             <Dialog open={dialogOpen} onOpenChange={() => { }}>
-              <DialogContent className="border-0 p-0 w-[90%] h-[85%] max-w-none bg-black rounded-[20px] overflow-hidden [&>button]:hidden shadow-2xl" overlayClassName="bg-transparent backdrop-blur-none">
+              <DialogContent className="border-0 p-0 w-screen h-screen max-w-none bg-background rounded-none overflow-hidden [&>button]:hidden shadow-none" overlayClassName="bg-transparent backdrop-blur-none">
                 <AnimatePresence mode="wait">
                   {instagramPhase === "connecting" && (
                     <motion.div
@@ -922,11 +916,15 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     >
                       <div className="flex-1 w-full h-full bg-black flex items-center justify-center overflow-hidden">
                         <webview
+                          partition="persist:instagram_shared"
                           ref={webviewRef}
                           src="https://www.instagram.com/accounts/login/"
-                          style={{ width: '100%', height: '100%' }}
-                          // @ts-ignore - webview tag is not fully typed in React
-                          partition="persist:instagram"
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            opacity: (instagramPhase as string) === 'success' ? 0 : 1, // THE CURTAIN
+                            transition: 'opacity 0.2s ease-out'
+                          }}
                         />
                       </div>
                     </motion.div>
@@ -935,29 +933,56 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   {instagramPhase === "success" && (
                     <motion.div
                       key="success"
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.3 }}
-                      className="p-12 flex flex-col items-center justify-center gap-6 min-h-[400px]"
+                      className="w-full h-full bg-paper text-ink flex flex-col items-center justify-center p-8 text-center"
                     >
-                      <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        transition={{
-                          type: "spring",
-                          stiffness: 200,
-                          damping: 15,
-                          delay: 0.1
-                        }}
-                        className="w-20 h-20 border-4 border-foreground rounded-full flex items-center justify-center"
-                      >
-                        <Check className="w-10 h-10 text-foreground" strokeWidth={2.5} />
-                      </motion.div>
+                      {/* Icon & Text Block */}
+                      <div className="flex flex-col items-center space-y-6 mb-12">
+                        <div className="p-4 border-2 border-ink/10 rounded-full">
+                          <Check className="w-12 h-12 text-ink" strokeWidth={1.5} />
+                        </div>
+                        <div className="space-y-2">
+                          <h2 className="text-4xl font-serif tracking-tight text-ink">Connection Established</h2>
+                          <p className="text-lg text-ink/60 font-sans tracking-wide uppercase text-sm">Secure session captured</p>
+                        </div>
+                      </div>
 
-                      <h3 className="text-2xl font-serif text-foreground text-center">
-                        Connection Established.
-                      </h3>
+                      {/* Button Container */}
+                      <div className="flex flex-col gap-4 w-full max-w-xs">
+                        <Button
+                          variant="ghost"
+                          onClick={async () => {
+                            // @ts-ignore
+                            const result = await window.api.testHeadless();
+                            alert(result);
+                          }}
+                          className="w-full"
+                        >
+                          Test Headless Mode
+                        </Button>
+
+                        <Button
+                          variant="default"
+                          onClick={() => {
+                            // 1. UPDATE STATE FIRST (Switch parent view)
+                            patchSettings({ hasOnboarded: true, analysisStatus: "working" });
+                            onContinue();
+
+                            // 2. CLOSE OVERLAY AFTER A TINY DELAY
+                            // This ensures the background has swapped to the new view
+                            // before we lift the curtain.
+                            setTimeout(() => {
+                              setDialogOpen(false);
+                            }, 50);
+                          }}
+                          className="w-full"
+                        >
+                          (DEBUG) Continue to App
+                        </Button>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>

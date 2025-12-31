@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import ZeroStateScreen from "@/components/screens/ZeroStateScreen";
 import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
@@ -13,6 +13,7 @@ import { defaultCircleUpdates, defaultWorldUpdates } from "@/lib/data/gazetteDat
 type Screen = "zero" | "agent" | "ready" | "gazette";
 
 const Index = () => {
+  const navigate = useNavigate();
   const location = useLocation();
   const { settings, isLoaded, patchSettings } = useSettings();
   const { addAnalysis } = useArchivedAnalyses();
@@ -25,9 +26,24 @@ const Index = () => {
 
     const screenFromState = (location.state as { screen?: Screen })?.screen;
 
-    // Only honor navigation-driven screen overrides for users who have onboarded.
-    if (screenFromState && (settings.hasOnboarded || screenFromState === "zero")) {
-      setCurrentScreen(screenFromState);
+    // STRICT GATE: If user has onboarded, NEVER show zero state unless settings were wiped.
+    // We ignore navigation overrides that try to force "zero" if we are already onboarded.
+    if (settings.hasOnboarded) {
+      // If we are onboarded, we default to agent or ready, regardless of what state says regarding 'zero'.
+      // If state requests 'gazette', we honor it.
+      if (screenFromState === "gazette") {
+        setCurrentScreen("gazette");
+      } else if (settings.analysisStatus === "ready") {
+        setCurrentScreen("ready");
+      } else {
+        setCurrentScreen("agent");
+      }
+      return;
+    }
+
+    // If NOT onboarded, honor state or default to zero
+    if (screenFromState === "zero") {
+      setCurrentScreen("zero");
       return;
     }
 
@@ -61,26 +77,29 @@ const Index = () => {
       circleUpdates: defaultCircleUpdates,
       worldUpdates: defaultWorldUpdates,
     };
-    
+
     // Save to archive
     addAnalysis(newAnalysis);
     setCurrentAnalysis(newAnalysis);
-    
-    patchSettings({ 
-      analysisStatus: "ready", 
-      lastAnalysisDate: new Date().toISOString() 
+
+    patchSettings({
+      analysisStatus: "ready",
+      lastAnalysisDate: new Date().toISOString()
     });
     setCurrentScreen("ready");
   };
 
   const handleViewAnalysis = () => {
+    // Push new history state so "Back" from Settings returns here
+    navigate(".", { state: { screen: "gazette" } });
     setCurrentScreen("gazette");
   };
 
   const handleClose = () => {
-    // User closed gazette - show agent screen, timer will auto-complete to ready
+    // User closed gazette - show agent screen
     patchSettings({ analysisStatus: "working" });
-    setCurrentScreen("agent");
+    // Go back in history if we pushed "gazette", or replace state
+    navigate(".", { replace: true, state: { screen: "agent" } });
   };
 
   // Show nothing until we determine the screen
@@ -120,7 +139,7 @@ const Index = () => {
             animate={pageTransition.animate}
             exit={pageTransition.exit}
           >
-            <AnalysisReadyScreen 
+            <AnalysisReadyScreen
               onViewAnalysis={handleViewAnalysis}
               lastAnalysisDate={settings.lastAnalysisDate}
             />
@@ -134,8 +153,8 @@ const Index = () => {
             animate={pageTransition.animate}
             exit={pageTransition.exit}
           >
-            <GazetteScreen 
-              onClose={handleClose} 
+            <GazetteScreen
+              onClose={handleClose}
               analysisData={currentAnalysis || undefined}
             />
           </motion.div>
