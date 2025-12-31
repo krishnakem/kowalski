@@ -19,19 +19,22 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ease, duration, spring, stagger } from "@/lib/animations";
-import { useArchivedAnalyses, type ArchivedAnalysis } from "@/hooks/useArchivedAnalyses";
+import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
+import type { ArchivedAnalysis } from "@/types/analysis";
 
 // Format time for display
-const formatTime = (date: Date): string => {
-  return date.toLocaleTimeString("en-US", {
+const formatTime = (date: Date | string): string => {
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     hour12: true
   });
 };
 
-const formatDate = (date: Date): string => {
-  return date.toLocaleDateString("en-US", {
+const formatDate = (date: Date | string): string => {
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
@@ -39,8 +42,9 @@ const formatDate = (date: Date): string => {
   });
 };
 
-const getWeekdayTitle = (date: Date): string => {
-  const weekday = date.toLocaleDateString("en-US", { weekday: "long" });
+const getWeekdayTitle = (date: Date | string): string => {
+  const d = date instanceof Date ? date : new Date(date);
+  const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
   return `The ${weekday} Analysis`;
 };
 
@@ -90,20 +94,21 @@ const getMatchContext = (analysis: ArchivedAnalysis, query: string): MatchContex
     contexts.push({ field, snippet });
   };
 
-  // Check each field for matches
-  analysis.data.worldUpdates.forEach((update, i) => {
-    if (update.summary.toLowerCase().includes(q)) {
-      extractSnippet(update.summary, `${update.source}`);
+  // Check each section content
+  analysis.data.sections.forEach((section) => {
+    // Check heading
+    if (section.heading.toLowerCase().includes(q)) {
+      extractSnippet(section.heading, "Section Heading");
     }
+    // Check content
+    section.content.forEach(paragraph => {
+      if (paragraph.toLowerCase().includes(q)) {
+        extractSnippet(paragraph, section.heading);
+      }
+    });
   });
 
-  analysis.data.circleUpdates.forEach((update) => {
-    if (update.update.toLowerCase().includes(q)) {
-      extractSnippet(update.update, `${update.name}'s Update`);
-    }
-  });
-
-  if (analysis.data.location.toLowerCase().includes(q)) {
+  if (analysis.data.location?.toLowerCase().includes(q)) {
     extractSnippet(analysis.data.location, "Location");
   }
 
@@ -182,7 +187,7 @@ const MonthCalendar = ({
 
     // Sort analyses by time (newest first)
     const sortedAnalyses = [...analyses].sort(
-      (a, b) => b.data.date.getTime() - a.data.date.getTime()
+      (a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime()
     );
 
     const cellContent = (
@@ -249,9 +254,6 @@ const MonthCalendar = ({
                 <div className="flex items-center justify-between">
                   <span className="font-sans text-sm text-foreground group-hover:text-primary transition-colors">
                     {formatTime(analysis.data.date)}
-                  </span>
-                  <span className="text-xs text-muted-foreground font-sans">
-                    {analysis.data.worldUpdates[0]?.source}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground font-sans mt-1 line-clamp-1">
@@ -337,17 +339,11 @@ const AnalysisArchive = () => {
     const weekdayTitle = getWeekdayTitle(data.date).toLowerCase();
     if (weekdayTitle.includes(q)) return true;
 
-    // Check world updates
-    for (const u of data.worldUpdates) {
-      if (u.source.toLowerCase().includes(q) || u.summary.toLowerCase().includes(q)) {
-        return true;
-      }
-    }
-
-    // Check circle updates
-    for (const u of data.circleUpdates) {
-      if (u.name.toLowerCase().includes(q) || u.update.toLowerCase().includes(q)) {
-        return true;
+    // Check sections
+    for (const section of data.sections) {
+      if (section.heading.toLowerCase().includes(q)) return true;
+      for (const p of section.content) {
+        if (p.toLowerCase().includes(q)) return true;
       }
     }
 
@@ -381,7 +377,7 @@ const AnalysisArchive = () => {
   const currentMonthAnalyses = useMemo(() => {
     if (selectedMonth === null || selectedYear === null) return [];
     return analyses.filter((analysis) => {
-      const date = analysis.data.date;
+      const date = new Date(analysis.data.date);
       return (
         date.getFullYear() === selectedYear &&
         date.getMonth() === selectedMonth &&
@@ -395,7 +391,7 @@ const AnalysisArchive = () => {
     if (selectedYear === null) return new Map<number, number>();
     const monthsMap = new Map<number, number>();
     for (const analysis of analyses) {
-      const date = analysis.data.date;
+      const date = new Date(analysis.data.date);
       if (date.getFullYear() === selectedYear && matchesSearch(analysis, searchQuery)) {
         const month = date.getMonth();
         monthsMap.set(month, (monthsMap.get(month) || 0) + 1);
@@ -407,7 +403,10 @@ const AnalysisArchive = () => {
   // Check if a specific month has any analyses (unfiltered)
   const hasAnalysesInMonth = useCallback(
     (year: number, month: number) =>
-      analyses.some((a) => a.data.date.getFullYear() === year && a.data.date.getMonth() === month),
+      analyses.some((a) => {
+        const d = new Date(a.data.date);
+        return d.getFullYear() === year && d.getMonth() === month;
+      }),
     [analyses]
   );
 
@@ -417,7 +416,7 @@ const AnalysisArchive = () => {
     if (selectedMonth === null) return dayMap;
 
     for (const analysis of currentMonthAnalyses) {
-      const day = analysis.data.date.getDate();
+      const day = new Date(analysis.data.date).getDate();
       const existing = dayMap.get(day);
       if (existing) {
         existing.push(analysis);
@@ -452,7 +451,7 @@ const AnalysisArchive = () => {
     if (!searchQuery.trim()) return [];
     return analyses
       .filter((analysis) => matchesSearch(analysis, searchQuery))
-      .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+      .sort((a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime());
   }, [analyses, searchQuery, matchesSearch]);
 
   const isSearching = searchQuery.trim().length > 0;
@@ -649,7 +648,7 @@ const AnalysisArchive = () => {
                         </p>
                         <div className="flex gap-2">
                           <span className="font-sans text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                            {highlightMatch(analysis.data.worldUpdates[0].source, searchQuery)}:
+                            {analysis.data.sections[0]?.heading}:
                           </span>
                           <p className="font-serif text-sm text-foreground/80 leading-relaxed line-clamp-2">
                             {highlightMatch(analysis.leadStoryPreview, searchQuery)}

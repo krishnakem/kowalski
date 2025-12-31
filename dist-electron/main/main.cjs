@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -7,6 +40,7 @@ const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const playwright_1 = require("playwright");
+const SecureKeyManager_1 = require("./services/SecureKeyManager");
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
     electron_1.app.quit();
@@ -22,6 +56,7 @@ const createWindow = () => {
         width: width,
         height: height,
         title: 'Kowalski',
+        backgroundColor: '#F9F8F5', // Warm Alabaster for LCD antialiasing
         frame: true,
         // titleBarStyle property removed to use system default
         webPreferences: {
@@ -36,35 +71,42 @@ const createWindow = () => {
     });
     // Load the index.html of the app.
     if (process.env.VITE_DEV_SERVER_URL) {
-        mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+        const url = process.env.VITE_DEV_SERVER_URL;
+        console.log("Creating window with URL:", url);
+        mainWindow.loadURL(url);
         // Open the DevTools.
         mainWindow.webContents.openDevTools();
     }
     else {
-        mainWindow.loadFile(path_1.default.join(__dirname, '../dist/index.html'));
+        const filePath = path_1.default.join(__dirname, '../dist/index.html');
+        console.log("Loading file path:", filePath);
+        mainWindow.loadFile(filePath);
     }
+    // --- DIAGNOSTIC LISTENERS ---
+    mainWindow.webContents.on('did-finish-load', () => {
+        console.log('✅ did-finish-load: Main window content loaded successfully.');
+    });
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+        console.error(`❌ did-fail-load: Error ${errorCode} (${errorDescription}) loading ${validatedURL}`);
+    });
+    mainWindow.webContents.on('dom-ready', () => {
+        console.log('✅ dom-ready: DOM is ready.');
+    });
+    mainWindow.webContents.on('render-process-gone', (event, details) => {
+        console.error(`💀 render-process-gone: Reason: ${details.reason}, Exit Code: ${details.exitCode}`);
+    });
+    // -----------------------------
 };
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 electron_1.app.on('ready', () => {
     createWindow();
-    // Fresh Start Logic
-    try {
-        const userDataPath = electron_1.app.getPath('userData');
-        const sessionPath = path_1.default.join(userDataPath, 'session.json');
-        if (fs_1.default.existsSync(sessionPath)) {
-            console.log('Clearing previous session file on startup...');
-            fs_1.default.unlinkSync(sessionPath);
-        }
-        // Clear storage for good measure
-        electron_1.session.defaultSession.clearStorageData();
-        electron_1.session.fromPartition(SHARED_PARTITION).clearStorageData();
-        console.log(`Cookies and storage cleared.`);
-    }
-    catch (e) {
-        console.error('Failed to init session logic:', e);
-    }
+    // Fresh Start Logic - DISABLED
+    // We now persist session.json to keep Instagram logged in.
+    // const userDataPath = app.getPath('userData');
+    // ...
+    console.log('Session persistence enabled.');
     setupIPCHandlers();
 });
 // DIRECT GUEST ATTACHMENT: The Nuclear Option
@@ -176,6 +218,13 @@ function setupIPCHandlers() {
             // 2. Clear Electron Cache
             await electron_1.session.defaultSession.clearStorageData();
             await electron_1.session.fromPartition(SHARED_PARTITION).clearStorageData();
+            // 3. Clear electron-store settings (except maybe some persistent flags if needed, but for reset we wipe info)
+            const { default: Store } = await Promise.resolve().then(() => __importStar(require('electron-store')));
+            const store = new Store();
+            store.clear();
+            // Ensure specific keys are definitely gone if clear didn't catch them
+            store.delete('analyses');
+            store.delete('settings');
             return true;
         }
         catch (e) {
@@ -183,6 +232,46 @@ function setupIPCHandlers() {
             return false;
         }
     });
+    // --- Electron Store Handlers ---
+    electron_1.ipcMain.handle('settings:get', async () => {
+        const { default: Store } = await Promise.resolve().then(() => __importStar(require('electron-store')));
+        const store = new Store();
+        return store.get('settings') || {};
+    });
+    electron_1.ipcMain.handle('settings:set', async (_event, newSettings) => {
+        const { default: Store } = await Promise.resolve().then(() => __importStar(require('electron-store')));
+        const store = new Store();
+        store.set('settings', newSettings);
+        return true;
+    });
+    electron_1.ipcMain.handle('settings:patch', async (_event, updates) => {
+        const { default: Store } = await Promise.resolve().then(() => __importStar(require('electron-store')));
+        const store = new Store();
+        const current = store.get('settings') || {};
+        const merged = { ...current, ...updates };
+        store.set('settings', merged);
+        return merged;
+    });
+    electron_1.ipcMain.handle('analyses:get', async () => {
+        const { default: Store } = await Promise.resolve().then(() => __importStar(require('electron-store')));
+        const store = new Store();
+        return store.get('analyses') || [];
+    });
+    electron_1.ipcMain.handle('analyses:set', async (_event, analyses) => {
+        const { default: Store } = await Promise.resolve().then(() => __importStar(require('electron-store')));
+        const store = new Store();
+        store.set('analyses', analyses);
+        return true;
+    });
+    // --- Secure Storage Handlers ---
+    electron_1.ipcMain.handle('settings:set-secure', async (_event, { apiKey }) => {
+        return SecureKeyManager_1.SecureKeyManager.getInstance().setKey(apiKey);
+    });
+    electron_1.ipcMain.handle('settings:check-key-status', async () => {
+        return SecureKeyManager_1.SecureKeyManager.getInstance().getKeyStatus();
+    });
+    // -------------------------------
+    // -------------------------------
     electron_1.ipcMain.handle('test-headless', async () => {
         try {
             const userDataPath = electron_1.app.getPath('userData');

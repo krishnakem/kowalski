@@ -3,12 +3,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import ZeroStateScreen from "@/components/screens/ZeroStateScreen";
 import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
-import GazetteScreen, { AnalysisData } from "@/components/screens/GazetteScreen";
+import GazetteScreen from "@/components/screens/GazetteScreen";
 import AnalysisReadyScreen from "@/components/screens/AnalysisReadyScreen";
 import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { pageTransition } from "@/lib/animations";
-import { defaultCircleUpdates, defaultWorldUpdates } from "@/lib/data/gazetteData";
+import type { AnalysisObject } from "@/types/analysis";
+import { generateScheduledDemoAnalyses } from "@/lib/generateDemoAnalyses";
 
 type Screen = "zero" | "agent" | "ready" | "gazette";
 
@@ -16,15 +17,30 @@ const Index = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { settings, isLoaded, patchSettings } = useSettings();
-  const { addAnalysis } = useArchivedAnalyses();
+  const { addAnalysis, analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
   const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
-  const [currentAnalysis, setCurrentAnalysis] = useState<AnalysisData | null>(null);
+  const [currentAnalysis, setCurrentAnalysis] = useState<AnalysisObject | null>(null);
 
   // Determine initial screen based on user state - only runs once on initial load
   useEffect(() => {
-    if (!isLoaded || currentScreen !== null) return;
+    console.log("Index useEffect triggered:", { isLoaded, archivesLoaded, currentScreen, hasOnboarded: settings.hasOnboarded });
+
+    // Wait for both settings and archives to load before making decisions
+    if (!isLoaded || !archivesLoaded || currentScreen !== null) {
+      console.log("Waiting for data or screen already set...");
+      return;
+    }
 
     const screenFromState = (location.state as { screen?: Screen })?.screen;
+    console.log("Screen determination logic running...", { screenFromState, status: settings.analysisStatus });
+
+    // Helper to recover analysis if missing
+    const recoverAnalysis = () => {
+      if (!currentAnalysis && analyses.length > 0) {
+        // Analyses are sorted new->old by hook, so take first
+        setCurrentAnalysis(analyses[0].data);
+      }
+    };
 
     // STRICT GATE: If user has onboarded, NEVER show zero state unless settings were wiped.
     // We ignore navigation overrides that try to force "zero" if we are already onboarded.
@@ -32,8 +48,10 @@ const Index = () => {
       // If we are onboarded, we default to agent or ready, regardless of what state says regarding 'zero'.
       // If state requests 'gazette', we honor it.
       if (screenFromState === "gazette") {
+        recoverAnalysis();
         setCurrentScreen("gazette");
       } else if (settings.analysisStatus === "ready") {
+        recoverAnalysis();
         setCurrentScreen("ready");
       } else {
         setCurrentScreen("agent");
@@ -56,13 +74,14 @@ const Index = () => {
           setCurrentScreen("agent");
           break;
         case "ready":
+          recoverAnalysis();
           setCurrentScreen("ready");
           break;
         default:
           setCurrentScreen("zero");
       }
     }
-  }, [isLoaded, currentScreen, location.state, settings.hasOnboarded, settings.analysisStatus]);
+  }, [isLoaded, archivesLoaded, currentScreen, location.state, settings.hasOnboarded, settings.analysisStatus, analyses, currentAnalysis]);
 
   const handleContinue = () => {
     patchSettings({ hasOnboarded: true, analysisStatus: "working" });
@@ -71,12 +90,9 @@ const Index = () => {
 
   const handleAgentComplete = () => {
     // Generate a new analysis when agent completes
-    const newAnalysis: AnalysisData = {
-      date: new Date(),
-      location: settings.location || "Cupertino",
-      circleUpdates: defaultCircleUpdates,
-      worldUpdates: defaultWorldUpdates,
-    };
+    // For now, we generate a demo analysis on the fly
+    const demoAnalyses = generateScheduledDemoAnalyses(settings, 1);
+    const newAnalysis: AnalysisObject = demoAnalyses[0];
 
     // Save to archive
     addAnalysis(newAnalysis);
@@ -104,8 +120,11 @@ const Index = () => {
 
   // Show nothing until we determine the screen
   if (!currentScreen) {
+    console.log("Render: Returning null (loading)...");
     return <div className="min-h-screen bg-background" />;
   }
+
+  console.log("Render: Rendering screen:", currentScreen);
 
   return (
     <div className="min-h-screen bg-background overflow-hidden">
@@ -155,7 +174,7 @@ const Index = () => {
           >
             <GazetteScreen
               onClose={handleClose}
-              analysisData={currentAnalysis || undefined}
+              analysisData={currentAnalysis!}
             />
           </motion.div>
         )}

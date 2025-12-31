@@ -4,7 +4,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "main": "dist-electron/main/main.cjs",
+  "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -49,6 +49,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^3.6.0",
     "electron-squirrel-startup": "^1.0.1",
+    "electron-store": "^11.0.2",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "^12.23.26",
     "input-otp": "^1.4.2",

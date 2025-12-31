@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { z } from "zod";
-import { getApiKey, setApiKey as setSecureApiKey, clearSecureData } from "@/lib/secureStorage";
+// import { getApiKey, setApiKey as setSecureApiKey, clearSecureData } from "@/lib/secureStorage"; // Legacy secure storage removed
 
 export const SETTINGS_KEY = "kowalski-settings";
 
@@ -65,46 +65,66 @@ const separateApiKey = (data: SettingsData): { apiKey: string; rest: Omit<Settin
   return { apiKey, rest: { ...rest, apiKey: '' } };
 };
 
+// settings key not needed for IPC, but kept if referenced elsewhere (unlikely)
+
 export const useSettings = () => {
   const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [keyStatus, setKeyStatus] = useState<'locked' | 'secured' | 'missing'>('missing');
 
   useEffect(() => {
-    // Load non-sensitive settings from localStorage
-    const saved = localStorage.getItem(SETTINGS_KEY);
-    let loadedSettings = DEFAULT_SETTINGS;
-    
-    if (saved) {
+    const loadSettings = async () => {
       try {
-        const parsed = JSON.parse(saved);
-        loadedSettings = normalizeSettings(parsed);
+        // Load non-sensitive settings from electron-store (async)
+        const saved = await window.api.settings.get();
+        let loadedSettings = DEFAULT_SETTINGS;
+
+        if (saved && Object.keys(saved).length > 0) {
+          loadedSettings = normalizeSettings(saved);
+        }
+
+        // Check Secure Key Status
+        const status = await window.api.settings.checkKeyStatus();
+        setKeyStatus(status);
+
+        // If secured, set a placeholder so form validation passes (if any)
+        // But do NOT expose the real key.
+        const apiKeyPlaceholder = status === 'secured' ? '••••••••••••••••' : '';
+
+        setSettings({ ...loadedSettings, apiKey: apiKeyPlaceholder });
       } catch (e) {
-        console.error("Failed to parse settings:", e);
+        console.error("Failed to load settings:", e);
+      } finally {
+        setIsLoaded(true);
       }
-    }
-    
-    // Load API key from secure sessionStorage
-    const secureApiKey = getApiKey();
-    setSettings({ ...loadedSettings, apiKey: secureApiKey });
-    setIsLoaded(true);
+    };
+
+    loadSettings();
   }, []);
 
-  const saveSettings = (newSettings?: SettingsData) => {
+  const saveSettings = async (newSettings?: SettingsData) => {
     const toSave = newSettings || settings;
     const { apiKey, rest } = separateApiKey(toSave);
-    
-    // Save non-sensitive data to localStorage (without API key)
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(rest));
-    
-    // Save API key to secure sessionStorage
-    setSecureApiKey(apiKey);
-    
+
+    // Save non-sensitive data to electron-store
+    await window.api.settings.set(rest);
+
+    // Handle Secure Key
+    // Only save if it's NOT the placeholder and actually contains value
+    if (apiKey && apiKey !== '••••••••••••••••') {
+      await window.api.settings.setSecure(apiKey);
+      setKeyStatus('secured');
+    }
+
     if (newSettings) setSettings(newSettings);
   };
 
-  const resetSettings = () => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(DEFAULT_SETTINGS));
-    clearSecureData(); // Clear API key from sessionStorage
+  const resetSettings = async () => {
+    // Reset electron-store
+    await window.api.settings.set(separateApiKey(DEFAULT_SETTINGS).rest);
+    // Overwrite secure key with empty string effectively clearing it
+    await window.api.settings.setSecure("");
+    setKeyStatus('missing');
     setSettings(DEFAULT_SETTINGS);
   };
 
@@ -112,25 +132,26 @@ export const useSettings = () => {
    * Patch settings with partial updates - merges with existing settings and saves.
    * Useful for incremental saves during onboarding.
    */
-  const patchSettings = useCallback((updates: Partial<SettingsData>) => {
-    const existing = localStorage.getItem(SETTINGS_KEY);
-    const current = existing ? JSON.parse(existing) : DEFAULT_SETTINGS;
-    
-    // Get current API key from secure storage
-    const currentApiKey = getApiKey();
-    const currentWithApiKey = { ...current, apiKey: currentApiKey };
-    
-    const merged = normalizeSettings({ ...currentWithApiKey, ...updates });
-    const { apiKey, rest } = separateApiKey(merged);
-    
-    // Save non-sensitive data to localStorage
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(rest));
-    
-    // Save API key to secure sessionStorage
-    setSecureApiKey(apiKey);
-    
-    setSettings(merged);
+  const patchSettings = useCallback(async (updates: Partial<SettingsData>) => {
+    // Optimistic update
+    setSettings(prev => {
+      return normalizeSettings({ ...prev, ...updates });
+    });
+
+    // Handle Secure Key Update
+    if ('apiKey' in updates && updates.apiKey && updates.apiKey !== '••••••••••••••••') {
+      await window.api.settings.setSecure(updates.apiKey);
+      setKeyStatus('secured');
+    }
+
+    // Strip apiKey from updates sent to store
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { apiKey: _, ...restUpdates } = updates;
+
+    if (Object.keys(restUpdates).length > 0) {
+      await window.api.settings.patch(restUpdates);
+    }
   }, []);
 
-  return { settings, setSettings, saveSettings, resetSettings, patchSettings, isLoaded };
+  return { settings, setSettings, saveSettings, resetSettings, patchSettings, isLoaded, keyStatus };
 };

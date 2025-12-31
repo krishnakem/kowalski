@@ -7,18 +7,13 @@ import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { ease, duration, spring, stagger } from "@/lib/animations";
-import { defaultCircleUpdates, defaultWorldUpdates, type CircleUpdate, type WorldUpdate } from "@/lib/data/gazetteData";
-
-export interface AnalysisData {
-  date: Date;
-  location: string;
-  circleUpdates: CircleUpdate[];
-  worldUpdates: WorldUpdate[];
-}
+import type { AnalysisObject } from "@/types/analysis";
+import { AnalysisRenderer } from "@/components/gazette/AnalysisRenderer";
+// import { sampleAnalysis } from "@/mocks/sampleAnalysis";
 
 interface GazetteScreenProps {
   onClose: () => void;
-  analysisData?: AnalysisData;
+  analysisData: AnalysisObject;
   isArchived?: boolean;
 }
 
@@ -55,10 +50,10 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
     navigate("/settings", { state: { from: "gazette" } });
   }, [navigate]);
 
-  const date = analysisData?.date || new Date();
-  const location = analysisData?.location || settings.location || "Cupertino";
-  const circleUpdates = analysisData?.circleUpdates || defaultCircleUpdates;
-  const worldUpdates = analysisData?.worldUpdates || defaultWorldUpdates;
+
+
+  // Hydrate date if it's a string
+  const date = analysisData ? (analysisData.date instanceof Date ? analysisData.date : new Date(analysisData.date)) : new Date();
 
   // Memoize expensive string operations
   const { dayName, monthDay } = useMemo(() => ({
@@ -66,15 +61,13 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
     monthDay: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
   }), [date]);
 
+  // Prefer data provided in analysis, fallback to settings
+  const location = analysisData?.location || settings.location || "Cupertino";
+  const displayTitle = analysisData?.title || (settings.userName?.trim() ? `${settings.userName.trim()}'s Analysis` : `The ${dayName} Analysis`);
+  const displaySubtitle = analysisData?.subtitle || null;
+
   // Get first letter for drop cap - memoized
-  const { firstLetter, restOfFirst, firstUpdate } = useMemo(() => {
-    const update = worldUpdates[0];
-    return {
-      firstUpdate: update,
-      firstLetter: update.summary.charAt(0),
-      restOfFirst: update.summary.slice(1),
-    };
-  }, [worldUpdates]);
+
 
   return (
     <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background relative">
@@ -141,149 +134,22 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
             y: headerY,
             opacity: headerOpacity,
             scale: headerScale,
-            willChange: "transform, opacity"
+            // willChange: "transform, opacity" // REMOVED: Causes fuzzy text on high-DPI
           }}
           className="text-center mb-12"
         >
           <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
-            {settings.userName?.trim() ? `${settings.userName.trim()}'s Analysis` : `The ${dayName} Analysis`}
+            {displayTitle}
           </h1>
-          <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic">
+          <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic mb-6">
             <PixelPin size={14} />
             <span>{monthDay} · {settings.morningTime || "8:00 AM"} · {location}</span>
           </div>
+          <div className="divider max-w-[120px] mx-auto opacity-60" />
         </motion.header>
 
-        {/* Divider */}
-        <motion.div
-          initial={{ scaleX: 0 }}
-          whileInView={{ scaleX: 1 }}
-          viewport={{ once: true, margin: "-50px" }}
-          transition={dividerTransition}
-          className="divider mb-12 origin-left"
-        />
-
-        {/* Lead Story with Drop Cap */}
-        <motion.section
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={sectionTransition}
-          className="mb-12"
-        >
-          <p className="text-xs text-accent font-sans tracking-widest uppercase mb-3">
-            {firstUpdate.source}
-          </p>
-          <p className="text-foreground font-sans leading-relaxed text-lg">
-            <span className="float-left text-7xl font-serif leading-none mr-3 mt-1 text-foreground">
-              {firstLetter}
-            </span>
-            {restOfFirst}
-          </p>
-        </motion.section>
-
-        {/* Divider */}
-        <motion.div
-          initial={{ scaleX: 0 }}
-          whileInView={{ scaleX: 1 }}
-          viewport={{ once: true, margin: "-50px" }}
-          transition={dividerTransition}
-          className="divider mb-12 origin-left"
-        />
-
-        {/* The Circle Section */}
-        <motion.section
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={sectionTransition}
-          className="mb-12"
-        >
-          <h2 className="text-2xl font-serif text-foreground mb-2">
-            The Circle
-          </h2>
-          <p className="text-muted-foreground text-sm mb-6 font-sans">
-            Updates from people you care about
-          </p>
-
-          <ul className="space-y-3">
-            {circleUpdates.map((item, index) => (
-              <motion.li
-                key={index}
-                initial={{ opacity: 0, x: -20 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true, margin: "-30px" }}
-                transition={{
-                  delay: index * stagger.normal,
-                  ...spring.gentle
-                }}
-                className="flex items-start gap-3 text-foreground font-sans"
-              >
-                <span className="text-accent mt-0.5">•</span>
-                <p>
-                  <span className="font-medium">{item.name}</span>
-                  <span className="text-muted-foreground"> {item.update}</span>
-                </p>
-              </motion.li>
-            ))}
-          </ul>
-        </motion.section>
-
-        {/* Divider */}
-        <motion.div
-          initial={{ scaleX: 0 }}
-          whileInView={{ scaleX: 1 }}
-          viewport={{ once: true, margin: "-50px" }}
-          transition={dividerTransition}
-          className="divider mb-12 origin-left"
-        />
-
-        {/* The World Section */}
-        <motion.section
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={sectionTransition}
-          className="mb-12"
-        >
-          <h2 className="text-2xl font-serif text-foreground mb-2">
-            The World
-          </h2>
-          <p className="text-muted-foreground text-sm mb-6 font-sans">
-            High-signal updates from creators and news
-          </p>
-
-          <div className="space-y-8">
-            {worldUpdates.slice(1).map((item, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-50px" }}
-                transition={{
-                  delay: index * stagger.slow,
-                  ...spring.gentle
-                }}
-              >
-                <p className="text-xs text-accent font-sans tracking-widest uppercase mb-2">
-                  {item.source}
-                </p>
-                <p className="text-foreground font-sans leading-relaxed">
-                  {item.summary}
-                </p>
-              </motion.div>
-            ))}
-          </div>
-        </motion.section>
-
-        {/* Divider */}
-        <motion.div
-          initial={{ scaleX: 0 }}
-          whileInView={{ scaleX: 1 }}
-          viewport={{ once: true, margin: "-50px" }}
-          transition={dividerTransition}
-          className="divider mb-12 origin-left"
-        />
+        {/* Render Analysis Content */}
+        <AnalysisRenderer data={analysisData} />
 
         {/* Footer - All Caught Up */}
         <motion.footer

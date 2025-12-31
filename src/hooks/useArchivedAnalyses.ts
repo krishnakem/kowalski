@@ -1,15 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import type { AnalysisData } from "@/components/screens/GazetteScreen";
+import type { AnalysisObject, ArchivedAnalysis } from "@/types/analysis";
 import { MONTHS } from "@/lib/data/archiveData";
 import type { SettingsData } from "@/hooks/useSettings";
 
-export interface ArchivedAnalysis {
-  id: string;
-  data: AnalysisData;
-  leadStoryPreview: string;
-}
-
-const STORAGE_KEY = "kowalski-archived-analyses";
 const MAX_ANALYSES_PER_DAY = 2;
 
 // Memoize today's start time at module level (reset on page refresh)
@@ -31,7 +24,9 @@ const enforceMaxPerDay = (analyses: ArchivedAnalysis[]): ArchivedAnalysis[] => {
   const dayMap = new Map<string, ArchivedAnalysis[]>();
 
   for (const analysis of analyses) {
-    const key = getDayKey(analysis.data.date);
+    // Ensure date is a Date object (serialization might make it string)
+    const dateObj = analysis.data.date instanceof Date ? analysis.data.date : new Date(analysis.data.date);
+    const key = getDayKey(dateObj);
     const existing = dayMap.get(key);
     if (existing) {
       existing.push(analysis);
@@ -45,91 +40,94 @@ const enforceMaxPerDay = (analyses: ArchivedAnalysis[]): ArchivedAnalysis[] => {
     if (group.length <= MAX_ANALYSES_PER_DAY) {
       flattened.push(...group);
     } else {
-      group.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+      group.sort((a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime());
       flattened.push(...group.slice(0, MAX_ANALYSES_PER_DAY));
     }
   });
 
-  return flattened.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
-};
-
-const serializeAnalyses = (analyses: ArchivedAnalysis[]): string => {
-  return JSON.stringify(
-    analyses.map((a) => ({
-      ...a,
-      data: { ...a.data, date: a.data.date.toISOString() },
-    }))
-  );
-};
-
-const deserializeAnalyses = (json: string): ArchivedAnalysis[] => {
-  try {
-    const parsed = JSON.parse(json);
-    return parsed.map(
-      (a: { id: string; data: AnalysisData & { date: string }; leadStoryPreview: string }) => ({
-        ...a,
-        data: { ...a.data, date: new Date(a.data.date) },
-      })
-    );
-  } catch {
-    return [];
-  }
-};
-
-// Lazy initializer for useState (only runs once)
-const getInitialAnalyses = (): ArchivedAnalysis[] => {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  return stored ? deserializeAnalyses(stored) : [];
+  return flattened.sort((a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime());
 };
 
 export const useArchivedAnalyses = () => {
-  // Use lazy initializer to avoid reading localStorage on every render
-  const [analyses, setAnalyses] = useState<ArchivedAnalysis[]>(getInitialAnalyses);
-  const [isLoaded, setIsLoaded] = useState(true); // Already loaded via lazy init
+  const [analyses, setAnalyses] = useState<ArchivedAnalysis[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
 
-  const addAnalysis = useCallback((analysisData: AnalysisData) => {
+  useEffect(() => {
+    const loadAnalyses = async () => {
+      try {
+        const stored = await window.api.analyses.get();
+        if (Array.isArray(stored)) {
+          // Hydrate dates
+          const hydrated = stored.map((a: any) => ({
+            ...a,
+            data: {
+              ...a.data,
+              date: a.data.date instanceof Date ? a.data.date : new Date(a.data.date)
+            }
+          }));
+          setAnalyses(hydrated);
+        }
+      } catch (e) {
+        console.error("Failed to load archived analyses:", e);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+    loadAnalyses();
+  }, []);
+
+  const saveAnalyses = async (updated: ArchivedAnalysis[]) => {
+    await window.api.analyses.set(updated);
+    setAnalyses(updated);
+  };
+
+  const addAnalysis = useCallback(async (analysisData: AnalysisObject) => {
     const newAnalysis: ArchivedAnalysis = {
       id: `analysis-${Date.now()}`,
       data: analysisData,
-      leadStoryPreview: analysisData.worldUpdates[0]?.summary || "No summary available",
+      // Use first paragraph of first section as preview
+      leadStoryPreview: analysisData.sections[0]?.content[0]?.slice(0, 100) + "..." || "No summary available",
     };
 
-    setAnalyses((prev) => {
-      const updated = enforceMaxPerDay([newAnalysis, ...prev]);
-      localStorage.setItem(STORAGE_KEY, serializeAnalyses(updated));
-      return updated;
-    });
+    const updated = enforceMaxPerDay([newAnalysis, ...analyses]);
+    await saveAnalyses(updated);
 
     return newAnalysis;
-  }, []);
+  }, [analyses]);
 
-  const clearAnalyses = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
-    setAnalyses([]);
+  const clearAnalyses = useCallback(async () => {
+    await saveAnalyses([]);
   }, []);
 
   const seedDemoAnalyses = useCallback(async (settings: SettingsData, daysBack: number = 7) => {
-    // Lazy import to avoid loading demo generator in production bundles
     const { generateScheduledDemoAnalyses } = await import("@/lib/generateDemoAnalyses");
     const demoData = generateScheduledDemoAnalyses(settings, daysBack);
+
+    // Ensure uniqueness by checking existing count
     const newAnalyses: ArchivedAnalysis[] = demoData.map((data, index) => ({
       id: `analysis-demo-${Date.now()}-${index}`,
       data,
-      leadStoryPreview: data.worldUpdates[0]?.summary || "No summary available",
+      leadStoryPreview: data.sections[0]?.content[0]?.slice(0, 100) + "..." || "No summary available",
     }));
 
-    setAnalyses((prev) => {
-      const updated = enforceMaxPerDay([...newAnalyses, ...prev]);
-      localStorage.setItem(STORAGE_KEY, serializeAnalyses(updated));
-      return updated;
-    });
-  }, []);
+    // Merge with existing but apply limit
+    // Note: enforceMaxPerDay takes care of merging limits
+    // But we need to pass current state.
+    // Since this is async/state based, we must rely on 'analyses' dependency or functional update?
+    // We can't do functional update easily with async IPC save.
+    // We'll rely on the optimistic update pattern or just use valid closure.
+    // Ideally we re-fetch effectively, but merging current 'analyses' is fine.
+
+    const updated = enforceMaxPerDay([...newAnalyses, ...analyses]);
+    await saveAnalyses(updated);
+  }, [analyses]);
 
   // Memoized derived state
   const availableYears = useMemo((): number[] => {
     const yearsSet = new Set<number>();
     for (const analysis of analyses) {
-      yearsSet.add(analysis.data.date.getFullYear());
+      const d = new Date(analysis.data.date);
+      yearsSet.add(d.getFullYear());
     }
     return Array.from(yearsSet).sort((a, b) => b - a);
   }, [analyses]);
@@ -157,3 +155,4 @@ export const useArchivedAnalyses = () => {
     MONTHS,
   };
 };
+export { type ArchivedAnalysis };

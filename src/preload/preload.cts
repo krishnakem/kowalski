@@ -15,4 +15,15 @@ contextBridge.exposeInMainWorld('api', {
     testHeadless: () => ipcRenderer.invoke('test-headless'),
     saveSessionDirectly: (cookies: string) => ipcRenderer.invoke('save-session-directly', cookies),
     manualSessionSave: () => ipcRenderer.send('manual-session-save'),
+    settings: {
+        get: () => ipcRenderer.invoke('settings:get'),
+        set: (value: any) => ipcRenderer.invoke('settings:set', value),
+        patch: (updates: any) => ipcRenderer.invoke('settings:patch', updates),
+        setSecure: (apiKey: string) => ipcRenderer.invoke('settings:set-secure', { apiKey }),
+        checkKeyStatus: () => ipcRenderer.invoke('settings:check-key-status'),
+    },
+    analyses: {
+        get: () => ipcRenderer.invoke('analyses:get'),
+        set: (value: any) => ipcRenderer.invoke('analyses:set', value),
+    }
 });

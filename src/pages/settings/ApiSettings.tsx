@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, Lock, Unlock, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -9,24 +9,24 @@ import SettingsLayout from "@/components/layouts/SettingsLayout";
 
 const ApiSettings = () => {
   const { navigateBack } = useFromScreen();
-  const { settings, setSettings, saveSettings } = useSettings();
+  const { settings, setSettings, saveSettings, keyStatus } = useSettings();
   const [showApiKey, setShowApiKey] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
 
   const handleSave = async () => {
     const apiKeyToSave = (settings.apiKey || "").trim();
-    
+
     // If there's an API key, validate it first (same as onboarding)
     if (apiKeyToSave) {
       setIsValidating(true);
       setKeyError(null);
-      
+
       try {
         const response = await fetch('https://api.openai.com/v1/models', {
           headers: { 'Authorization': `Bearer ${apiKeyToSave}` }
         });
-        
+
         if (response.status === 401) {
           setKeyError('Invalid API key. Please check and try again.');
           setIsValidating(false);
@@ -37,10 +37,10 @@ const ApiSettings = () => {
         setIsValidating(false);
         return;
       }
-      
+
       setIsValidating(false);
     }
-    
+
     // Valid key (or empty) - save and proceed
     saveSettings({ ...settings, apiKey: apiKeyToSave });
     toast.success("API settings saved");
@@ -51,7 +51,27 @@ const ApiSettings = () => {
     <SettingsLayout title="API & Usage">
       {/* API Key */}
       <div className="space-y-3">
-        <Label className="text-sm text-foreground font-sans">OpenAI API Key</Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-sm text-foreground font-sans">OpenAI API Key</Label>
+          {keyStatus === 'secured' && (
+            <div className="flex items-center gap-1.5 text-xs text-green-600 font-sans font-medium">
+              <Lock size={12} />
+              <span>Encrypted on Disk</span>
+            </div>
+          )}
+          {keyStatus === 'missing' && (
+            <div className="flex items-center gap-1.5 text-xs text-amber-600 font-sans font-medium">
+              <AlertTriangle size={12} />
+              <span>Not Configured</span>
+            </div>
+          )}
+          {keyStatus === 'locked' && (
+            <div className="flex items-center gap-1.5 text-xs text-destructive font-sans font-medium">
+              <Unlock size={12} />
+              <span>Keychain Locked</span>
+            </div>
+          )}
+        </div>
         <div className="relative">
           <input
             type={showApiKey ? "text" : "password"}
@@ -128,9 +148,9 @@ const ApiSettings = () => {
         disabled={isValidating}
         className={`w-full inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-foreground 
                    font-sans text-sm tracking-wider uppercase transition-all duration-200
-                   ${isValidating 
-                     ? 'text-foreground/50 cursor-not-allowed' 
-                     : 'text-foreground hover:bg-foreground hover:text-background'}`}
+                   ${isValidating
+            ? 'text-foreground/50 cursor-not-allowed'
+            : 'text-foreground hover:bg-foreground hover:text-background'}`}
       >
         {isValidating ? (
           <>

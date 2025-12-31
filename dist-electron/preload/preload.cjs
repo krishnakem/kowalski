@@ -16,4 +16,15 @@ electron_1.contextBridge.exposeInMainWorld('api', {
     testHeadless: () => electron_1.ipcRenderer.invoke('test-headless'),
     saveSessionDirectly: (cookies) => electron_1.ipcRenderer.invoke('save-session-directly', cookies),
     manualSessionSave: () => electron_1.ipcRenderer.send('manual-session-save'),
+    settings: {
+        get: () => electron_1.ipcRenderer.invoke('settings:get'),
+        set: (value) => electron_1.ipcRenderer.invoke('settings:set', value),
+        patch: (updates) => electron_1.ipcRenderer.invoke('settings:patch', updates),
+        setSecure: (apiKey) => electron_1.ipcRenderer.invoke('settings:set-secure', { apiKey }),
+        checkKeyStatus: () => electron_1.ipcRenderer.invoke('settings:check-key-status'),
+    },
+    analyses: {
+        get: () => electron_1.ipcRenderer.invoke('analyses:get'),
+        set: (value) => electron_1.ipcRenderer.invoke('analyses:set', value),
+    }
 });
