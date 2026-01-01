@@ -16,6 +16,7 @@ interface Window {
             patch: (updates: any) => Promise<any>;
             setSecure: (apiKey: string) => Promise<boolean>;
             checkKeyStatus: () => Promise<'locked' | 'secured' | 'missing'>;
+            getSecureKey: () => Promise<string | null>;
             onAnalysisReady: (callback: (analysis: any) => void) => () => void;
         };
         analyses: {

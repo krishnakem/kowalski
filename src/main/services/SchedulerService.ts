@@ -45,6 +45,14 @@ export class SchedulerService {
         return new Store();
     }
 
+    // Format date in LOCAL timezone (avoids UTC conversion issues)
+    private formatLocalDate(date: Date): string {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
     public stop() {
         if (this.checkInterval) {
             clearInterval(this.checkInterval);
@@ -89,15 +97,7 @@ export class SchedulerService {
             return null;
         }
 
-        // Helper to format date in LOCAL timezone (avoids UTC conversion issues)
-        const formatLocalDate = (date: Date): string => {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-        };
-
-        const today = formatLocalDate(new Date());
+        const today = this.formatLocalDate(new Date());
         let activeSchedule = store.get('activeSchedule') as ActiveSchedule | undefined;
 
         // If no snapshot exists (first run after onboarding), set activeDate to TOMORROW
@@ -105,7 +105,7 @@ export class SchedulerService {
         if (!activeSchedule) {
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
-            const tomorrowStr = formatLocalDate(tomorrow);
+            const tomorrowStr = this.formatLocalDate(tomorrow);
 
             activeSchedule = {
                 morningTime: settings.morningTime || '8:00 AM',
@@ -147,15 +147,7 @@ export class SchedulerService {
 
             const settings = (store.get('settings') || {}) as SchedulerSettings;
             const now = new Date();
-
-            // Format today in LOCAL timezone (must match ensureDailySnapshot format)
-            const formatLocalDate = (date: Date): string => {
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                return `${year}-${month}-${day}`;
-            };
-            const todayStr = formatLocalDate(now);
+            const todayStr = this.formatLocalDate(now);
 
             // Only check if today matches the active schedule date
             if (activeSchedule.activeDate !== todayStr) {

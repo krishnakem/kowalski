@@ -35,7 +35,7 @@ const Settings = memo(() => {
   const location = useLocation();
   const fromScreen = (location.state as { from?: string })?.from || "agent";
   const { settings, resetSettings, isLoaded } = useSettings();
-  const { clearAnalyses, seedDemoAnalyses } = useArchivedAnalyses();
+  const { clearAnalyses } = useArchivedAnalyses();
 
   const handleDevReset = useCallback(async () => {
     try {
@@ -48,10 +48,6 @@ const Settings = memo(() => {
     // Hard reload to ensure all in-memory state is cleared
     window.location.assign("/");
   }, [resetSettings, clearAnalyses]);
-
-  const handleSeedDemo = useCallback(async () => {
-    await seedDemoAnalyses(settings, 7);
-  }, [seedDemoAnalyses, settings]);
 
   const handleBack = useCallback(() => {
     navigate(-1);

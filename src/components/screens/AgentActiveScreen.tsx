@@ -23,7 +23,10 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
   const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
-  const nextAnalysis = getNextAnalysisTime(settings);
+
+  // If no past analyses, this is the first day after onboarding - schedule starts tomorrow
+  const isFirstDay = archivesLoaded && !hasPastAnalyses;
+  const nextAnalysis = getNextAnalysisTime(settings, isFirstDay);
   const showArchiveButton = archivesLoaded && hasPastAnalyses;
 
   // Purely visual component - navigation is handled by global listeners in Index.tsx

@@ -19,6 +19,13 @@ export class SchedulerService {
         const { default: Store } = await import('electron-store');
         return new Store();
     }
+    // Format date in LOCAL timezone (avoids UTC conversion issues)
+    formatLocalDate(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
     stop() {
         if (this.checkInterval) {
             clearInterval(this.checkInterval);
@@ -56,21 +63,14 @@ export class SchedulerService {
         if (!settings.hasOnboarded) {
             return null;
         }
-        // Helper to format date in LOCAL timezone (avoids UTC conversion issues)
-        const formatLocalDate = (date) => {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-        };
-        const today = formatLocalDate(new Date());
+        const today = this.formatLocalDate(new Date());
         let activeSchedule = store.get('activeSchedule');
         // If no snapshot exists (first run after onboarding), set activeDate to TOMORROW
         // This ensures the onboarding schedule doesn't trigger missed slots from today
         if (!activeSchedule) {
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
-            const tomorrowStr = formatLocalDate(tomorrow);
+            const tomorrowStr = this.formatLocalDate(tomorrow);
             activeSchedule = {
                 morningTime: settings.morningTime || '8:00 AM',
                 eveningTime: settings.eveningTime || '4:00 PM',
@@ -106,14 +106,7 @@ export class SchedulerService {
             }
             const settings = (store.get('settings') || {});
             const now = new Date();
-            // Format today in LOCAL timezone (must match ensureDailySnapshot format)
-            const formatLocalDate = (date) => {
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                return `${year}-${month}-${day}`;
-            };
-            const todayStr = formatLocalDate(now);
+            const todayStr = this.formatLocalDate(now);
             // Only check if today matches the active schedule date
             if (activeSchedule.activeDate !== todayStr) {
                 // Schedule is for tomorrow (first-run scenario)

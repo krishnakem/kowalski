@@ -38,7 +38,6 @@ const InterestsSettings = () => {
   const handleSave = () => {
     saveSettings();
     toast.success("Interests saved");
-    navigateBack("/settings");
   };
 
   return (
@@ -46,7 +45,7 @@ const InterestsSettings = () => {
       {/* Interests */}
       <div className="space-y-4">
         <Label className="text-sm text-foreground font-sans">Your Topics</Label>
-        
+
         {/* Input row */}
         <div className="flex gap-2">
           <input
@@ -66,18 +65,18 @@ const InterestsSettings = () => {
             Add
           </button>
         </div>
-        
+
         {/* Clear all button */}
         <button
           onClick={() => setSettings({ ...settings, interests: [] })}
           className={`text-sm font-sans transition-colors underline underline-offset-2 h-5
-                     ${settings.interests.length > 0 
-                       ? "text-muted-foreground hover:text-foreground" 
-                       : "text-transparent pointer-events-none"}`}
+                     ${settings.interests.length > 0
+              ? "text-muted-foreground hover:text-foreground"
+              : "text-transparent pointer-events-none"}`}
         >
           Clear all
         </button>
-        
+
         {/* Word Cloud */}
         <div className="relative h-48 w-full overflow-hidden">
           {settings.interests.map((interest, index) => {
@@ -103,7 +102,7 @@ const InterestsSettings = () => {
               </motion.button>
             );
           })}
-          
+
           {settings.interests.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center">
               <p className="text-muted-foreground/50 font-sans text-sm italic">

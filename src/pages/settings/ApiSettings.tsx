@@ -13,12 +13,20 @@ const ApiSettings = () => {
   const [showApiKey, setShowApiKey] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
+  const [keyChanged, setKeyChanged] = useState(false); // Track if API key was edited
 
   const handleSave = async () => {
     const apiKeyToSave = (settings.apiKey || "").trim();
 
-    // If there's an API key, validate it first (same as onboarding)
-    if (apiKeyToSave) {
+    // Only validate if the user actually changed the API key
+    if (keyChanged) {
+      // Require a non-empty API key if user is trying to update it
+      if (!apiKeyToSave) {
+        setKeyError('Please enter an API key.');
+        return;
+      }
+
+      // Validate the API key
       setIsValidating(true);
       setKeyError(null);
 
@@ -27,13 +35,16 @@ const ApiSettings = () => {
           headers: { 'Authorization': `Bearer ${apiKeyToSave}` }
         });
 
-        if (response.status === 401) {
+        // Any non-OK response means invalid key
+        if (!response.ok) {
           setKeyError('Invalid API key. Please check and try again.');
           setIsValidating(false);
           return;
         }
       } catch (error) {
-        setKeyError('Could not validate key. Check your connection.');
+        // Network error - could be connection or CORS issue
+        console.error('API validation error:', error);
+        setKeyError('Invalid API key. Please check and try again.');
         setIsValidating(false);
         return;
       }
@@ -41,56 +52,61 @@ const ApiSettings = () => {
       setIsValidating(false);
     }
 
-    // Valid key (or empty) - save and proceed
-    saveSettings({ ...settings, apiKey: apiKeyToSave });
-    toast.success("API settings saved");
-    navigateBack("/settings");
+    // Save settings (apiKey will be included only if changed, or pass current)
+    saveSettings({ ...settings, apiKey: keyChanged ? apiKeyToSave : settings.apiKey });
+    toast.success("API Settings Saved");
+    setKeyChanged(false); // Reset after save
   };
 
   return (
     <SettingsLayout title="API & Usage">
       {/* API Key */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <Label className="text-sm text-foreground font-sans">OpenAI API Key</Label>
-          {keyStatus === 'secured' && (
-            <div className="flex items-center gap-1.5 text-xs text-green-600 font-sans font-medium">
-              <Lock size={12} />
-              <span>Encrypted on Disk</span>
-            </div>
-          )}
-          {keyStatus === 'missing' && (
-            <div className="flex items-center gap-1.5 text-xs text-amber-600 font-sans font-medium">
-              <AlertTriangle size={12} />
-              <span>Not Configured</span>
-            </div>
-          )}
-          {keyStatus === 'locked' && (
-            <div className="flex items-center gap-1.5 text-xs text-destructive font-sans font-medium">
-              <Unlock size={12} />
-              <span>Keychain Locked</span>
-            </div>
-          )}
-        </div>
+        <Label className="text-sm text-foreground font-sans">OpenAI API Key</Label>
         <div className="relative">
           <input
+            key={showApiKey ? "text" : "password"} // Force re-render to ensure type switch works
             type={showApiKey ? "text" : "password"}
             value={settings.apiKey}
             onChange={(e) => {
               setSettings({ ...settings, apiKey: e.target.value });
               setKeyError(null);
+              setKeyChanged(true); // Mark that the key was edited
             }}
             placeholder="sk-..."
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck="false"
             className={`w-full input-dotted text-foreground placeholder:text-foreground/30 text-left
                        font-sans text-lg tracking-wider pr-12 py-4 ${keyError ? 'border-destructive' : ''}`}
           />
-          <button
-            type="button"
-            onClick={() => setShowApiKey(!showApiKey)}
-            className="absolute right-0 top-1/2 -translate-y-1/2 p-3 text-muted-foreground transition-colors"
+          <div
+            onClick={async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+
+              if (!showApiKey) {
+                // About to show key. If it's a placeholder, fetch the real one.
+                const isPlaceholder = settings.apiKey === '••••••••••••••••';
+                if (isPlaceholder || (keyStatus === 'secured' && !keyChanged)) {
+                  try {
+                    const realKey = await window.api.settings.getSecureKey();
+                    if (realKey) {
+                      setSettings(prev => ({ ...prev, apiKey: realKey }));
+                    }
+                  } catch (err: any) {
+                    console.error("Unmask error:", err);
+                    toast.error(`Error: ${err.message || "Failed to unmask"}`);
+                  }
+                }
+              }
+
+              setShowApiKey(prev => !prev);
+            }}
+            className="absolute right-0 top-1/2 -translate-y-1/2 p-3 text-muted-foreground transition-colors z-50 cursor-pointer hover:text-foreground"
           >
             {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
-          </button>
+          </div>
         </div>
         {keyError && (
           <motion.p

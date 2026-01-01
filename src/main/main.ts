@@ -231,31 +231,51 @@ async function saveSessionAndNotify(targetSession: Electron.Session) {
 
 function setupIPCHandlers() {
   ipcMain.handle('reset-session', async () => {
+    console.log('🧹 Starting session reset...');
+
+    // 1. Delete session.json
     try {
-      // 1. Delete session.json
       const userDataPath = app.getPath('userData');
       const sessionPath = path.join(userDataPath, 'session.json');
       if (fs.existsSync(sessionPath)) {
         fs.unlinkSync(sessionPath);
+        console.log('✅ Deleted session.json');
       }
+    } catch (e) {
+      console.error('⚠️ Failed to delete session.json:', e);
+    }
 
-      // 2. Clear Electron Cache
+    // 2. Clear Electron Cache (may fail due to file locks, non-critical)
+    try {
       await session.defaultSession.clearStorageData();
-      await session.fromPartition(SHARED_PARTITION).clearStorageData();
+      console.log('✅ Cleared default session storage');
+    } catch (e) {
+      console.error('⚠️ Failed to clear default session storage:', e);
+    }
 
-      // 3. Clear electron-store settings (except maybe some persistent flags if needed, but for reset we wipe info)
+    try {
+      await session.fromPartition(SHARED_PARTITION).clearStorageData();
+      console.log('✅ Cleared shared partition storage');
+    } catch (e) {
+      console.error('⚠️ Failed to clear shared partition storage:', e);
+    }
+
+    // 3. Clear electron-store (critical)
+    try {
       const { default: Store } = await import('electron-store');
       const store: any = new Store();
       store.clear();
-      // Ensure specific keys are definitely gone if clear didn't catch them
       store.delete('analyses');
       store.delete('settings');
-
-      return true;
+      store.delete('activeSchedule');
+      console.log('✅ Cleared electron-store');
     } catch (e) {
-      console.error('Reset Error:', e);
+      console.error('❌ Failed to clear electron-store:', e);
       return false;
     }
+
+    console.log('🎉 Session reset complete');
+    return true;
   });
 
   // --- Electron Store Handlers ---
@@ -307,6 +327,10 @@ function setupIPCHandlers() {
 
   ipcMain.handle('settings:check-key-status', async () => {
     return SecureKeyManager.getInstance().getKeyStatus();
+  });
+
+  ipcMain.handle('settings:get-secure', async () => {
+    return SecureKeyManager.getInstance().getKey();
   });
   // -------------------------------
   // -------------------------------

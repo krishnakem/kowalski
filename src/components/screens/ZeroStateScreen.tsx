@@ -229,12 +229,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
     const removeListener = window.api.onLoginSuccess(() => {
       console.log("🎉 FRONTEND RECEIVED SUCCESS SIGNAL! Transitioning...");
       setInstagramPhase("success");
-
-      // setTimeout(() => {
-      //   patchSettings({ hasOnboarded: true, analysisStatus: "working" });
-      //   onContinue();
-      //   setTimeout(() => setDialogOpen(false), 50);
-      // }, 1500);
     });
 
     return () => {
@@ -242,6 +236,20 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
       if (removeListener) removeListener();
     };
   }, [dialogOpen]);
+
+  // EFFECT 1.5: Auto-proceed after success screen displays for 2.5 seconds
+  useEffect(() => {
+    if (instagramPhase !== "success") return;
+
+    const timer = setTimeout(() => {
+      console.log("⏰ Auto-proceeding from Connection Established screen...");
+      patchSettings({ hasOnboarded: true, analysisStatus: "working" });
+      onContinue();
+      setTimeout(() => setDialogOpen(false), 50);
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, [instagramPhase, patchSettings, onContinue]);
 
   // EFFECT 2: Webview Setup (Ref dependent)
   useEffect(() => {
@@ -940,7 +948,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                       className="w-full h-full bg-paper text-ink flex flex-col items-center justify-center p-8 text-center"
                     >
                       {/* Icon & Text Block */}
-                      <div className="flex flex-col items-center space-y-6 mb-12">
+                      <div className="flex flex-col items-center space-y-6">
                         <div className="p-4 border-2 border-ink/10 rounded-full">
                           <Check className="w-12 h-12 text-ink" strokeWidth={1.5} />
                         </div>
@@ -948,40 +956,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                           <h2 className="text-4xl font-serif tracking-tight text-ink">Connection Established</h2>
                           <p className="text-lg text-ink/60 font-sans tracking-wide uppercase text-sm">Secure session captured</p>
                         </div>
-                      </div>
-
-                      {/* Button Container */}
-                      <div className="flex flex-col gap-4 w-full max-w-xs">
-                        <Button
-                          variant="ghost"
-                          onClick={async () => {
-                            // @ts-ignore
-                            const result = await window.api.testHeadless();
-                            alert(result);
-                          }}
-                          className="w-full"
-                        >
-                          Test Headless Mode
-                        </Button>
-
-                        <Button
-                          variant="default"
-                          onClick={() => {
-                            // 1. UPDATE STATE FIRST (Switch parent view)
-                            patchSettings({ hasOnboarded: true, analysisStatus: "working" });
-                            onContinue();
-
-                            // 2. CLOSE OVERLAY AFTER A TINY DELAY
-                            // This ensures the background has swapped to the new view
-                            // before we lift the curtain.
-                            setTimeout(() => {
-                              setDialogOpen(false);
-                            }, 50);
-                          }}
-                          className="w-full"
-                        >
-                          (DEBUG) Continue to App
-                        </Button>
                       </div>
                     </motion.div>
                   )}

@@ -22,16 +22,6 @@ import { ease, duration, spring, stagger } from "@/lib/animations";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import type { ArchivedAnalysis } from "@/types/analysis";
 
-// Format time for display
-const formatTime = (date: Date | string): string => {
-  const d = date instanceof Date ? date : new Date(date);
-  return d.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true
-  });
-};
-
 const formatDate = (date: Date | string): string => {
   const d = date instanceof Date ? date : new Date(date);
   return d.toLocaleDateString("en-US", {

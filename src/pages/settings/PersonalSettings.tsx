@@ -32,7 +32,6 @@ const PersonalSettings = () => {
   const handleSave = () => {
     patchSettings({ userName: editName, location: editLocation });
     toast.success("Personal info saved");
-    navigate(-1);
   };
 
   const handleDetectLocation = async () => {

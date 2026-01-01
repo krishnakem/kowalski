@@ -15,7 +15,6 @@ const ScheduleSettings = () => {
   const handleSave = () => {
     saveSettings();
     toast.success("Schedule saved");
-    navigateBack("/settings");
   };
 
   return (
