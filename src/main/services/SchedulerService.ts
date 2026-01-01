@@ -2,6 +2,7 @@
 import { BrowserWindow, powerMonitor } from 'electron';
 import { LoremIpsumGenerator } from './LoremIpsumGenerator.js';
 import { v4 as uuidv4 } from 'uuid';
+import { ActiveSchedule } from '../../types/schedule.js';
 
 interface SchedulerSettings {
     digestFrequency: 1 | 2;
@@ -14,17 +15,15 @@ interface SchedulerSettings {
 }
 
 // Next-Day Effect: Locked schedule that only updates on new calendar days
-interface ActiveSchedule {
-    morningTime: string;
-    eveningTime: string;
-    digestFrequency: 1 | 2;
-    activeDate: string;  // YYYY-MM-DD format
-}
+// (Imported ActiveSchedule)
 
 export class SchedulerService {
     private static instance: SchedulerService;
     private checkInterval: NodeJS.Timeout | null = null;
     private mainWindow: BrowserWindow | null = null;
+
+    private alignmentTimeout: NodeJS.Timeout | null = null;
+    private lastWakeTime: Date = new Date(); // Track when app started/woke
 
     private constructor() { }
 
@@ -33,6 +32,10 @@ export class SchedulerService {
             SchedulerService.instance = new SchedulerService();
         }
         return SchedulerService.instance;
+    }
+
+    public getLastWakeTime(): Date {
+        return this.lastWakeTime;
     }
 
     public setMainWindow(window: BrowserWindow | null) {
@@ -58,29 +61,55 @@ export class SchedulerService {
             clearInterval(this.checkInterval);
             this.checkInterval = null;
         }
+        if (this.alignmentTimeout) {
+            clearTimeout(this.alignmentTimeout);
+            this.alignmentTimeout = null;
+        }
     }
 
     public async initialize(): Promise<void> {
         console.log('⏰ SchedulerService: Initialized.');
+        this.lastWakeTime = new Date();
+        console.log('⏰ Wake Time set to:', this.lastWakeTime.toLocaleString());
+
+        // DAEMON MODE: No Catch-Up. Start watching immediately.
         this.startHeartbeat();
+
 
         // Restart heartbeat on system wake to ensure accuracy
         powerMonitor.on('resume', () => {
             console.log('⚡️ System Resumed: Restarting Heartbeat.');
+            this.lastWakeTime = new Date(); // Reset wake time on resume
+            console.log('⏰ Wake Time updated to:', this.lastWakeTime.toLocaleString());
             this.startHeartbeat();
         });
     }
 
     private startHeartbeat() {
+        // Clear existing timers
         if (this.checkInterval) clearInterval(this.checkInterval);
+        if (this.alignmentTimeout) clearTimeout(this.alignmentTimeout);
 
-        // Check every minute
-        this.checkInterval = setInterval(() => {
-            this.checkSchedule();
-        }, 60 * 1000);
+        const now = new Date();
+        const msUntilNextMinute = 60000 - (now.getTime() % 60000);
 
-        // Run immediate check in case we launched right on the minute or need to catch up
+        console.log(`⏰ SchedulerService: Aligning heartbeat. Waiting ${msUntilNextMinute}ms for minute boundary.`);
+
+        // Run immediate check for catch-up (in case we missed a slot while app was closed)
         this.checkSchedule();
+
+        // Wait for top of minute
+        this.alignmentTimeout = setTimeout(() => {
+            console.log('⏰ SchedulerService: Minute boundary reached. Starting precision intervals.');
+
+            // Execute exactly on the minute
+            this.checkSchedule();
+
+            // Start regular interval
+            this.checkInterval = setInterval(() => {
+                this.checkSchedule();
+            }, 60000);
+        }, msUntilNextMinute);
     }
 
     /**
@@ -135,6 +164,9 @@ export class SchedulerService {
     }
 
     private async checkSchedule() {
+        // Log precise execution time for debugging
+        console.log("Scheduler Triggered at: " + new Date().toISOString());
+
         try {
             const store = await this.getStore();
 
@@ -174,6 +206,8 @@ export class SchedulerService {
         }
     }
 
+    // catchUpMissedSlots removed for Daemon Mode (Anti-Burst)
+
     /**
      * Determines if we should trigger based on current time, target time, and last run.
      * Logic: 
@@ -197,6 +231,18 @@ export class SchedulerService {
         // 1. If we haven't reached the target time yet today, wait.
         if (now < targetTimeToday) return false;
 
+        // 1.5 CHECK: 3-Hour Preparation Buffer
+        // If the machine woke up too close to the target time, skip it.
+        // Diff = TargetTime - WakeTime
+        const prepTimeMs = targetTimeToday.getTime() - this.lastWakeTime.getTime();
+        const threeHoursMs = 3 * 60 * 60 * 1000;
+
+        // Condition: triggers only if we have > 3 hours of "uptime" before the slot
+        if (prepTimeMs < threeHoursMs) {
+            console.log(`🛡️ Skipping Slot ${targetTimeStr}: Not enough prep time (${Math.floor(prepTimeMs / 60000)}m < 180m)`);
+            return false;
+        }
+
         // 2. Check if we already ran for this slot TODAY (or after it)
         if (lastRunIso) {
             const lastRun = new Date(lastRunIso);
@@ -205,30 +251,34 @@ export class SchedulerService {
             }
         }
 
-        // 3. Catch-Up Tolerance (e.g., 12 hours)
+        // 3. Catch-Up Tolerance (e.g., 30 minutes for daemon mode)
         const diffMs = now.getTime() - targetTimeToday.getTime();
-        const twelveHoursMs = 12 * 60 * 60 * 1000;
+        const thirtyMinutesMs = 30 * 60 * 1000;
 
-        if (diffMs > twelveHoursMs) {
+        if (diffMs > thirtyMinutesMs) {
             return false;
         }
 
         return true;
     }
 
-    private async triggerSimulation(now: Date, store: any, scheduledTime: string) {
+    private async triggerSimulation(now: Date, store: any, scheduledTime: string, targetDate?: Date, silent: boolean = false) {
         const settings = store.get('settings') || {};
+
+        // If targetDate provided, use it. Otherwise use 'now'
+        const effectiveDate = targetDate || now;
 
         // 1. Generate Content with User Context (including the scheduled time slot)
         const mockAnalysis = LoremIpsumGenerator.generate({
             userName: settings.userName,
             location: settings.location,
-            scheduledTime: scheduledTime
+            scheduledTime: scheduledTime,
+            targetDate: effectiveDate
         });
 
         // 2. Persist
         const newRecord = {
-            id: `analysis-sim-${Date.now()}`,
+            id: `analysis-sim-${Date.now()}-${Math.floor(Math.random() * 1000)}`, // Random suffix to avoid collision in fast loops
             data: mockAnalysis,
             leadStoryPreview: mockAnalysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
         };
@@ -238,17 +288,20 @@ export class SchedulerService {
         store.set('analyses', updatedAnalyses);
 
         // 3. Update State
+        // If silent (catch-up), mark as 'idle' so user isn't bombarded. Only final one (not silent) marks 'ready'.
+        const newStatus = silent ? 'idle' : 'ready';
+
         store.set('settings', {
             ...settings,
-            lastAnalysisDate: now.toISOString(),
-            analysisStatus: 'ready'
+            lastAnalysisDate: effectiveDate.toISOString(),
+            analysisStatus: newStatus
         });
 
         // 4. Zero-Cost Logging
-        console.log('🤖 Simulation Complete. Estimated Cost: $0.00 (Zero-Cost Mode)');
+        console.log(`🤖 Simulation Complete (${silent ? 'Silent/Historical' : 'Live'}). Estimated Cost: $0.00`);
 
-        // 5. Notify UI (Push)
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        // 5. Notify UI (Push) - Only if not silent
+        if (!silent && this.mainWindow && !this.mainWindow.isDestroyed()) {
             console.log('📡 Push Notification Sent: analysis-ready');
             this.mainWindow.webContents.send('analysis-ready', newRecord);
         }

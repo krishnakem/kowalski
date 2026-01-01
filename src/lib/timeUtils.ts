@@ -37,13 +37,51 @@ export const parseTimeString = (timeStr: string): { hours: number; minutes: numb
   return { hours, minutes };
 };
 
+import type { ActiveSchedule } from "@/types/schedule";
+
 /**
- * Calculates when the next analysis will be ready based on user settings.
- * If isFirstDay is true (fresh onboarding), always returns tomorrow's morning time
- * to account for the "next-day effect" where schedules activate the day after setup.
+ * Calculates when the next analysis will be ready based on locked schedule and completion status.
+ *
+ * Truth Source Logic:
+ * 1. Active Schedule (Daily Snapshot) is the authority.
+ * 2. If Today's slots are completed (checked via lastAnalysisDate), show Tomorrow.
+ * 3. Fallback to Settings only if Active Schedule is missing (should not happen after onboarding).
  */
-export const getNextAnalysisTime = (settings: SettingsData, isFirstDay: boolean = false): string => {
-  const morning = parseTimeString(settings.morningTime);
+export const getNextAnalysisTime = (
+  settings: SettingsData,
+  activeSchedule: ActiveSchedule | null,
+  isFirstDay: boolean = false,
+  wakeTime: Date | null = null
+): string => {
+  // Use locked schedule if available, else fallback to settings
+  const morningTimeStr = activeSchedule?.morningTime || settings.morningTime;
+  const eveningTimeStr = activeSchedule?.eveningTime || settings.eveningTime;
+  const frequency = activeSchedule?.digestFrequency || settings.digestFrequency;
+
+  const morning = parseTimeString(morningTimeStr);
+  const evening = parseTimeString(eveningTimeStr);
+
+  // Buffer Logic Helper
+  // Returns TRUE if the target slot is "buffered out" (too close to wake time)
+  // Logic: Target (Today/Tomorrow) - WakeTime < 3 Hours
+  const isBuffered = (targetTime: { hours: number, minutes: number }, isTargetTomorrow: boolean): boolean => {
+    if (!wakeTime) return false;
+
+    const now = new Date();
+    const targetDate = new Date(now);
+    targetDate.setHours(targetTime.hours, targetTime.minutes, 0, 0);
+    if (isTargetTomorrow) {
+      targetDate.setDate(targetDate.getDate() + 1);
+    } else {
+      // If target is today but time has passed, this logic is moot as we wouldn't pick it anyway.
+      // But if it's future, we check.
+    }
+
+    const prepTimeMs = targetDate.getTime() - wakeTime.getTime();
+    const threeHoursMs = 3 * 60 * 60 * 1000;
+
+    return prepTimeMs < threeHoursMs;
+  };
 
   // If this is the first day (just onboarded), schedule starts tomorrow
   if (isFirstDay) {
@@ -52,12 +90,50 @@ export const getNextAnalysisTime = (settings: SettingsData, isFirstDay: boolean 
   }
 
   const now = new Date();
+
+  // COMPLETION CHECK: Has the user already received today's analysis?
+  if (settings.lastAnalysisDate) {
+    // ... [Existing Completion Logic] ...
+    // Note: If we are "done for the day", the result is usually "Tomorrow".
+    // We should theoretically check if "Tomorrow Morning" is buffered too?
+    // Unlikely (launch > 21 hours before tomorrow morning), but possible if freq=2 and we just woke up late?
+    // Let's assume Tomorrow logic is safe for now, or apply buffer check there too.
+
+    // For simplicity, let's inject buffering into the standard flow below, 
+    // OR just return standard "Tomorrow" if completed.
+    // If we are strictly "Done", we are done.
+
+    const lastDate = new Date(settings.lastAnalysisDate);
+    const isLastAnalysisToday = lastDate.toDateString() === now.toDateString();
+
+    if (isLastAnalysisToday) {
+      if (frequency === 1) {
+        const formattedTime = formatTime(morning.hours, morning.minutes);
+        return `Tomorrow at ${formattedTime}`;
+      }
+      // Freq 2 logic
+      const lastMinutes = lastDate.getHours() * 60 + lastDate.getMinutes();
+      if (lastMinutes >= 12 * 60) {
+        // Evening done -> Tomorrow Morning
+        const formattedTime = formatTime(morning.hours, morning.minutes);
+        return `Tomorrow at ${formattedTime}`;
+      } else {
+        // Morning done -> Tonight Evening
+        // Check Buffer for Evening
+        if (isBuffered(evening, false)) {
+          // Evening buffered out -> Alert user it's Tomorrow Morning instead
+          const formattedTime = formatTime(morning.hours, morning.minutes);
+          return `Tomorrow at ${formattedTime}`;
+        }
+        const formattedTime = formatTime(evening.hours, evening.minutes);
+        return `Today at ${formattedTime}`;
+      }
+    }
+  }
+
+  // STANDARD CHECK (No analysis today yet)
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
-
-  const evening = parseTimeString(settings.eveningTime);
-
-  // Convert to minutes since midnight for easy comparison
   const nowMinutes = currentHour * 60 + currentMinute;
   const morningMinutes = morning.hours * 60 + morning.minutes;
   const eveningMinutes = evening.hours * 60 + evening.minutes;
@@ -65,9 +141,9 @@ export const getNextAnalysisTime = (settings: SettingsData, isFirstDay: boolean 
   let nextTime: { hours: number; minutes: number };
   let isToday = true;
 
-  if (settings.digestFrequency === 1) {
+  if (frequency === 1) {
     // Once daily - only morning time
-    if (nowMinutes < morningMinutes) {
+    if (nowMinutes < morningMinutes && !isBuffered(morning, false)) {
       nextTime = morning;
     } else {
       nextTime = morning;
@@ -75,9 +151,10 @@ export const getNextAnalysisTime = (settings: SettingsData, isFirstDay: boolean 
     }
   } else {
     // Twice daily - morning and evening
-    if (nowMinutes < morningMinutes) {
+    if (nowMinutes < morningMinutes && !isBuffered(morning, false)) {
       nextTime = morning;
-    } else if (nowMinutes < eveningMinutes) {
+    } else if (nowMinutes < eveningMinutes && !isBuffered(evening, false)) {
+      // It's before evening. Is evening buffered?
       nextTime = evening;
     } else {
       nextTime = morning;

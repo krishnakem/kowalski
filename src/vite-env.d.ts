@@ -14,6 +14,8 @@ interface Window {
             get: () => Promise<any>;
             set: (settings: any) => Promise<boolean>;
             patch: (updates: any) => Promise<any>;
+            getActiveSchedule: () => Promise<any>;
+            getWakeTime: () => Promise<Date>;
             setSecure: (apiKey: string) => Promise<boolean>;
             checkKeyStatus: () => Promise<'locked' | 'secured' | 'missing'>;
             getSecureKey: () => Promise<string | null>;

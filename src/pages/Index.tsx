@@ -18,6 +18,7 @@ const Index = () => {
   const { settings, isLoaded, patchSettings } = useSettings();
   const { analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
   const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
+  const [latestAnalysisId, setLatestAnalysisId] = useState<string | null>(null);
 
   // Determine initial screen based on user state - only runs once on initial load
   useEffect(() => {
@@ -57,6 +58,11 @@ const Index = () => {
         return;
       }
 
+      // Capture the ID for direct navigation (fixes deep link bug)
+      if (newAnalysis.id) {
+        setLatestAnalysisId(newAnalysis.id);
+      }
+
       // Update Global Settings
       patchSettings({
         analysisStatus: 'ready',
@@ -87,10 +93,13 @@ const Index = () => {
 
   const handleViewAnalysis = () => {
     // Navigate to the latest analysis in the Archive hub
-    if (analyses.length > 0) {
-      const latestId = analyses[0].id;
+    // Prioritize the ID received from the background event (latestAnalysisId)
+    // as hooks might be stale immediately after generation.
+    const targetId = latestAnalysisId || (analyses.length > 0 ? analyses[0].id : null);
+
+    if (targetId) {
       patchSettings({ analysisStatus: "idle" });
-      navigate(`/archive/${latestId}`);
+      navigate(`/archive/${targetId}`);
     } else {
       // Fallback: go to archive list
       navigate("/archive");

@@ -59,7 +59,7 @@ export class LoremIpsumGenerator {
         };
     }
 
-    public static generate(options?: { userName?: string, location?: string, scheduledTime?: string }): AnalysisObject {
+    public static generate(options?: { userName?: string, location?: string, scheduledTime?: string, targetDate?: Date }): AnalysisObject {
         const numSections = Math.floor(Math.random() * 2) + 2; // 2-3 sections
         const sections: AnalysisSection[] = [];
         for (let i = 0; i < numSections; i++) {
@@ -67,7 +67,8 @@ export class LoremIpsumGenerator {
         }
 
         // Title Logic: [User Name]'s [Day] Analysis
-        const date = new Date();
+        // Use provided targetDate (for back-dating) or current date
+        const date = options?.targetDate ? new Date(options.targetDate) : new Date();
         const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
 
         let title = `The ${dayName} Analysis`; // Default fallback

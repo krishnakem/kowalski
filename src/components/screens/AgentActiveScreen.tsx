@@ -6,6 +6,8 @@ import { AnimatedPixelPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
+import { useDailySnapshot } from "@/hooks/useDailySnapshot";
+import { useSystemWakeTime } from "@/hooks/useSystemWakeTime";
 import { ease, duration, spring } from "@/lib/animations";
 import { getNextAnalysisTime } from "@/lib/timeUtils";
 
@@ -23,10 +25,12 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
   const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
+  const { snapshot: activeSchedule } = useDailySnapshot();
+  const { wakeTime } = useSystemWakeTime();
 
   // If no past analyses, this is the first day after onboarding - schedule starts tomorrow
   const isFirstDay = archivesLoaded && !hasPastAnalyses;
-  const nextAnalysis = getNextAnalysisTime(settings, isFirstDay);
+  const nextAnalysis = getNextAnalysisTime(settings, activeSchedule, isFirstDay, wakeTime);
   const showArchiveButton = archivesLoaded && hasPastAnalyses;
 
   // Purely visual component - navigation is handled by global listeners in Index.tsx

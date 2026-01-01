@@ -2,7 +2,24 @@ import { app, BrowserWindow, ipcMain, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { chromium } from 'playwright';
+// Replace 'playwright' import with 'playwright-extra'
+import { chromium } from 'playwright-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+// Add stealth plugin to chromium
+chromium.use(StealthPlugin());
+
+// --- GLOBAL ELECTRON FIXES ---
+app.commandLine.appendSwitch('ignore-certificate-errors');
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-software-rasterizer');
+app.commandLine.appendSwitch('disable-dev-shm-usage');
+
+// ... (imports remain) ...
+
+// ... (inside setupIPCHandlers) ...
+
+
 import { SecureKeyManager } from './services/SecureKeyManager.js';
 import { UsageService } from './services/UsageService.js';
 import { SchedulerService } from './services/SchedulerService.js';
@@ -12,6 +29,14 @@ const __dirname = path.dirname(__filename);
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
+
+// Ensure app launches on login (background daemon)
+if (!app.getLoginItemSettings().openAtLogin) {
+  app.setLoginItemSettings({
+    openAtLogin: true,
+    openAsHidden: false // Optional: could be true if we want silent start
+  });
+}
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -149,17 +174,37 @@ app.on('web-contents-created', (event, contents) => {
     }, 1000);
 
     // METHOD A: EVENT SNIFFER (Listening to headers on this handle)
+    // METHOD A: EVENT SNIFFER (Listening to headers on this handle)
     const filter = { urls: ['*://*.instagram.com/*'] };
-    contents.session.webRequest.onHeadersReceived(filter, async (details, callback) => {
+    const targetSession = contents.session; // Capture reference safely
+
+    // 1. Setup Listener
+    targetSession.webRequest.onHeadersReceived(filter, async (details, callback) => {
       const responseHeaders = details.responseHeaders;
       const setCookie = responseHeaders ? (responseHeaders['set-cookie'] || responseHeaders['Set-Cookie']) : null;
       if (setCookie && Array.isArray(setCookie)) {
         if (setCookie.some(h => h.includes('sessionid'))) {
           // Give it a moment to commit to the jar
-          setTimeout(() => saveSessionAndNotify(contents.session), 500);
+          setTimeout(() => {
+            // FIX: Prevent accessing destroyed object
+            if (!contents.isDestroyed()) {
+              saveSessionAndNotify(contents.session);
+            }
+          }, 500);
         }
       }
       callback({ responseHeaders: details.responseHeaders });
+    });
+
+    // 2. Cleanup on Destruction (Requested by User)
+    contents.on('destroyed', () => {
+      try {
+        // Remove the listener to prevent memory leaks or zombie handlers
+        // Note: usage of targetSession here is safe because we captured it
+        targetSession.webRequest.onHeadersReceived(filter, null);
+      } catch (e) {
+        // Ignore errors during cleanup
+      }
     });
   }
 });
@@ -320,6 +365,16 @@ function setupIPCHandlers() {
     return true;
   });
 
+  ipcMain.handle('settings:get-active-schedule', async () => {
+    const { default: Store } = await import('electron-store');
+    const store: any = new Store();
+    return store.get('activeSchedule') || null;
+  });
+
+  ipcMain.handle('settings:get-wake-time', async () => {
+    return SchedulerService.getInstance().getLastWakeTime();
+  });
+
   // --- Secure Storage Handlers ---
   ipcMain.handle('settings:set-secure', async (_event, { apiKey }) => {
     return SecureKeyManager.getInstance().setKey(apiKey);
@@ -340,26 +395,51 @@ function setupIPCHandlers() {
       const userDataPath = app.getPath('userData');
       const sessionPath = path.join(userDataPath, 'session.json');
 
+      console.log('🤖 Starting Playwright with Stealth + GPU Fixes...');
+
       if (!fs.existsSync(sessionPath)) {
         return 'No session file found';
       }
 
-      // Launch non-headless temporarily to verify
-      const browser = await chromium.launch({ headless: false });
-      const context = await browser.newContext({ storageState: sessionPath });
+      // Launch with robust args for "Black Window" fix
+      const browser = await chromium.launch({
+        headless: false,
+        args: [
+          '--disable-gpu',
+          '--disable-dev-shm-usage',
+          '--disable-software-rasterizer', // Crucial for black window issues
+          '--no-sandbox',
+          '--disable-blink-features=AutomationControlled', // Anti-detection
+          '--window-position=0,0'
+        ]
+      });
+
+      const context = await browser.newContext({
+        storageState: sessionPath,
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'
+      });
+
       const page = await context.newPage();
 
+      // --- VERBOSE LOGGING START ---
+      page.on('console', msg => console.log('PW CONSOLE:', msg.text()));
+      page.on('pageerror', err => console.log('PW ERROR:', err.message));
+      page.on('requestfailed', request => console.log('PW FAILED:', request.url(), request.failure()?.errorText));
+      // --- VERBOSE LOGGING END ---
+
+      console.log('🌍 Navigating to Instagram...');
       await page.goto('https://www.instagram.com/');
 
       try {
-        await page.waitForSelector('svg[aria-label="Home"]', { timeout: 5000 });
-        // await browser.close(); // Keep open for inspection
+        await page.waitForSelector('svg[aria-label="Home"]', { timeout: 10000 });
+        console.log('✅ INSTAGRAM LOGIN CONFIRMED');
         return 'Success: Logged in automatically';
       } catch (e) {
-        // await browser.close(); // Keep open for inspection
+        console.log('❌ NOT LOGGED IN / SELECTOR TIMEOUT');
         return 'Failed: Still on login page';
       }
     } catch (error) {
+      console.error('CRITICAL PW ERROR:', error);
       return `Error: ${(error as Error).message}`;
     }
   });

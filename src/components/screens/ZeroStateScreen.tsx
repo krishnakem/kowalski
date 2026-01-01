@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { useSettings } from "@/hooks/useSettings";
 import { TIME_OPTIONS, MORNING_TIME_OPTIONS, EVENING_TIME_OPTIONS } from "@/lib/constants";
+import { getValidEveningOptions } from "@/utils/timeValidation";
 
 interface ZeroStateScreenProps {
   onContinue: () => void;
@@ -156,11 +157,25 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
       if (!MORNING_TIME_OPTIONS.includes(morningTime)) {
         setMorningTime("8:00 AM");
       }
-      if (!EVENING_TIME_OPTIONS.includes(eveningTime)) {
-        setEveningTime("6:00 PM");
+
+      const currentValidEvening = getValidEveningOptions(morningTime, EVENING_TIME_OPTIONS);
+      if (!currentValidEvening.includes(eveningTime)) {
+        setEveningTime(currentValidEvening[0] || "6:00 PM");
       }
     }
   };
+
+  // Calculate valid evening options dynamically
+  const validEveningTimes = getValidEveningOptions(morningTime, EVENING_TIME_OPTIONS);
+
+  // Auto-correct loop: If Morning changes and makes Evening invalid, snap to nearest valid
+  useEffect(() => {
+    if (digestCount === 2 && !validEveningTimes.includes(eveningTime)) {
+      if (validEveningTimes.length > 0) {
+        setEveningTime(validEveningTimes[0]);
+      }
+    }
+  }, [morningTime, digestCount, validEveningTimes, eveningTime]);
 
   const handleRoutineContinue = () => {
     // Save schedule settings before moving to interests
@@ -519,7 +534,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                           className="bg-transparent border-2 border-foreground/20 px-6 py-3 font-sans text-foreground 
                                      focus:border-foreground outline-none transition-colors cursor-pointer"
                         >
-                          {EVENING_TIME_OPTIONS.map((time) => (
+                          {validEveningTimes.map((time) => (
                             <option key={time} value={time} className="bg-background">
                               {time}
                             </option>

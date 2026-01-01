@@ -55,7 +55,8 @@ export class LoremIpsumGenerator {
             sections.push(this.generateSection());
         }
         // Title Logic: [User Name]'s [Day] Analysis
-        const date = new Date();
+        // Use provided targetDate (for back-dating) or current date
+        const date = options?.targetDate ? new Date(options.targetDate) : new Date();
         const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
         let title = `The ${dayName} Analysis`; // Default fallback
         if (options?.userName && options.userName.trim().length > 0) {

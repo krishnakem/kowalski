@@ -20,6 +20,8 @@ electron_1.contextBridge.exposeInMainWorld('api', {
         get: () => electron_1.ipcRenderer.invoke('settings:get'),
         set: (value) => electron_1.ipcRenderer.invoke('settings:set', value),
         patch: (updates) => electron_1.ipcRenderer.invoke('settings:patch', updates),
+        getActiveSchedule: () => electron_1.ipcRenderer.invoke('settings:get-active-schedule'),
+        getWakeTime: () => electron_1.ipcRenderer.invoke('settings:get-wake-time'),
         setSecure: (apiKey) => electron_1.ipcRenderer.invoke('settings:set-secure', { apiKey }),
         checkKeyStatus: () => electron_1.ipcRenderer.invoke('settings:check-key-status'),
         getSecureKey: () => electron_1.ipcRenderer.invoke('settings:get-secure'),

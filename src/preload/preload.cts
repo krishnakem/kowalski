@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('api', {
         get: () => ipcRenderer.invoke('settings:get'),
         set: (value: any) => ipcRenderer.invoke('settings:set', value),
         patch: (updates: any) => ipcRenderer.invoke('settings:patch', updates),
+        getActiveSchedule: () => ipcRenderer.invoke('settings:get-active-schedule'),
+        getWakeTime: () => ipcRenderer.invoke('settings:get-wake-time'),
         setSecure: (apiKey: string) => ipcRenderer.invoke('settings:set-secure', { apiKey }),
         checkKeyStatus: () => ipcRenderer.invoke('settings:check-key-status'),
         getSecureKey: () => ipcRenderer.invoke('settings:get-secure'),

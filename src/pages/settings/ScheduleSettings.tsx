@@ -8,6 +8,9 @@ import { TIME_OPTIONS, MORNING_TIME_OPTIONS, EVENING_TIME_OPTIONS } from "@/lib/
 import SettingsLayout from "@/components/layouts/SettingsLayout";
 import { spring } from "@/lib/animations";
 
+import { getValidEveningOptions } from "@/utils/timeValidation";
+import { useEffect, useMemo } from "react";
+
 const ScheduleSettings = () => {
   const { navigateBack } = useFromScreen();
   const { settings, setSettings, saveSettings } = useSettings();
@@ -16,6 +19,21 @@ const ScheduleSettings = () => {
     saveSettings();
     toast.success("Schedule saved");
   };
+
+  // Calculate valid evening options based on morning selection
+  const validEveningOptions = useMemo(() => {
+    return getValidEveningOptions(settings.morningTime, EVENING_TIME_OPTIONS);
+  }, [settings.morningTime]);
+
+  // Auto-correct: If current evening time is invalid, snap to the first valid Option
+  useEffect(() => {
+    if (settings.digestFrequency === 2 && !validEveningOptions.includes(settings.eveningTime)) {
+      if (validEveningOptions.length > 0) {
+        // Update setting immediately if invalid
+        setSettings({ ...settings, eveningTime: validEveningOptions[0] });
+      }
+    }
+  }, [settings.morningTime, validEveningOptions, settings.digestFrequency, settings.eveningTime, setSettings, settings]);
 
   return (
     <SettingsLayout title="Schedule">
@@ -94,7 +112,7 @@ const ScheduleSettings = () => {
             className="w-full bg-background border-2 border-foreground/20 px-6 py-3 font-sans text-foreground text-center
                        focus:border-foreground outline-none transition-colors cursor-pointer"
           >
-            {EVENING_TIME_OPTIONS.map((time) => (
+            {validEveningOptions.map((time) => (
               <option key={time} value={time} className="bg-background">
                 {time}
               </option>

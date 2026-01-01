@@ -72,17 +72,28 @@ const GazetteScreen = memo(({ onClose, analysisData: propData, isArchived: propI
   const headerOpacity = useTransform(scrollY, [0, 200], [1, 0.3]);
   const headerScale = useTransform(scrollY, [0, 300], [1, 0.95]);
 
-  // Three-Hub Architecture: Back always goes to Archive List
+  // Three-Hub Architecture: Back always goes to Archive List (with specific state)
   const handleClose = useCallback(() => {
-    console.log("GazetteScreen: Back button clicked. Navigating to Archive List.");
+    console.log("GazetteScreen: Back button clicked. Navigating to Archive Hierarchically.");
+
     // If used inline (e.g., from AnalysisArchive modal), call the provided callback
     if (onClose) {
       onClose();
     } else {
-      // Route-based: Navigate to Archive List
-      navigate("/archive");
+      // Route-based: Navigate "Up" to the specific Calendar View (L3)
+      const d = effectiveData?.date ? new Date(effectiveData.date) : new Date();
+      const year = d.getFullYear();
+      const month = d.getMonth();
+
+      navigate("/archive", {
+        state: {
+          viewMode: 'calendar',
+          year,
+          month
+        }
+      });
     }
-  }, [onClose, navigate]);
+  }, [onClose, navigate, effectiveData]);
 
   const handleNavigateToSettings = useCallback(() => {
     navigate("/settings", { state: { from: "gazette" } });

@@ -305,12 +305,29 @@ const AnalysisArchive = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showAllResults, setShowAllResults] = useState(false);
 
-  // Set initial year when data loads
+  // Hydrate state from "Up" navigation (e.g. from Gazette teleport)
   useEffect(() => {
-    if (availableYears.length > 0 && selectedYear === null) {
+    // specific strict check for location state presence to avoid runtime errors
+    const navState = (location.state || {}) as any;
+    const { viewMode: targetView, year, month } = navState;
+
+    if (targetView === 'calendar' && year !== undefined && month !== undefined) {
+      console.log("AnalysisArchive: Hydrating state from navigation:", { year, month });
+      setSelectedYear(year);
+      setSelectedMonth(month);
+      setViewMode('calendar');
+    }
+  }, [location.state]);
+
+  // Set initial year when data loads (Defaults - only if not hydrating)
+  useEffect(() => {
+    const navState = (location.state || {}) as any;
+    const isHydrating = navState.viewMode === 'calendar';
+
+    if (availableYears.length > 0 && selectedYear === null && !isHydrating) {
       setSelectedYear(availableYears[0]);
     }
-  }, [availableYears, selectedYear]);
+  }, [availableYears, selectedYear, location.state]);
 
   // Memoized search filter
   const matchesSearch = useCallback((analysis: ArchivedAnalysis, query: string): boolean => {
@@ -342,12 +359,13 @@ const AnalysisArchive = () => {
 
   const handleBack = useCallback(() => {
     if (viewMode === "calendar") {
+      // Level 3 -> Level 2: Go from Calendar to Month Grid
       setViewMode("months");
       setSelectedMonth(null);
       return;
     }
-    // Standard dynamic back navigation
-    navigate(-1);
+    // Level 2 -> Level 1: Explicitly Go Home (Fixes Loop)
+    navigate("/");
   }, [viewMode, navigate]);
 
   const handleAnalysisClick = useCallback((analysis: ArchivedAnalysis) => {

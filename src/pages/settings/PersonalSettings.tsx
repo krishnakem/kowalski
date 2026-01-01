@@ -176,7 +176,7 @@ const PersonalSettings = () => {
             // But we might want to refresh checking status?
             // The UI says "Session Active" statically right now, which is fine since we just logged in.
           }}
-          autoCloseDelay={5000} // 5 Seconds wait
+          autoCloseDelay={2500} // 2.5 Seconds wait
         />
       </div>
     </SettingsLayout>
