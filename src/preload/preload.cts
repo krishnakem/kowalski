@@ -21,6 +21,12 @@ contextBridge.exposeInMainWorld('api', {
         patch: (updates: any) => ipcRenderer.invoke('settings:patch', updates),
         setSecure: (apiKey: string) => ipcRenderer.invoke('settings:set-secure', { apiKey }),
         checkKeyStatus: () => ipcRenderer.invoke('settings:check-key-status'),
+        onAnalysisReady: (callback: (analysis: any) => void) => {
+            const subscription = (_event: any, analysis: any) => callback(analysis);
+            ipcRenderer.on('analysis-ready', subscription);
+            // Return unsubscribe function
+            return () => ipcRenderer.removeListener('analysis-ready', subscription);
+        }
     },
     analyses: {
         get: () => ipcRenderer.invoke('analyses:get'),

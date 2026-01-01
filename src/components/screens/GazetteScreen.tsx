@@ -1,5 +1,5 @@
-import { useRef, useMemo, useCallback, memo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRef, useMemo, useCallback, memo, useEffect, useState } from "react";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { Settings, ArrowLeft, Archive } from "lucide-react";
 import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
@@ -9,12 +9,12 @@ import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { ease, duration, spring, stagger } from "@/lib/animations";
 import type { AnalysisObject } from "@/types/analysis";
 import { AnalysisRenderer } from "@/components/gazette/AnalysisRenderer";
-// import { sampleAnalysis } from "@/mocks/sampleAnalysis";
 
 interface GazetteScreenProps {
-  onClose: () => void;
-  analysisData: AnalysisObject;
+  // Props for legacy/inline usage (e.g., AnalysisArchive modal)
+  analysisData?: AnalysisObject;
   isArchived?: boolean;
+  onClose?: () => void; // Used by AnalysisArchive inline modal
 }
 
 // Animation transitions defined outside component
@@ -24,12 +24,47 @@ const headerTransition = { delay: 0.15, duration: duration.slow, ease: ease.cine
 const dividerTransition = { duration: duration.slow, ease: ease.cinematic };
 const sectionTransition = { duration: duration.slow, ease: ease.cinematic };
 
-const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: GazetteScreenProps) => {
+const GazetteScreen = memo(({ onClose, analysisData: propData, isArchived: propIsArchived = false }: GazetteScreenProps) => {
   const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const locationState = useLocation().state as { from?: string } | null;
   const { settings, patchSettings } = useSettings();
-  const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
-  const hasArchivedAnalyses = archivesLoaded && hasPastAnalyses;
+  const { analyses, hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Determine effective data: props -> param id -> fallback (latest)
+  const [effectiveData, setEffectiveData] = useState<AnalysisObject | null>(propData || null);
+  const [isArchived, setIsArchived] = useState(propIsArchived);
+
+  useEffect(() => {
+    if (propData) {
+      setEffectiveData(propData);
+      setIsArchived(propIsArchived);
+      return;
+    }
+
+    if (!archivesLoaded) return;
+
+    if (id) {
+      const found = analyses.find(a => a.id === id);
+      if (found) {
+        setEffectiveData(found.data);
+        setIsArchived(true); // If accessed by ID, it's considered archived/persistent
+      } else {
+        // ID provided but not found? Redirect to archive list
+        navigate('/archive', { replace: true });
+      }
+    } else {
+      // No ID, No Props. Show Latest Analysis (Active)
+      if (analyses.length > 0) {
+        setEffectiveData(analyses[0].data);
+        setIsArchived(false);
+      }
+    }
+  }, [id, propData, propIsArchived, analyses, archivesLoaded, navigate]);
+
+
+  const hasArchivedAnalyses = archivesLoaded && hasPastAnalyses;
 
   // Parallax scroll effects
   const { scrollY } = useScroll();
@@ -37,23 +72,26 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
   const headerOpacity = useTransform(scrollY, [0, 200], [1, 0.3]);
   const headerScale = useTransform(scrollY, [0, 300], [1, 0.95]);
 
+  // Three-Hub Architecture: Back always goes to Archive List
   const handleClose = useCallback(() => {
-    patchSettings({ analysisStatus: "idle" });
-    onClose();
-  }, [patchSettings, onClose]);
-
-  const handleNavigateToArchive = useCallback(() => {
-    navigate("/archive", { state: { from: "gazette" } });
-  }, [navigate]);
+    console.log("GazetteScreen: Back button clicked. Navigating to Archive List.");
+    // If used inline (e.g., from AnalysisArchive modal), call the provided callback
+    if (onClose) {
+      onClose();
+    } else {
+      // Route-based: Navigate to Archive List
+      navigate("/archive");
+    }
+  }, [onClose, navigate]);
 
   const handleNavigateToSettings = useCallback(() => {
     navigate("/settings", { state: { from: "gazette" } });
   }, [navigate]);
 
 
-
-  // Hydrate date if it's a string
-  const date = analysisData ? (analysisData.date instanceof Date ? analysisData.date : new Date(analysisData.date)) : new Date();
+  // Hydrate date if it's a string (Handle null effectiveData gracefully by checking specific usage or defaulting)
+  const dateStr = effectiveData?.date || new Date().toISOString();
+  const date = dateStr instanceof Date ? dateStr : new Date(dateStr);
 
   // Memoize expensive string operations
   const { dayName, monthDay } = useMemo(() => ({
@@ -61,46 +99,49 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
     monthDay: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
   }), [date]);
 
-  // Prefer data provided in analysis, fallback to settings
-  const location = analysisData?.location || settings.location || "Cupertino";
-  const displayTitle = analysisData?.title || (settings.userName?.trim() ? `${settings.userName.trim()}'s Analysis` : `The ${dayName} Analysis`);
-  const displaySubtitle = analysisData?.subtitle || null;
+  // Loading state (Moved AFTER hooks)
+  if (!effectiveData) {
+    if (!archivesLoaded) return <div className="min-h-screen bg-background" />; // Loading...
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background text-muted-foreground">
+        <p>No analysis found.</p>
+        <Button variant="link" onClick={() => navigate('/archive')}>Go to Archive</Button>
+      </div>
+    );
+  }
 
-  // Get first letter for drop cap - memoized
+  // Prefer data provided in analysis, fallback to settings (if legacy data)
+  const locationVal = effectiveData.location; // Can be empty string now
+  const displayTitle = effectiveData.title || `The ${dayName} Analysis`;
 
+  // Format Time: Use the stored scheduledTime from the analysis data
+  const timeStr = effectiveData.scheduledTime || "8:00 AM";
+  const displayTime = `${timeStr} Analysis`;
 
   return (
     <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background relative">
 
-      {/* Back Button (for archived view) OR Archive Button (for live view, only if archives exist) */}
-      {(isArchived || hasArchivedAnalyses) && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={buttonEntranceTransition}
-          className="absolute top-6 left-6"
+      {/* Back Button / Archive Button Logic */}
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={buttonEntranceTransition}
+        className="absolute top-6 left-6 z-50"
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleClose}
+          className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
         >
-          {isArchived ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onClose}
-              className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-            >
-              <ArrowLeft className="w-6 h-6" />
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleNavigateToArchive}
-              className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-            >
-              <Archive className="w-8 h-8" />
-            </Button>
-          )}
-        </motion.div>
-      )}
+          {/* Always show ArrowLeft as per request if 'onClose' meant 'live view' which now goes to archive?
+              Actually, the user said 'Back Arrow... leads to Archive'.
+              If isArchived (browsing history), Back usually goes back to list (Archive). 
+              If Live View, Back now goes to Archive.
+              So basically, it always goes to Archive. */}
+          <ArrowLeft className="w-6 h-6" />
+        </Button>
+      </motion.div>
 
       {/* Settings Button */}
       <motion.div
@@ -134,7 +175,6 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
             y: headerY,
             opacity: headerOpacity,
             scale: headerScale,
-            // willChange: "transform, opacity" // REMOVED: Causes fuzzy text on high-DPI
           }}
           className="text-center mb-12"
         >
@@ -143,13 +183,18 @@ const GazetteScreen = memo(({ onClose, analysisData, isArchived = false }: Gazet
           </h1>
           <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic mb-6">
             <PixelPin size={14} />
-            <span>{monthDay} · {settings.morningTime || "8:00 AM"} · {location}</span>
+
+            {/* Conditional Location Display from Metadata */}
+            <span>
+              {monthDay} · {displayTime}
+              {locationVal ? ` · ${locationVal}` : ''}
+            </span>
           </div>
           <div className="divider max-w-[120px] mx-auto opacity-60" />
         </motion.header>
 
         {/* Render Analysis Content */}
-        <AnalysisRenderer data={analysisData} />
+        <AnalysisRenderer data={effectiveData} />
 
         {/* Footer - All Caught Up */}
         <motion.footer

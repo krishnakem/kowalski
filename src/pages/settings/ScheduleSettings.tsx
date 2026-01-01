@@ -22,7 +22,10 @@ const ScheduleSettings = () => {
     <SettingsLayout title="Schedule">
       {/* Analysis Frequency */}
       <div className="space-y-3">
-        <Label className="text-sm text-foreground font-sans">Analysis Frequency</Label>
+        <div className="space-y-1">
+          <Label className="text-sm text-foreground font-sans">Analysis Frequency</Label>
+          <p className="text-xs text-muted-foreground font-sans">(Changes take effect the next day)</p>
+        </div>
         <div className="grid grid-cols-2 gap-4">
           <motion.button
             whileHover={{ y: -3, boxShadow: "0 8px 20px rgba(0,0,0,0.1)" }}
@@ -30,11 +33,10 @@ const ScheduleSettings = () => {
             transition={spring.snappy}
             onClick={() => setSettings({ ...settings, digestFrequency: 1 })}
             className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-4
-                       transition-colors duration-200 bg-card ${
-                         settings.digestFrequency === 1 
-                           ? "border-foreground" 
-                           : "border-foreground/20 hover:border-foreground"
-                       }`}
+                       transition-colors duration-200 bg-card ${settings.digestFrequency === 1
+                ? "border-foreground"
+                : "border-foreground/20 hover:border-foreground"
+              }`}
           >
             <PixelSun size={40} color="charcoal" />
             <span className="font-sans text-foreground text-base">Once a day</span>
@@ -46,11 +48,10 @@ const ScheduleSettings = () => {
             transition={spring.snappy}
             onClick={() => setSettings({ ...settings, digestFrequency: 2 })}
             className={`aspect-square border-2 p-6 flex flex-col items-center justify-center gap-4
-                       transition-colors duration-200 bg-card ${
-                         settings.digestFrequency === 2 
-                           ? "border-foreground" 
-                           : "border-foreground/20 hover:border-foreground"
-                       }`}
+                       transition-colors duration-200 bg-card ${settings.digestFrequency === 2
+                ? "border-foreground"
+                : "border-foreground/20 hover:border-foreground"
+              }`}
           >
             <div className="flex items-center gap-1">
               <PixelSun size={32} color="charcoal" />

@@ -26,14 +26,12 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   const nextAnalysis = getNextAnalysisTime(settings);
   const showArchiveButton = archivesLoaded && hasPastAnalyses;
 
+  // Purely visual component - navigation is handled by global listeners in Index.tsx
   useEffect(() => {
-    patchSettings({ analysisStatus: "working" });
-    
-    if (autoComplete) {
-      const timer = setTimeout(onComplete, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [onComplete, autoComplete, patchSettings]);
+    // Optional: Ensure status is 'working' if we want to enforce it, 
+    // but preventing side-effects is cleaner. 
+    // patchSettings({ analysisStatus: "working" });
+  }, [patchSettings]);
 
   const handleNavigateToArchive = useCallback(() => {
     navigate("/archive", { state: { from: "agent" } });

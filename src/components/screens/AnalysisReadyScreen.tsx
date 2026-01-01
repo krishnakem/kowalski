@@ -29,8 +29,8 @@ const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: Analysis
 
   const greeting = getTimeOfDayGreeting();
 
-  const title = settings.userName?.trim() 
-    ? `${greeting}, ${settings.userName.trim()}` 
+  const title = settings.userName?.trim()
+    ? `${greeting}, ${settings.userName.trim()}`
     : greeting;
 
   const handleNavigateToArchive = useCallback(() => {
@@ -65,8 +65,8 @@ const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: Analysis
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
-      <PageHeader 
-        title="" 
+      <PageHeader
+        title=""
         leftAction={leftAction}
         rightAction={rightAction}
       />
@@ -91,7 +91,7 @@ const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: Analysis
         <h1 className="text-4xl font-serif text-foreground">
           {title}
         </h1>
-        
+
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -101,7 +101,7 @@ const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: Analysis
           Your analysis is ready
         </motion.p>
 
-        
+
         <motion.button
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}

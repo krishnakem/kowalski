@@ -36,58 +36,32 @@ const PersonalSettings = () => {
   };
 
   const handleDetectLocation = async () => {
-    if (!navigator.geolocation) {
-      toast.error("Geolocation is not supported by your browser");
-      return;
-    }
-
     setIsDetectingLocation(true);
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
-          );
-          const data = await response.json();
+    try {
+      // Use IP-based geolocation for Electron compatibility
+      // This doesn't require GPS permissions and works reliably
+      const response = await fetch('https://ipapi.co/json/');
 
-          const city = data.address?.city ||
-            data.address?.town ||
-            data.address?.village ||
-            data.address?.municipality ||
-            data.address?.county;
+      if (!response.ok) {
+        throw new Error('Failed to fetch location');
+      }
 
-          if (city) {
-            setEditLocation(city);
-            toast.success(`Location detected: ${city}`);
-          } else {
-            toast.error("Couldn't determine your city");
-          }
-        } catch (error) {
-          toast.error("Failed to detect location");
-        } finally {
-          setIsDetectingLocation(false);
-        }
-      },
-      (error) => {
-        setIsDetectingLocation(false);
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            toast.error("Location access denied");
-            break;
-          case error.POSITION_UNAVAILABLE:
-            toast.error("Location unavailable");
-            break;
-          case error.TIMEOUT:
-            toast.error("Location request timed out");
-            break;
-          default:
-            toast.error("Failed to get location");
-        }
-      },
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
-    );
+      const data = await response.json();
+      const city = data.city;
+
+      if (city) {
+        setEditLocation(city);
+        toast.success(`Location detected: ${city}`);
+      } else {
+        toast.error("Couldn't determine your city");
+      }
+    } catch (error) {
+      console.error('Location detection error:', error);
+      toast.error("Failed to detect location");
+    } finally {
+      setIsDetectingLocation(false);
+    }
   };
 
   return (

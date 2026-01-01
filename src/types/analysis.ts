@@ -8,6 +8,7 @@ export interface AnalysisObject {
     subtitle: string;
     date: string | Date; // ISO string for storage, Date object in runtime
     location: string;
+    scheduledTime: string; // e.g., "10:00 AM" - the slot this was triggered for
     sections: AnalysisSection[];
 }
 

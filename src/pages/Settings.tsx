@@ -190,12 +190,6 @@ const Settings = memo(() => {
         {/* Dev Buttons */}
         <div className="flex flex-col items-center gap-2 mt-8">
           <button
-            onClick={handleSeedDemo}
-            className="text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
-          >
-            Seed demo analyses (dev)
-          </button>
-          <button
             onClick={handleDevReset}
             className="text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
           >

@@ -3,23 +3,21 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import ZeroStateScreen from "@/components/screens/ZeroStateScreen";
 import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
-import GazetteScreen from "@/components/screens/GazetteScreen";
 import AnalysisReadyScreen from "@/components/screens/AnalysisReadyScreen";
 import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { pageTransition } from "@/lib/animations";
-import type { AnalysisObject } from "@/types/analysis";
-import { generateScheduledDemoAnalyses } from "@/lib/generateDemoAnalyses";
 
-type Screen = "zero" | "agent" | "ready" | "gazette";
+// Three-Hub Architecture: Index manages only zero, agent, ready.
+// The "gazette" view is now a route under /archive/:id
+type Screen = "zero" | "agent" | "ready";
 
 const Index = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { settings, isLoaded, patchSettings } = useSettings();
-  const { addAnalysis, analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
+  const { analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
   const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
-  const [currentAnalysis, setCurrentAnalysis] = useState<AnalysisObject | null>(null);
 
   // Determine initial screen based on user state - only runs once on initial load
   useEffect(() => {
@@ -31,27 +29,11 @@ const Index = () => {
       return;
     }
 
-    const screenFromState = (location.state as { screen?: Screen })?.screen;
-    console.log("Screen determination logic running...", { screenFromState, status: settings.analysisStatus });
-
-    // Helper to recover analysis if missing
-    const recoverAnalysis = () => {
-      if (!currentAnalysis && analyses.length > 0) {
-        // Analyses are sorted new->old by hook, so take first
-        setCurrentAnalysis(analyses[0].data);
-      }
-    };
+    console.log("Screen determination logic running...", { status: settings.analysisStatus });
 
     // STRICT GATE: If user has onboarded, NEVER show zero state unless settings were wiped.
-    // We ignore navigation overrides that try to force "zero" if we are already onboarded.
     if (settings.hasOnboarded) {
-      // If we are onboarded, we default to agent or ready, regardless of what state says regarding 'zero'.
-      // If state requests 'gazette', we honor it.
-      if (screenFromState === "gazette") {
-        recoverAnalysis();
-        setCurrentScreen("gazette");
-      } else if (settings.analysisStatus === "ready") {
-        recoverAnalysis();
+      if (settings.analysisStatus === "ready") {
         setCurrentScreen("ready");
       } else {
         setCurrentScreen("agent");
@@ -59,63 +41,60 @@ const Index = () => {
       return;
     }
 
-    // If NOT onboarded, honor state or default to zero
-    if (screenFromState === "zero") {
-      setCurrentScreen("zero");
-      return;
-    }
+    // If NOT onboarded, default to zero
+    setCurrentScreen("zero");
 
-    // Determine screen based on settings
-    if (!settings.hasOnboarded) {
-      setCurrentScreen("zero");
-    } else {
-      switch (settings.analysisStatus) {
-        case "working":
-          setCurrentScreen("agent");
-          break;
-        case "ready":
-          recoverAnalysis();
-          setCurrentScreen("ready");
-          break;
-        default:
-          setCurrentScreen("zero");
+  }, [isLoaded, archivesLoaded, currentScreen, settings.hasOnboarded, settings.analysisStatus]);
+
+  // Listen for Background Analysis Generation (Silent Update -> UI Update)
+  useEffect(() => {
+    const unsubscribe = window.api.settings.onAnalysisReady((newAnalysis: any) => {
+      console.log("🔔 Incoming Analysis (Background):", newAnalysis.id);
+
+      // GUARD: Ignore if user hasn't completed onboarding
+      if (!settings.hasOnboarded) {
+        console.log("⚠️ Ignoring analysis-ready event: User not onboarded yet.");
+        return;
       }
-    }
-  }, [isLoaded, archivesLoaded, currentScreen, location.state, settings.hasOnboarded, settings.analysisStatus, analyses, currentAnalysis]);
+
+      // Update Global Settings
+      patchSettings({
+        analysisStatus: 'ready',
+        lastAnalysisDate: new Date().toISOString()
+      });
+
+      // Update Local State (Immediate transition if app is open)
+      setCurrentScreen("ready");
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [patchSettings, settings.hasOnboarded]);
+
 
   const handleContinue = () => {
-    patchSettings({ hasOnboarded: true, analysisStatus: "working" });
+    patchSettings({ hasOnboarded: true, analysisStatus: "idle" });
     setCurrentScreen("agent");
   };
 
+  // AgentActiveScreen's onComplete is no longer used for demo mode.
+  // It can remain for legacy/testing or be removed entirely.
   const handleAgentComplete = () => {
-    // Generate a new analysis when agent completes
-    // For now, we generate a demo analysis on the fly
-    const demoAnalyses = generateScheduledDemoAnalyses(settings, 1);
-    const newAnalysis: AnalysisObject = demoAnalyses[0];
-
-    // Save to archive
-    addAnalysis(newAnalysis);
-    setCurrentAnalysis(newAnalysis);
-
-    patchSettings({
-      analysisStatus: "ready",
-      lastAnalysisDate: new Date().toISOString()
-    });
-    setCurrentScreen("ready");
+    // No-op for now - Scheduler handles real generation
+    console.log("Agent complete (no-op in production)");
   };
 
   const handleViewAnalysis = () => {
-    // Push new history state so "Back" from Settings returns here
-    navigate(".", { state: { screen: "gazette" } });
-    setCurrentScreen("gazette");
-  };
-
-  const handleClose = () => {
-    // User closed gazette - show agent screen
-    patchSettings({ analysisStatus: "working" });
-    // Go back in history if we pushed "gazette", or replace state
-    navigate(".", { replace: true, state: { screen: "agent" } });
+    // Navigate to the latest analysis in the Archive hub
+    if (analyses.length > 0) {
+      const latestId = analyses[0].id;
+      patchSettings({ analysisStatus: "idle" });
+      navigate(`/archive/${latestId}`);
+    } else {
+      // Fallback: go to archive list
+      navigate("/archive");
+    }
   };
 
   // Show nothing until we determine the screen
@@ -161,20 +140,6 @@ const Index = () => {
             <AnalysisReadyScreen
               onViewAnalysis={handleViewAnalysis}
               lastAnalysisDate={settings.lastAnalysisDate}
-            />
-          </motion.div>
-        )}
-
-        {currentScreen === "gazette" && (
-          <motion.div
-            key="gazette"
-            initial={pageTransition.initial}
-            animate={pageTransition.animate}
-            exit={pageTransition.exit}
-          >
-            <GazetteScreen
-              onClose={handleClose}
-              analysisData={currentAnalysis!}
             />
           </motion.div>
         )}

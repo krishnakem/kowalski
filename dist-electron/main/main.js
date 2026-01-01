@@ -5,6 +5,7 @@ import fs from 'fs';
 import { chromium } from 'playwright';
 import { SecureKeyManager } from './services/SecureKeyManager.js';
 import { UsageService } from './services/UsageService.js';
+import { SchedulerService } from './services/SchedulerService.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 import { createRequire } from 'module';
@@ -13,6 +14,8 @@ const require = createRequire(import.meta.url);
 if (require('electron-squirrel-startup')) {
     app.quit();
 }
+// Track quitting state so we can actually quit when Cmd+Q is pressed
+let isQuitting = false;
 let mainWindow = null;
 const SHARED_PARTITION = 'persist:instagram_shared';
 const createWindow = () => {
@@ -33,6 +36,9 @@ const createWindow = () => {
             partition: SHARED_PARTITION // Force main window to check this (though webview usually isolates)
         },
     });
+    // Share window ref with Scheduler
+    SchedulerService.getInstance().setMainWindow(mainWindow);
+    // Prevent title from being updated by the renderer (React)
     // Prevent title from being updated by the renderer (React)
     mainWindow.on('page-title-updated', (e) => {
         e.preventDefault();
@@ -43,7 +49,7 @@ const createWindow = () => {
         console.log("Creating window with URL:", url);
         mainWindow.loadURL(url);
         // Open the DevTools.
-        mainWindow.webContents.openDevTools();
+        // mainWindow.webContents.openDevTools();
     }
     else {
         const filePath = path.join(__dirname, '../dist/index.html');
@@ -63,7 +69,17 @@ const createWindow = () => {
     mainWindow.webContents.on('render-process-gone', (event, details) => {
         console.error(`💀 render-process-gone: Reason: ${details.reason}, Exit Code: ${details.exitCode}`);
     });
-    // -----------------------------
+    // --- WINDOW LIFECYCLE ---
+    mainWindow.on('close', (event) => {
+        if (!isQuitting) {
+            event.preventDefault();
+            mainWindow?.hide();
+            return false;
+        }
+        // Clear reference in Scheduler to be safe
+        SchedulerService.getInstance().setMainWindow(null);
+    });
+    // -------------------------
 };
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
@@ -78,7 +94,13 @@ app.on('ready', () => {
     console.log('Session persistence enabled.');
     // Initialize Usage Service (Checks for monthly reset)
     UsageService.getInstance().initialize();
+    // Initialize Scheduler
+    SchedulerService.getInstance().initialize();
     setupIPCHandlers();
+});
+app.on('before-quit', () => {
+    isQuitting = true;
+    SchedulerService.getInstance().stop();
 });
 // DIRECT GUEST ATTACHMENT: The Nuclear Option
 app.on('web-contents-created', (event, contents) => {
@@ -213,6 +235,11 @@ function setupIPCHandlers() {
         const { default: Store } = await import('electron-store');
         const store = new Store();
         store.set('settings', newSettings);
+        // If resetting (hasOnboarded = false), also clear the activeSchedule snapshot
+        if (newSettings.hasOnboarded === false) {
+            store.delete('activeSchedule');
+            console.log('🧹 Cleared activeSchedule during reset');
+        }
         return true;
     });
     ipcMain.handle('settings:patch', async (_event, updates) => {
@@ -298,5 +325,9 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();
+    }
+    else {
+        // If window exists but is hidden, show it
+        mainWindow?.show();
     }
 });

@@ -253,7 +253,7 @@ const MonthCalendar = ({
               >
                 <div className="flex items-center justify-between">
                   <span className="font-sans text-sm text-foreground group-hover:text-primary transition-colors">
-                    {formatTime(analysis.data.date)}
+                    {analysis.data.scheduledTime || "8:00 AM"}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground font-sans mt-1 line-clamp-1">
@@ -644,7 +644,7 @@ const AnalysisArchive = () => {
                           {highlightMatch(getWeekdayTitle(analysis.data.date), searchQuery)}
                         </h2>
                         <p className="font-sans text-xs text-muted-foreground uppercase tracking-wider mb-4">
-                          {highlightMatch(formatDate(analysis.data.date), searchQuery)} at {formatTime(analysis.data.date)} • {highlightMatch(analysis.data.location, searchQuery)}
+                          {highlightMatch(formatDate(analysis.data.date), searchQuery)} at {analysis.data.scheduledTime || "8:00 AM"}{analysis.data.location ? ` • ${highlightMatch(analysis.data.location, searchQuery)}` : ''}
                         </p>
                         <div className="flex gap-2">
                           <span className="font-sans text-xs font-medium text-muted-foreground uppercase tracking-wide">

@@ -120,7 +120,7 @@ export const useSettings = () => {
   };
 
   const resetSettings = async () => {
-    // Reset electron-store
+    // Reset electron-store (this also clears activeSchedule in main.ts handler)
     await window.api.settings.set(separateApiKey(DEFAULT_SETTINGS).rest);
     // Overwrite secure key with empty string effectively clearing it
     await window.api.settings.setSecure("");

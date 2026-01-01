@@ -22,6 +22,12 @@ electron_1.contextBridge.exposeInMainWorld('api', {
         patch: (updates) => electron_1.ipcRenderer.invoke('settings:patch', updates),
         setSecure: (apiKey) => electron_1.ipcRenderer.invoke('settings:set-secure', { apiKey }),
         checkKeyStatus: () => electron_1.ipcRenderer.invoke('settings:check-key-status'),
+        onAnalysisReady: (callback) => {
+            const subscription = (_event, analysis) => callback(analysis);
+            electron_1.ipcRenderer.on('analysis-ready', subscription);
+            // Return unsubscribe function
+            return () => electron_1.ipcRenderer.removeListener('analysis-ready', subscription);
+        }
     },
     analyses: {
         get: () => electron_1.ipcRenderer.invoke('analyses:get'),
