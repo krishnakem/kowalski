@@ -14,6 +14,36 @@
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"cross-env VITE_DEV_SERVER_URL=http://localhost:8080 npm run electron\"",
     "electron:build": "npm run build && tsc -p electron.tsconfig.json && electron-builder"
   },
+  "appId": "com.krishnakemisetti.kowalski",
+  "copyright": "Copyright © 2026 Krishna Kemisetti",
+  "build": {
+    "appId": "com.krishnakemisetti.kowalski",
+    "productName": "Kowalski",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage"
+      ]
+    }
+  },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.11",
@@ -75,6 +105,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
+    "@hunlongyu/electron-icon-builder": "^0.1.5",
     "@tailwindcss/typography": "^0.5.16",
     "@types/node": "^22.16.5",
     "@types/react": "^18.3.23",

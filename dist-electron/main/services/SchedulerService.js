@@ -324,12 +324,18 @@ export class SchedulerService {
             leadStoryPreview: mockAnalysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
         };
         // FILE-BASED STORAGE MIGRATION
-        // A. Save FULL object to disk
+        // A. Atomic Write (Write to temp -> Rename) to prevent partial writes
         const userDataPath = app.getPath('userData');
-        const recordPath = path.join(userDataPath, 'analysis_records', `${newRecord.id}.json`);
+        const recordDir = path.join(userDataPath, 'analysis_records');
+        const recordPath = path.join(recordDir, `${newRecord.id}.json`);
+        // Temp path for atomic swap
+        const tempPath = path.join(recordDir, `${newRecord.id}.tmp`);
         try {
-            fs.writeFileSync(recordPath, JSON.stringify(newRecord, null, 2));
-            console.log(`💾 Saved Full Analysis to disk: ${recordPath}`);
+            // 1. Write to temporary file first
+            await fs.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+            // 2. Atomic Rename (This is the "Commit" step)
+            await fs.promises.rename(tempPath, recordPath);
+            console.log(`💾 Saved Full Analysis cleanly to disk: ${recordPath}`);
             // B. Save METADATA ONLY to Store (Lightweight)
             // MOVED INSIDE TRY: Only update store if file write succeeded
             const metadataRecord = {
@@ -347,27 +353,38 @@ export class SchedulerService {
             const currentAnalyses = store.get('analyses') || [];
             const updatedAnalyses = [metadataRecord, ...currentAnalyses];
             store.set('analyses', updatedAnalyses);
+            // 3. Update State
+            // If silent (catch-up), mark as 'idle' so user isn't bombarded. Only final one (not silent) marks 'ready'.
+            const newStatus = silent ? 'idle' : 'ready';
+            store.set('settings', {
+                ...settings,
+                lastAnalysisDate: effectiveDate.toISOString(),
+                analysisStatus: newStatus
+            });
+            // 4. Zero-Cost Logging
+            console.log(`🌕 Background Task Completed at ${new Date().toLocaleString()}`);
+            console.log(`🤖 Simulation Complete (${silent ? 'Silent/Historical' : 'Live'}). Estimated Cost: $0.00`);
+            // 5. Notify UI (Push) - Only if not silent
+            if (!silent && this.mainWindow && !this.mainWindow.isDestroyed()) {
+                console.log('📡 Push Notification Sent: analysis-ready (Metadata Only)');
+                // OPTIMIZATION: Send only metadata, not the full blob.
+                // The UI doesn't need the full text until the user opens the archive.
+                this.mainWindow.webContents.send('analysis-ready', metadataRecord);
+            }
         }
         catch (e) {
-            console.error('❌ Failed to save analysis to disk. Skipping metadata update.', e);
+            console.error('❌ Failed to save analysis to disk (Atomic Write Failed). Aborting metadata update.', e);
+            // Notify UI of the critical failure so it can show a toast/error state
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('analysis-error', { message: 'Failed to save analysis to disk.' });
+            }
+            // Cleanup temp file if it exists
+            try {
+                if (fs.existsSync(tempPath))
+                    await fs.promises.unlink(tempPath);
+            }
+            catch (cleanupErr) { /* ignore */ }
             return; // Abort - Do not update metadata or notify user
-        }
-        // 3. Update State
-        // If silent (catch-up), mark as 'idle' so user isn't bombarded. Only final one (not silent) marks 'ready'.
-        const newStatus = silent ? 'idle' : 'ready';
-        store.set('settings', {
-            ...settings,
-            lastAnalysisDate: effectiveDate.toISOString(),
-            analysisStatus: newStatus
-        });
-        // 4. Zero-Cost Logging
-        console.log(`🌕 Background Task Completed at ${new Date().toLocaleString()}`);
-        console.log(`🤖 Simulation Complete (${silent ? 'Silent/Historical' : 'Live'}). Estimated Cost: $0.00`);
-        // 5. Notify UI (Push) - Only if not silent
-        if (!silent && this.mainWindow && !this.mainWindow.isDestroyed()) {
-            console.log('📡 Push Notification Sent: analysis-ready');
-            // Send full record so UI doesn't have to fetch immediately
-            this.mainWindow.webContents.send('analysis-ready', newRecord);
         }
     }
 }
