@@ -1,4 +1,5 @@
 import { Toaster } from "@/components/ui/toaster";
+import { SettingsProvider } from "@/contexts/SettingsContext";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -83,9 +84,11 @@ const App = () => (
       <Toaster />
       <Sonner />
       <ErrorBoundary>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <SettingsProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </SettingsProvider>
       </ErrorBoundary>
     </TooltipProvider>
   </QueryClientProvider>

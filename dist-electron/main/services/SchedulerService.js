@@ -1,6 +1,7 @@
 import { app, powerMonitor, powerSaveBlocker } from 'electron';
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 import { LoremIpsumGenerator } from './LoremIpsumGenerator.js';
 // Next-Day Effect: Locked schedule that only updates on new calendar days
 // (Imported ActiveSchedule)
@@ -45,6 +46,7 @@ export class SchedulerService {
             clearTimeout(this.alignmentTimeout);
             this.alignmentTimeout = null;
         }
+        this.disableInsomnia();
     }
     async initialize() {
         console.log('⏰ SchedulerService: Initialized.');
@@ -68,6 +70,19 @@ export class SchedulerService {
             clearInterval(this.checkInterval);
         if (this.alignmentTimeout)
             clearTimeout(this.alignmentTimeout);
+        // --- SAFE INSOMNIA MODE (AC POWER ONLY) ---
+        // Initial Check
+        this.handleInsomniaState();
+        // Dynamic Listeners
+        powerMonitor.on('on-ac', () => {
+            console.log('🔌 Power Source: AC. Re-evaluating Insomnia Mode...');
+            this.handleInsomniaState();
+        });
+        powerMonitor.on('on-battery', () => {
+            console.log('🪫 Power Source: Battery. Disabling Insomnia Mode...');
+            this.disableInsomnia();
+        });
+        // ------------------------------------------
         const now = new Date();
         const msUntilNextMinute = 60000 - (now.getTime() % 60000);
         // console.log(`⏰ SchedulerService: Aligning heartbeat. Waiting ${msUntilNextMinute}ms for minute boundary.`);
@@ -84,6 +99,35 @@ export class SchedulerService {
             }, 60000);
         }, msUntilNextMinute);
     }
+    // --- INSOMNIA MANAGEMENT ---
+    insomniaProcess = null; // Type 'ChildProcess' needs import or 'any'
+    handleInsomniaState() {
+        if (!powerMonitor.isOnBatteryPower()) {
+            this.enableInsomnia();
+        }
+        else {
+            this.disableInsomnia();
+        }
+    }
+    enableInsomnia() {
+        if (this.insomniaProcess)
+            return; // Already running
+        console.log('🔋 AC Power detected: Insomnia Mode active (Preventing System Sleep)');
+        // Use standard import (added to top of file)
+        this.insomniaProcess = spawn('caffeinate', ['-i', '-s', '-w', process.pid.toString()]);
+        this.insomniaProcess.on('close', (code) => {
+            console.log(`☕️ Insomnia Process exited with code ${code}`);
+            this.insomniaProcess = null;
+        });
+    }
+    disableInsomnia() {
+        if (this.insomniaProcess) {
+            console.log('🪫 Battery detected / Stopping: Insomnia Mode disabled');
+            this.insomniaProcess.kill();
+            this.insomniaProcess = null;
+        }
+    }
+    // ---------------------------
     /**
      * Ensures the daily schedule snapshot is up-to-date.
      * - On first run after onboarding: Creates snapshot with activeDate = TOMORROW
@@ -100,18 +144,26 @@ export class SchedulerService {
         let activeSchedule = store.get('activeSchedule');
         // If no snapshot exists (first run after onboarding), set activeDate to TOMORROW
         // This ensures the onboarding schedule doesn't trigger missed slots from today
+        // If no snapshot exists (first run after onboarding), decide if we start TODAY or TOMORROW.
+        // PREVIOUS BUG: We unconditionally set it to TOMORROW. This caused the "Jan 2" bug where
+        // restarting the app on Day 2 (with no saved snapshot) would skip Day 2 and jump to Day 3.
         if (!activeSchedule) {
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            const tomorrowStr = this.formatLocalDate(tomorrow);
+            // Check if we can still hit the Morning slot TODAY
+            const canHitToday = this.canScheduleForToday(settings.morningTime || '8:00 AM');
+            // If we can hit today, set activeDate to TODAY. Otherwise, TOMORROW.
+            const nextDate = new Date();
+            if (!canHitToday) {
+                nextDate.setDate(nextDate.getDate() + 1);
+            }
+            const activeDateStr = this.formatLocalDate(nextDate);
             activeSchedule = {
                 morningTime: settings.morningTime || '8:00 AM',
                 eveningTime: settings.eveningTime || '4:00 PM',
                 digestFrequency: settings.digestFrequency || 1,
-                activeDate: tomorrowStr // First schedule activates tomorrow
+                activeDate: activeDateStr
             };
             store.set('activeSchedule', activeSchedule);
-            console.log(`📅 First Daily Snapshot Created. Active starting ${tomorrowStr}:`, activeSchedule);
+            console.log(`📅 First Daily Snapshot Created. Active starting ${activeDateStr}:`, activeSchedule);
             this.mainWindow?.webContents.send('schedule-updated', activeSchedule);
             return activeSchedule;
         }
@@ -149,6 +201,11 @@ export class SchedulerService {
                 // Schedule is for tomorrow (first-run scenario)
                 return;
             }
+            // PULSE: Send Heartbeat to UI
+            // This ensures that if the UI is stuck in "Tomorrow" mode (due to clock jump/race condition),
+            // it receives a fresh signal that the schedule is indeed TODAY.
+            // We do this every minute.
+            this.mainWindow?.webContents.send('schedule-updated', activeSchedule);
             // Check Morning Slot using LOCKED schedule times
             if (this.shouldTrigger(now, activeSchedule.morningTime, settings.lastAnalysisDate)) {
                 console.log(`🚀 Scheduling Trigger (Morning: ${activeSchedule.morningTime})`);
@@ -167,6 +224,34 @@ export class SchedulerService {
         }
     }
     // catchUpMissedSlots removed for Daemon Mode (Anti-Burst)
+    /**
+     * Helper to determine if a slot is still viable for TODAY based on time and buffer.
+     */
+    canScheduleForToday(targetTimeStr) {
+        const now = new Date();
+        const [time, modifier] = targetTimeStr.split(' ');
+        let [hours, minutes] = time.split(':').map(Number);
+        if (modifier === 'PM' && hours < 12)
+            hours += 12;
+        if (modifier === 'AM' && hours === 12)
+            hours = 0;
+        const targetDate = new Date(now);
+        targetDate.setHours(hours, minutes, 0, 0);
+        // 1. If time passed, obviously not.
+        if (now >= targetDate)
+            return false;
+        // 2. Check Buffer (Reuse logic from shouldTrigger or duplicate for safety)
+        const prepTimeMs = targetDate.getTime() - this.lastWakeTime.getTime();
+        // TEST OVERRIDE: 15 seconds
+        const threeHoursMs = 15 * 1000;
+        const uptimeSeconds = process.uptime();
+        const threeHoursSeconds = 15;
+        if (prepTimeMs < threeHoursMs && uptimeSeconds < threeHoursSeconds) {
+            console.log(`🛡️ Initial Snapshot: Skipping Today. Too close to wake/boot. (${Math.floor(uptimeSeconds)}s uptime)`);
+            return false;
+        }
+        return true;
+    }
     /**
      * Determines if we should trigger based on current time, target time, and last run.
      * Logic:

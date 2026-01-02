@@ -25,8 +25,8 @@ const Index = () => {
     console.log("Index useEffect triggered:", { isLoaded, archivesLoaded, currentScreen, hasOnboarded: settings.hasOnboarded });
 
     // Wait for both settings and archives to load before making decisions
-    if (!isLoaded || !archivesLoaded || currentScreen !== null) {
-      console.log("Waiting for data or screen already set...");
+    if (!isLoaded || !archivesLoaded) {
+      console.log("Waiting for data...");
       return;
     }
 

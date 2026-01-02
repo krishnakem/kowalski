@@ -1,4 +1,4 @@
-import { useEffect, useCallback, memo } from "react";
+import { useEffect, useCallback, memo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Settings, Archive } from "lucide-react";
@@ -25,7 +25,7 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
   const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
-  const { snapshot: activeSchedule } = useDailySnapshot();
+  const { snapshot: activeSchedule, refresh: refreshSnapshot } = useDailySnapshot();
   const { wakeTime } = useSystemWakeTime();
 
   // If no past analyses AND active schedule is not for today, then it's the first day (onboarding day)
@@ -36,16 +36,60 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   // Logic: It is "First Day" (show tomorrow) ONLY IF:
   // 1. We have no archives (new user)
   // 2. AND The active schedule is NOT for today (meaning we onboarded today and wait for tomorrow)
+  // Logic: It is "First Day" (show tomorrow) ONLY IF:
+  // 1. We have no archives (new user)
+  // 2. AND The active schedule is NOT for today (meaning we onboarded today and wait for tomorrow)
   const isFirstDay = archivesLoaded && !hasPastAnalyses && !isActiveToday;
   const nextAnalysis = getNextAnalysisTime(settings, activeSchedule, isFirstDay, wakeTime);
+
+  // DEBUG LOGGING
+  console.log("🔍 UI DEBUG:", {
+    now: new Date().toLocaleString(),
+    todayStr,
+    activeDate: activeSchedule?.activeDate,
+    isActiveToday,
+    isFirstDay,
+    wakeTime: wakeTime?.toLocaleString(),
+    nextAnalysis
+  });
+
   const showArchiveButton = archivesLoaded && hasPastAnalyses;
 
   // Purely visual component - navigation is handled by global listeners in Index.tsx
+
+  // UI PULSE: Force re-render every minute to keep relative time strings ("Tomorrow" vs "Today") accurate.
+  // This fixes the bug where jumping the system clock leaves the UI stale.
+  const [, setTick] = useState(0);
+
   useEffect(() => {
-    // Optional: Ensure status is 'working' if we want to enforce it, 
-    // but preventing side-effects is cleaner. 
-    // patchSettings({ analysisStatus: "working" });
-  }, [patchSettings]);
+    // 1. Minute Ticker
+    const interval = setInterval(() => {
+      setTick(t => t + 1);
+    }, 60000); // 1 minute
+
+    // 2. Focus Trigger (Updates immediately when user wakes/tabs back to app)
+    const onFocus = () => {
+      // console.log("👁️ App Focused: Refreshing UI time...");
+      setTick(t => t + 1);
+      refreshSnapshot(); // FORCE RE-FETCH from Backend
+    };
+
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
+
+  // FAIL-SAFE NAVIGATION:
+  // If the 'analysis-ready' event was missed but the store updated, navigate anyway.
+  useEffect(() => {
+    if (settings.analysisStatus === 'ready') {
+      console.log("Stale 'AgentActive' screen detected (Status is Ready). Navigating to Gazette...");
+      onComplete(); // Triggers parent navigation
+    }
+  }, [settings.analysisStatus, onComplete]);
 
   const handleNavigateToArchive = useCallback(() => {
     navigate("/archive", { state: { from: "agent" } });

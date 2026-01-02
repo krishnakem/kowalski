@@ -81,7 +81,11 @@ export const getNextAnalysisTime = (
     // TEST OVERRIDE: 15 seconds instead of 3 hours
     const threeHoursMs = 15 * 1000;
 
-    return prepTimeMs < threeHoursMs;
+    const buffered = prepTimeMs < threeHoursMs;
+    if (buffered) {
+      console.log(`🛡️ UI BUFFERED: PrepTime=${Math.floor(prepTimeMs / 1000)}s needed=15s. Target=${targetDate.toLocaleTimeString()} Wake=${wakeTime.toLocaleTimeString()}`);
+    }
+    return buffered;
   };
 
   // If this is the first day (just onboarded), schedule starts tomorrow
@@ -144,7 +148,8 @@ export const getNextAnalysisTime = (
 
   if (frequency === 1) {
     // Once daily - only morning time
-    if (nowMinutes < morningMinutes && !isBuffered(morning, false)) {
+    // Fix: Use <= to ensure that during the 8:00 AM minute, we still say "Today"
+    if (nowMinutes <= morningMinutes && !isBuffered(morning, false)) {
       nextTime = morning;
     } else {
       nextTime = morning;
@@ -152,9 +157,9 @@ export const getNextAnalysisTime = (
     }
   } else {
     // Twice daily - morning and evening
-    if (nowMinutes < morningMinutes && !isBuffered(morning, false)) {
+    if (nowMinutes <= morningMinutes && !isBuffered(morning, false)) {
       nextTime = morning;
-    } else if (nowMinutes < eveningMinutes && !isBuffered(evening, false)) {
+    } else if (nowMinutes <= eveningMinutes && !isBuffered(evening, false)) {
       // It's before evening. Is evening buffered?
       nextTime = evening;
     } else {

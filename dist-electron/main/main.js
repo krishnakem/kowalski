@@ -311,6 +311,30 @@ function setupIPCHandlers() {
             store.delete('activeSchedule');
             console.log('🧹 Cleared activeSchedule during reset');
         }
+        else if (newSettings.hasOnboarded === true) {
+            // HOT-PATCH: Update active schedule if it exists for TODAY
+            // This ensures user sees the new time immediately.
+            const activeSchedule = store.get('activeSchedule');
+            if (activeSchedule) {
+                // We only patch if the schedule is NOT "past" (i.e. activeDate is today or future)
+                // Actually, simpler: Just patch the "Time Policy" values.
+                // We do NOT change the activeDate.
+                // Only patch if we have valid values to patch
+                const updatedSchedule = {
+                    ...activeSchedule,
+                    morningTime: newSettings.morningTime,
+                    eveningTime: newSettings.eveningTime,
+                    digestFrequency: newSettings.digestFrequency
+                };
+                store.set('activeSchedule', updatedSchedule);
+                // Notify any listeners (like AgentActiveScreen)
+                const windows = BrowserWindow.getAllWindows();
+                windows.forEach(win => {
+                    win.webContents.send('schedule-updated', updatedSchedule);
+                });
+                console.log('🔥 Hot-Patched Daily Snapshot with new User Settings:', updatedSchedule);
+            }
+        }
         return true;
     });
     ipcMain.handle('settings:patch', async (_event, updates) => {
@@ -319,6 +343,24 @@ function setupIPCHandlers() {
         const current = store.get('settings') || {};
         const merged = { ...current, ...updates };
         store.set('settings', merged);
+        // HOT-PATCH for Patch ops too
+        // This catches updates that might come from partial saves or specific setting tweaks
+        if (('morningTime' in updates || 'eveningTime' in updates || 'digestFrequency' in updates)) {
+            const activeSchedule = store.get('activeSchedule');
+            if (activeSchedule) {
+                const updatedSchedule = {
+                    ...activeSchedule,
+                    morningTime: merged.morningTime,
+                    eveningTime: merged.eveningTime,
+                    digestFrequency: merged.digestFrequency
+                };
+                store.set('activeSchedule', updatedSchedule);
+                BrowserWindow.getAllWindows().forEach(win => {
+                    win.webContents.send('schedule-updated', updatedSchedule);
+                });
+                console.log('🔥 Hot-Patched Daily Snapshot (via Patch):', updatedSchedule);
+            }
+        }
         return merged;
     });
     ipcMain.handle('analyses:get', async () => {
