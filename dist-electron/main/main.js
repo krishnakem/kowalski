@@ -55,11 +55,13 @@ const createWindow = () => {
             partition: SHARED_PARTITION // Force main window to check this (though webview usually isolates)
         },
         // Set icon for Windows/Linux (and Mac if packaged)
-        icon: path.join(__dirname, '../../build/icon.png')
+        // Use the processed, standardized icon
+        icon: path.join(__dirname, '../../build/icon-standard.png')
     });
     // macOS Dock Icon (Dev Mode Fix)
     if (process.platform === 'darwin' && process.env.VITE_DEV_SERVER_URL) {
-        const iconPath = path.join(__dirname, '../../build/icon.png');
+        // CRITICAL: Point to the Standard (Apple Grid) icon
+        const iconPath = path.join(__dirname, '../../build/icon-standard.png');
         app.dock?.setIcon(iconPath);
     }
     // Share window ref with Scheduler

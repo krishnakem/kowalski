@@ -1,7 +1,6 @@
 import { useCallback, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Settings } from "lucide-react";
 import { WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/layouts/PageHeader";
@@ -31,22 +30,9 @@ const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: Analysis
     ? `${greeting}, ${settings.userName.trim()}`
     : greeting;
 
-  const handleNavigateToSettings = useCallback(() => {
-    navigate("/settings", { state: { from: "ready" } });
-  }, [navigate]);
-
   const leftAction = null;
 
-  const rightAction = (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={handleNavigateToSettings}
-      className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-    >
-      <Settings className="w-8 h-8" />
-    </Button>
-  );
+  const rightAction = null;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">

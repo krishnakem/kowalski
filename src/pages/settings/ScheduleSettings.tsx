@@ -41,7 +41,6 @@ const ScheduleSettings = () => {
       <div className="space-y-3">
         <div className="space-y-1">
           <Label className="text-sm text-foreground font-sans">Analysis Frequency</Label>
-          <p className="text-xs text-muted-foreground font-sans">(Changes take effect the next day)</p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <motion.button

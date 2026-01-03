@@ -36,9 +36,6 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   // Logic: It is "First Day" (show tomorrow) ONLY IF:
   // 1. We have no archives (new user)
   // 2. AND The active schedule is NOT for today (meaning we onboarded today and wait for tomorrow)
-  // Logic: It is "First Day" (show tomorrow) ONLY IF:
-  // 1. We have no archives (new user)
-  // 2. AND The active schedule is NOT for today (meaning we onboarded today and wait for tomorrow)
   const isFirstDay = archivesLoaded && !hasPastAnalyses && !isActiveToday;
   const nextAnalysis = getNextAnalysisTime(settings, activeSchedule, isFirstDay, wakeTime);
 
@@ -137,7 +134,6 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
           <Settings className="w-8 h-8" />
         </Button>
       </motion.div>
-
       {/* Animated Pixel Penguin */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
