@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('api', {
     startAgent: () => ipcRenderer.invoke('start-agent'),
+    startLogin: (bounds: any) => ipcRenderer.invoke('auth:login', bounds),
     resetSession: () => ipcRenderer.invoke('reset-session'),
     clearInstagramSession: () => ipcRenderer.invoke('clear-instagram-session'),
     saveLoginSession: () => ipcRenderer.invoke('save-login-session'),

@@ -20,7 +20,8 @@ export const InstagramConnectModal = ({
     autoCloseDelay
 }: InstagramConnectModalProps) => {
     const [phase, setPhase] = useState<InstagramPhase>("connecting");
-    const webviewRef = useRef<Electron.WebviewTag>(null);
+    const loginTargetRef = useRef<HTMLDivElement>(null);
+    const hasLaunchedRef = useRef(false);
 
     // Reset phase when opened
     useEffect(() => {
@@ -29,29 +30,50 @@ export const InstagramConnectModal = ({
         }
     }, [isOpen]);
 
-    // Listen for Login Success
+    // Trigger Login Flow on Mount (Once)
     useEffect(() => {
-        if (!isOpen) return;
+        if (!isOpen || phase !== 'connecting' || hasLaunchedRef.current) return;
 
-        // @ts-ignore
-        const removeListener = window.api.onLoginSuccess(() => {
-            console.log("🎉 MODAL RECEIVED SUCCESS SIGNAL!");
-            setPhase("success");
+        const startOverlay = async () => {
+            if (!loginTargetRef.current) return;
+            hasLaunchedRef.current = true;
 
-            if (onSuccess) onSuccess();
+            // Calculate Screen Coordinates for the Overlay
+            const rect = loginTargetRef.current.getBoundingClientRect();
+            // Convert to integer screen coordinates (Main process expects integers)
+            const bounds = {
+                x: Math.round(window.screenX + rect.left),
+                y: Math.round(window.screenY + rect.top),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+            };
 
-            // Auto-close logic (for Switch Account flow)
-            if (autoCloseDelay) {
-                setTimeout(() => {
-                    onClose(); // Close the modal
-                }, autoCloseDelay);
+            console.log("🚀 Triggering Overlay Login at:", bounds);
+
+            try {
+                // @ts-ignore
+                const success = await window.api.startLogin(bounds);
+                if (success) {
+                    setPhase("success");
+                    if (onSuccess) onSuccess();
+                    if (autoCloseDelay) {
+                        setTimeout(() => onClose(), autoCloseDelay);
+                    }
+                } else {
+                    // Start Over / Error
+                    hasLaunchedRef.current = false; // Allow retry?
+                    // Maybe show error state
+                }
+            } catch (e) {
+                console.error("Overlay Login Error:", e);
+                hasLaunchedRef.current = false;
             }
-        });
-
-        return () => {
-            if (removeListener) removeListener();
         };
-    }, [isOpen, onSuccess, autoCloseDelay, onClose]);
+
+        // Small delay to ensure render layout
+        setTimeout(startOverlay, 500);
+
+    }, [isOpen, phase]);
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -66,13 +88,13 @@ export const InstagramConnectModal = ({
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             transition={{ duration: 0.3 }}
-                            className="w-full h-full flex flex-col bg-black"
+                            className="w-full h-full flex flex-col bg-transparent" // CHANGED: Transparent background
                         >
-                            <webview
-                                partition="persist:instagram_shared"
-                                ref={webviewRef}
-                                src="https://www.instagram.com/accounts/login/"
+                            <div
+                                ref={loginTargetRef}
+                                id="login-placeholder"
                                 style={{ width: '100%', height: '100%' }}
+                                className="bg-transparent" // Transparent so we see the overlay
                             />
                         </motion.div>
                     )}

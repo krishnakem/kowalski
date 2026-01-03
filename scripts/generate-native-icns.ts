@@ -9,8 +9,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function generateNativeIcons() {
-    // Input: The Apple HIG Standardized version (824x824 on 1024x1024)
-    const inputPath = path.join(__dirname, '../build/icon-standard.png');
+    // Input: The User Requested "icon.png" (1024x1024)
+    const inputPath = path.join(__dirname, '../build/icon.png');
 
     // Output extensions
     const iconsetDir = path.join(__dirname, '../build/Kowalski.iconset');

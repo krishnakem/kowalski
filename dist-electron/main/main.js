@@ -3,10 +3,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 // Replace 'playwright' import with 'playwright-extra'
-import { chromium } from 'playwright-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-// Add stealth plugin to chromium
-chromium.use(StealthPlugin());
+// BrowserManager now handles the browser instance
+import { BrowserManager } from './services/BrowserManager.js';
 // --- GLOBAL ELECTRON FIXES ---
 app.commandLine.appendSwitch('ignore-certificate-errors');
 app.commandLine.appendSwitch('disable-gpu');
@@ -143,132 +141,24 @@ app.on('before-quit', () => {
     SchedulerService.getInstance().stop();
 });
 // DIRECT GUEST ATTACHMENT: The Nuclear Option
-app.on('web-contents-created', (event, contents) => {
-    // Only attach to webviews (which are our Instagram windows)
-    if (contents.getType() === 'webview') {
-        console.log(`⚡️ HOOKED: Attached direct cookie listener to Webview ID: ${contents.id}`);
-        // METHOD B: DIRECT PROBE (Polling the handle)
-        // We poll this SPECIFIC webContents' session, ignoring the partition name entirely.
-        const directInterval = setInterval(async () => {
-            try {
-                if (contents.isDestroyed()) {
-                    clearInterval(directInterval);
-                    return;
-                }
-                const cookies = await contents.session.cookies.get({});
-                const sessionCookie = cookies.find(c => c.name === 'sessionid');
-                if (sessionCookie) {
-                    await saveSessionAndNotify(contents.session);
-                    clearInterval(directInterval);
-                }
-            }
-            catch (e) { /* ignore */ }
-        }, 1000);
-        // METHOD A: EVENT SNIFFER (Listening to headers on this handle)
-        // METHOD A: EVENT SNIFFER (Listening to headers on this handle)
-        const filter = { urls: ['*://*.instagram.com/*'] };
-        const targetSession = contents.session; // Capture reference safely
-        // 1. Setup Listener
-        targetSession.webRequest.onHeadersReceived(filter, async (details, callback) => {
-            const responseHeaders = details.responseHeaders;
-            const setCookie = responseHeaders ? (responseHeaders['set-cookie'] || responseHeaders['Set-Cookie']) : null;
-            if (setCookie && Array.isArray(setCookie)) {
-                if (setCookie.some(h => h.includes('sessionid'))) {
-                    // Give it a moment to commit to the jar
-                    setTimeout(() => {
-                        // FIX: Prevent accessing destroyed object
-                        if (!contents.isDestroyed()) {
-                            saveSessionAndNotify(contents.session);
-                        }
-                    }, 500);
-                }
-            }
-            callback({ responseHeaders: details.responseHeaders });
-        });
-        // 2. Cleanup on Destruction (Requested by User)
-        contents.on('destroyed', () => {
-            try {
-                // Remove the listener to prevent memory leaks or zombie handlers
-                // Note: usage of targetSession here is safe because we captured it
-                targetSession.webRequest.onHeadersReceived(filter, null);
-            }
-            catch (e) {
-                // Ignore errors during cleanup
-            }
-        });
-    }
-});
-// Helper to save session
-let isSaving = false;
-async function saveSessionAndNotify(targetSession) {
-    if (isSaving)
-        return;
-    isSaving = true;
-    try {
-        // SAFEGUARD: The webview might be destroyed by React before we run this 
-        let cookies;
-        try {
-            cookies = await targetSession.cookies.get({});
-        }
-        catch (err) {
-            if (String(err).includes('destroyed')) {
-                return;
-            }
-            throw err;
-        }
-        const sessionCookie = cookies.find(c => c.name === 'sessionid');
-        if (sessionCookie) {
-            const userDataPath = app.getPath('userData');
-            const sessionPath = path.join(userDataPath, 'session.json');
-            const playwrightCookies = cookies.map(cookie => {
-                // Playwright requires strict SameSite values: 'Strict', 'Lax', 'None'
-                let sameSite = 'Lax'; // Default fallback
-                if (cookie.sameSite === 'no_restriction' || cookie.sameSite === 'unspecified') {
-                    sameSite = 'None';
-                }
-                else if (cookie.sameSite) {
-                    sameSite = cookie.sameSite.charAt(0).toUpperCase() + cookie.sameSite.slice(1);
-                }
-                return {
-                    ...cookie,
-                    expires: cookie.expirationDate || -1,
-                    sameSite: sameSite,
-                    secure: sameSite === 'None' ? true : cookie.secure
-                };
-            });
-            const storageState = { cookies: playwrightCookies, origins: [] };
-            fs.writeFileSync(sessionPath, JSON.stringify(storageState, null, 2));
-            // BROADCAST SIGNAL TO ALL WINDOWS
-            const windows = BrowserWindow.getAllWindows();
-            windows.forEach(win => {
-                win.webContents.send('login-success');
-            });
-            // Reset lock so we can save again (e.g. Switch Account)
-            // verify we wait a bit or just reset immediately? 
-            // Resetting immediately is fine, the interval checks prevent spamming 
-            // but to be safe, maybe a small timeout or just false.
-            setTimeout(() => { isSaving = false; }, 2000);
-        }
-        else {
-            isSaving = false;
-        }
-    }
-    catch (e) {
-        console.error('Save Error:', e);
-        isSaving = false;
-    }
-}
+// [REMOVED] DIRECT GUEST ATTACHMENT (Legacy Webview Cookie Sniffer)
+// The login flow is now handled by BrowserManager Overlay.
+// [REMOVED] Helper to save session
+// saveSessionAndNotify logic deleted.
 function setupIPCHandlers() {
     ipcMain.handle('reset-session', async () => {
         console.log('🧹 Starting session reset...');
         // 1. Delete session.json
         try {
             const userDataPath = app.getPath('userData');
+            // 1. Delete legacy session.json (if exists)
             const sessionPath = path.join(userDataPath, 'session.json');
             if (fs.existsSync(sessionPath)) {
                 fs.unlinkSync(sessionPath);
-                console.log('✅ Deleted session.json');
+                console.log('✅ Deleted legacy session.json');
             }
+            // 1.5 Close & Wipe BrowserManager Data
+            await BrowserManager.getInstance().clearData();
         }
         catch (e) {
             console.error('⚠️ Failed to delete session.json:', e);
@@ -419,46 +309,29 @@ function setupIPCHandlers() {
     });
     // -------------------------------
     // -------------------------------
+    ipcMain.handle('auth:login', async (_event, bounds) => {
+        if (!mainWindow)
+            return false;
+        return BrowserManager.getInstance().login(bounds, mainWindow);
+    });
     ipcMain.handle('test-headless', async () => {
         try {
-            const userDataPath = app.getPath('userData');
-            const sessionPath = path.join(userDataPath, 'session.json');
-            console.log('🤖 Starting Playwright with Stealth + GPU Fixes...');
-            if (!fs.existsSync(sessionPath)) {
-                return 'No session file found';
-            }
-            // Launch with robust args for "Black Window" fix
-            const browser = await chromium.launch({
-                headless: false,
-                args: [
-                    '--disable-gpu',
-                    '--disable-dev-shm-usage',
-                    '--disable-software-rasterizer', // Crucial for black window issues
-                    '--no-sandbox',
-                    '--disable-blink-features=AutomationControlled', // Anti-detection
-                    '--window-position=0,0'
-                ]
-            });
-            const context = await browser.newContext({
-                storageState: sessionPath,
-                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'
-            });
+            console.log('🤖 Starting BrowserManager (Persistent)...');
+            const manager = BrowserManager.getInstance();
+            // Launch via Manager (handles persistence, stealth, and zombies)
+            const context = await manager.launch({ headless: false });
+            // Create a page for the test
             const page = await context.newPage();
-            // --- VERBOSE LOGGING START ---
-            page.on('console', msg => console.log('PW CONSOLE:', msg.text()));
-            page.on('pageerror', err => console.log('PW ERROR:', err.message));
-            page.on('requestfailed', request => console.log('PW FAILED:', request.url(), request.failure()?.errorText));
-            // --- VERBOSE LOGGING END ---
             console.log('🌍 Navigating to Instagram...');
             await page.goto('https://www.instagram.com/');
             try {
                 await page.waitForSelector('svg[aria-label="Home"]', { timeout: 10000 });
                 console.log('✅ INSTAGRAM LOGIN CONFIRMED');
-                return 'Success: Logged in automatically';
+                return 'Success: Logged in automatically (Persistent Profile)';
             }
             catch (e) {
                 console.log('❌ NOT LOGGED IN / SELECTOR TIMEOUT');
-                return 'Failed: Still on login page';
+                return 'Failed: Still on login page. Please log in manually to save territory.';
             }
         }
         catch (error) {

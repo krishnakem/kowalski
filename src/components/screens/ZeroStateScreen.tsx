@@ -231,7 +231,9 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
     }
   };
 
-  const webviewRef = useRef<Electron.WebviewTag>(null);
+  // const webviewRef = useRef<Electron.WebviewTag>(null);
+  const loginTargetRef = useRef<HTMLDivElement>(null);
+  const hasLaunchedRef = useRef(false);
 
   // EFFECT 1: Handle Login Success (Global Listener)
   // Independent of webview Ref - listens as soon as dialog opens
@@ -266,14 +268,49 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
     return () => clearTimeout(timer);
   }, [instagramPhase, patchSettings, onContinue]);
 
-  // EFFECT 2: Webview Setup (Ref dependent)
-  useEffect(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
+  // EFFECT 2: Webview Setup (Ref dependent) - REMOVED (Replaced by Overlay)
 
-    // Any webview-specific setup goes here (listeners on the DOM element itself)
-    // Currently empty as we use the Main process for detection
-  }, [dialogOpen]);
+  // EFFECT 2.5: Trigger Overlay Logic
+  useEffect(() => {
+    // Only trigger if dialog is open, we are in 'connecting' phase, and haven't launched yet
+    if (!dialogOpen || instagramPhase !== 'connecting' || hasLaunchedRef.current) return;
+
+    const startOverlay = async () => {
+      if (!loginTargetRef.current) return;
+      hasLaunchedRef.current = true; // Lock
+
+      // Calculate Screen Coordinates for the Overlay
+      const rect = loginTargetRef.current.getBoundingClientRect();
+      const bounds = {
+        x: Math.round(window.screenX + rect.left),
+        y: Math.round(window.screenY + rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      };
+
+      console.log("🚀 ZeroState: Triggering Overlay Login at:", bounds);
+
+      try {
+        // @ts-ignore
+        const success = await window.api.startLogin(bounds);
+        if (success) {
+          // Main process handles closing the overlay. We just update state.
+          console.log("✅ ZeroState: Login Success returned from Main.");
+          setInstagramPhase("success");
+        } else {
+          console.log("⚠️ ZeroState: Login returned false/cancelled.");
+          hasLaunchedRef.current = false; // Allow retry?
+        }
+      } catch (e) {
+        console.error("ZeroState Overlay Error:", e);
+        hasLaunchedRef.current = false;
+      }
+    };
+
+    // Small delay to ensure render layout
+    setTimeout(startOverlay, 500);
+
+  }, [dialogOpen, instagramPhase]);
 
   const handleConnectClick = () => {
     setDialogOpen(true);
@@ -937,17 +974,12 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                       transition={{ duration: 0.3 }}
                       className="w-full h-full flex flex-col"
                     >
-                      <div className="flex-1 w-full h-full bg-black flex items-center justify-center overflow-hidden">
-                        <webview
-                          partition="persist:instagram_shared"
-                          ref={webviewRef}
-                          src="https://www.instagram.com/accounts/login/"
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            opacity: (instagramPhase as string) === 'success' ? 0 : 1, // THE CURTAIN
-                            transition: 'opacity 0.2s ease-out'
-                          }}
+                      <div className="flex-1 w-full h-full bg-transparent flex items-center justify-center overflow-hidden">
+                        <div
+                          ref={loginTargetRef}
+                          id="login-placeholder"
+                          style={{ width: '100%', height: '100%' }}
+                          className="bg-transparent" // Transparent so we see the overlay
                         />
                       </div>
                     </motion.div>
