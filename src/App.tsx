@@ -2,19 +2,23 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { lazy, Suspense, useEffect } from "react";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
 // Lazy-loaded routes for better initial bundle size
+// Lazy-loaded routes (Keep settings lazy as they are less critical)
+// Direct imports (Critical Paths)
+import AnalysisArchive from "./pages/AnalysisArchive";
+import GazetteScreen from "./components/screens/GazetteScreen";
+
 const Settings = lazy(() => import("./pages/Settings"));
 const ScheduleSettings = lazy(() => import("./pages/settings/ScheduleSettings"));
 const ApiSettings = lazy(() => import("./pages/settings/ApiSettings"));
 const InterestsSettings = lazy(() => import("./pages/settings/InterestsSettings"));
 const PersonalSettings = lazy(() => import("./pages/settings/PersonalSettings"));
-const AnalysisArchive = lazy(() => import("./pages/AnalysisArchive"));
-const GazetteScreen = lazy(() => import("./components/screens/GazetteScreen"));
 
 const queryClient = new QueryClient();
 
@@ -23,11 +27,36 @@ const PageLoading = () => (
   <div className="min-h-screen bg-background" />
 );
 
+import { useSettings } from "@/hooks/useSettings";
+
 const AppRoutes = () => {
   const navigate = useNavigate();
+  const { settings, patchSettings } = useSettings();
 
+  // Global Listener: Force Navigation when Analysis is Ready
+  useEffect(() => {
+    const unsubscribe = window.api.settings.onAnalysisReady((newAnalysis: any) => {
+      console.log("🚀 Forced navigation to Analysis Ready screen (Global Listener).", newAnalysis?.id);
 
-  // Global listeners and state checks moved to Index.tsx to prevent hijacking navigation
+      // GUARD: Ignore if user hasn't completed onboarding
+      if (!settings.hasOnboarded) {
+        return;
+      }
+
+      // update Global Settings to ensure UI reflects ready state
+      patchSettings({
+        analysisStatus: 'ready',
+        lastAnalysisDate: new Date().toISOString()
+      });
+
+      // Force navigate to home (which renders AnalysisReady based on status)
+      navigate('/');
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [patchSettings, settings.hasOnboarded, navigate]);
 
   return (
     <Suspense fallback={<PageLoading />}>
@@ -53,9 +82,11 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
+      <ErrorBoundary>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </ErrorBoundary>
     </TooltipProvider>
   </QueryClientProvider>
 );

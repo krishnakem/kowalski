@@ -9,7 +9,7 @@ interface AnalysisRendererProps {
 const sectionTransition = { duration: 0.8, ease: [0.22, 1, 0.36, 1] as const }; // Cinematic ease
 
 export const AnalysisRenderer = memo(({ data }: AnalysisRendererProps) => {
-    if (!data) return null;
+    if (!data || !data.sections) return null;
 
     return (
         <article className="max-w-[65ch] w-full mx-auto bg-background">

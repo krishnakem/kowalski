@@ -20,10 +20,12 @@ interface Window {
             checkKeyStatus: () => Promise<'locked' | 'secured' | 'missing'>;
             getSecureKey: () => Promise<string | null>;
             onAnalysisReady: (callback: (analysis: any) => void) => () => void;
+            onScheduleUpdated: (callback: (schedule: any) => void) => () => void;
         };
         analyses: {
             get: () => Promise<any[]>;
             set: (value: any[]) => Promise<boolean>;
+            getContent: (id: string) => Promise<any | null>;
         };
     }
 }

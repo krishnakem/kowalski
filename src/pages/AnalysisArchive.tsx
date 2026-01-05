@@ -84,19 +84,21 @@ const getMatchContext = (analysis: ArchivedAnalysis, query: string): MatchContex
     contexts.push({ field, snippet });
   };
 
-  // Check each section content
-  analysis.data.sections.forEach((section) => {
-    // Check heading
-    if (section.heading.toLowerCase().includes(q)) {
-      extractSnippet(section.heading, "Section Heading");
-    }
-    // Check content
-    section.content.forEach(paragraph => {
-      if (paragraph.toLowerCase().includes(q)) {
-        extractSnippet(paragraph, section.heading);
+  // Check each section content (If loaded)
+  if (analysis.data.sections) {
+    analysis.data.sections.forEach((section) => {
+      // Check heading
+      if (section.heading.toLowerCase().includes(q)) {
+        extractSnippet(section.heading, "Section Heading");
       }
+      // Check content
+      section.content.forEach(paragraph => {
+        if (paragraph.toLowerCase().includes(q)) {
+          extractSnippet(paragraph, section.heading);
+        }
+      });
     });
-  });
+  }
 
   if (analysis.data.location?.toLowerCase().includes(q)) {
     extractSnippet(analysis.data.location, "Location");
@@ -346,11 +348,14 @@ const AnalysisArchive = () => {
     const weekdayTitle = getWeekdayTitle(data.date).toLowerCase();
     if (weekdayTitle.includes(q)) return true;
 
-    // Check sections
-    for (const section of data.sections) {
-      if (section.heading.toLowerCase().includes(q)) return true;
-      for (const p of section.content) {
-        if (p.toLowerCase().includes(q)) return true;
+    // Check sections IF AVAILABLE (Memory-based legacy)
+    // New Storage: sections are not loaded in list view. Skip deep search.
+    if (data.sections) {
+      for (const section of data.sections) {
+        if (section.heading.toLowerCase().includes(q)) return true;
+        for (const p of section.content) {
+          if (p.toLowerCase().includes(q)) return true;
+        }
       }
     }
 
@@ -508,6 +513,7 @@ const AnalysisArchive = () => {
           <GazetteScreen
             onClose={handleCloseAnalysis}
             analysisData={selectedAnalysis.data}
+            analysisId={selectedAnalysis.id}
             isArchived={true}
           />
         </motion.div>
@@ -656,7 +662,7 @@ const AnalysisArchive = () => {
                         </p>
                         <div className="flex gap-2">
                           <span className="font-sans text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                            {analysis.data.sections[0]?.heading}:
+                            {analysis.data.sections && analysis.data.sections[0] ? analysis.data.sections[0].heading + ":" : "Summary:"}
                           </span>
                           <p className="font-serif text-sm text-foreground/80 leading-relaxed line-clamp-2">
                             {highlightMatch(analysis.leadStoryPreview, searchQuery)}

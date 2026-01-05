@@ -12,6 +12,7 @@ app.commandLine.appendSwitch('ignore-certificate-errors');
 app.commandLine.appendSwitch('disable-gpu');
 app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('disable-dev-shm-usage');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // ... (imports remain) ...
 // ... (inside setupIPCHandlers) ...
 import { SecureKeyManager } from './services/SecureKeyManager.js';
@@ -114,6 +115,18 @@ app.on('ready', () => {
     UsageService.getInstance().initialize();
     // Initialize Scheduler
     SchedulerService.getInstance().initialize();
+    // MIGRATION: Ensure storage directory exists
+    const userDataPath = app.getPath('userData');
+    const recordsPath = path.join(userDataPath, 'analysis_records');
+    if (!fs.existsSync(recordsPath)) {
+        fs.mkdirSync(recordsPath, { recursive: true });
+        console.log('📂 Created analysis_records directory');
+    }
+    // MIGRATION: Clean Slate for File-Based Storage
+    // Clearing legacy store to prevent UI errors with missing files.
+    // TEMPORARY MIGRATION CLEANUP (Removed to prevent data loss on restart)
+    // The previous block wiped data on every boot.
+    // Data persistence is now safely handled by the File-Per-Analysis model.
     setupIPCHandlers();
 });
 app.on('before-quit', () => {
@@ -318,6 +331,22 @@ function setupIPCHandlers() {
         const store = new Store();
         store.set('analyses', analyses);
         return true;
+        return true;
+    });
+    ipcMain.handle('analyses:get-content', async (_event, id) => {
+        try {
+            const userDataPath = app.getPath('userData');
+            const filePath = path.join(userDataPath, 'analysis_records', `${id}.json`);
+            if (fs.existsSync(filePath)) {
+                const raw = fs.readFileSync(filePath, 'utf-8');
+                return JSON.parse(raw);
+            }
+            return null;
+        }
+        catch (e) {
+            console.error(`❌ Failed to load analysis content for ${id}:`, e);
+            return null;
+        }
     });
     ipcMain.handle('settings:get-active-schedule', async () => {
         const { default: Store } = await import('electron-store');

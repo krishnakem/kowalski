@@ -23,6 +23,14 @@ export const useDailySnapshot = () => {
 
         // Optional: We could listen for updates, but snapshots only change on new days or first launch.
         // A reload handles that.
+        const unsubscribe = window.api.settings.onScheduleUpdated((newSnapshot: any) => {
+            console.log("⚡️ Received schedule update in renderer:", newSnapshot);
+            setSnapshot(newSnapshot);
+        });
+
+        return () => {
+            unsubscribe();
+        };
     }, []);
 
     return { snapshot, isLoaded };

@@ -28,11 +28,18 @@ contextBridge.exposeInMainWorld('api', {
             const subscription = (_event: any, analysis: any) => callback(analysis);
             ipcRenderer.on('analysis-ready', subscription);
             // Return unsubscribe function
+            // Return unsubscribe function
             return () => ipcRenderer.removeListener('analysis-ready', subscription);
+        },
+        onScheduleUpdated: (callback: (schedule: any) => void) => {
+            const subscription = (_event: any, schedule: any) => callback(schedule);
+            ipcRenderer.on('schedule-updated', subscription);
+            return () => ipcRenderer.removeListener('schedule-updated', subscription);
         }
     },
     analyses: {
         get: () => ipcRenderer.invoke('analyses:get'),
         set: (value: any) => ipcRenderer.invoke('analyses:set', value),
+        getContent: (id: string) => ipcRenderer.invoke('analyses:get-content', id),
     }
 });

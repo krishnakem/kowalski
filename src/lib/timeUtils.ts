@@ -78,7 +78,8 @@ export const getNextAnalysisTime = (
     }
 
     const prepTimeMs = targetDate.getTime() - wakeTime.getTime();
-    const threeHoursMs = 3 * 60 * 60 * 1000;
+    // TEST OVERRIDE: 15 seconds instead of 3 hours
+    const threeHoursMs = 15 * 1000;
 
     return prepTimeMs < threeHoursMs;
   };

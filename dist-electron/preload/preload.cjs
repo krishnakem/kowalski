@@ -29,11 +29,18 @@ electron_1.contextBridge.exposeInMainWorld('api', {
             const subscription = (_event, analysis) => callback(analysis);
             electron_1.ipcRenderer.on('analysis-ready', subscription);
             // Return unsubscribe function
+            // Return unsubscribe function
             return () => electron_1.ipcRenderer.removeListener('analysis-ready', subscription);
+        },
+        onScheduleUpdated: (callback) => {
+            const subscription = (_event, schedule) => callback(schedule);
+            electron_1.ipcRenderer.on('schedule-updated', subscription);
+            return () => electron_1.ipcRenderer.removeListener('schedule-updated', subscription);
         }
     },
     analyses: {
         get: () => electron_1.ipcRenderer.invoke('analyses:get'),
         set: (value) => electron_1.ipcRenderer.invoke('analyses:set', value),
+        getContent: (id) => electron_1.ipcRenderer.invoke('analyses:get-content', id),
     }
 });

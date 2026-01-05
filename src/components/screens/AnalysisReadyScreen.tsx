@@ -1,13 +1,12 @@
 import { useCallback, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Settings, Archive } from "lucide-react";
+import { Settings } from "lucide-react";
 import { WavingPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/layouts/PageHeader";
 import { ease, duration, spring } from "@/lib/animations";
 import { useSettings } from "@/hooks/useSettings";
-import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { getTimeOfDayGreeting } from "@/lib/timeUtils";
 
 
@@ -24,8 +23,7 @@ const buttonEntranceTransition = { duration: duration.slow, ease: ease.cinematic
 const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: AnalysisReadyScreenProps) => {
   const navigate = useNavigate();
   const { settings } = useSettings();
-  const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
-  const showArchiveButton = archivesLoaded && hasPastAnalyses;
+
 
   const greeting = getTimeOfDayGreeting();
 
@@ -33,24 +31,11 @@ const AnalysisReadyScreen = memo(({ onViewAnalysis, lastAnalysisDate }: Analysis
     ? `${greeting}, ${settings.userName.trim()}`
     : greeting;
 
-  const handleNavigateToArchive = useCallback(() => {
-    navigate("/archive", { state: { from: "ready" } });
-  }, [navigate]);
-
   const handleNavigateToSettings = useCallback(() => {
     navigate("/settings", { state: { from: "ready" } });
   }, [navigate]);
 
-  const leftAction = showArchiveButton ? (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={handleNavigateToArchive}
-      className="text-muted-foreground hover:bg-transparent opacity-60 hover:opacity-100 transition-opacity h-14 w-14"
-    >
-      <Archive className="w-8 h-8" />
-    </Button>
-  ) : null;
+  const leftAction = null;
 
   const rightAction = (
     <Button

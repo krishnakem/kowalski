@@ -28,8 +28,15 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   const { snapshot: activeSchedule } = useDailySnapshot();
   const { wakeTime } = useSystemWakeTime();
 
-  // If no past analyses, this is the first day after onboarding - schedule starts tomorrow
-  const isFirstDay = archivesLoaded && !hasPastAnalyses;
+  // If no past analyses AND active schedule is not for today, then it's the first day (onboarding day)
+  // Fix: If activeSchedule.activeDate IS today, then we are LIVE, regardless of past analyses.
+  const todayStr = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
+  const isActiveToday = activeSchedule?.activeDate === todayStr;
+
+  // Logic: It is "First Day" (show tomorrow) ONLY IF:
+  // 1. We have no archives (new user)
+  // 2. AND The active schedule is NOT for today (meaning we onboarded today and wait for tomorrow)
+  const isFirstDay = archivesLoaded && !hasPastAnalyses && !isActiveToday;
   const nextAnalysis = getNextAnalysisTime(settings, activeSchedule, isFirstDay, wakeTime);
   const showArchiveButton = archivesLoaded && hasPastAnalyses;
 
@@ -51,8 +58,8 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
 
-      {/* Archive Button - only show if there are past analyses in the archive */}
-      {showArchiveButton && (
+      {/* Archive Button - Always show for navigation/testing */}
+      {archivesLoaded && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -116,6 +123,9 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
           Your analysis will be ready {nextAnalysis.toLowerCase()}.
         </motion.p>
       </motion.div>
+
+
+
     </div>
   );
 });

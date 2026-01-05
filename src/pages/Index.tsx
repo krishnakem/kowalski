@@ -34,6 +34,10 @@ const Index = () => {
 
     // STRICT GATE: If user has onboarded, NEVER show zero state unless settings were wiped.
     if (settings.hasOnboarded) {
+      // LOGIC UPDATE: 'ready' status implies "Unviewed Analysis Available".
+      // It does NOT matter if it's from today or yesterday. 
+      // If the user hasn't viewed it, show it.
+      // Once viewed (in handleViewAnalysis), status becomes 'idle', and we show Agent.
       if (settings.analysisStatus === "ready") {
         setCurrentScreen("ready");
       } else {
@@ -47,36 +51,7 @@ const Index = () => {
 
   }, [isLoaded, archivesLoaded, currentScreen, settings.hasOnboarded, settings.analysisStatus]);
 
-  // Listen for Background Analysis Generation (Silent Update -> UI Update)
-  useEffect(() => {
-    const unsubscribe = window.api.settings.onAnalysisReady((newAnalysis: any) => {
-      console.log("🔔 Incoming Analysis (Background):", newAnalysis.id);
 
-      // GUARD: Ignore if user hasn't completed onboarding
-      if (!settings.hasOnboarded) {
-        console.log("⚠️ Ignoring analysis-ready event: User not onboarded yet.");
-        return;
-      }
-
-      // Capture the ID for direct navigation (fixes deep link bug)
-      if (newAnalysis.id) {
-        setLatestAnalysisId(newAnalysis.id);
-      }
-
-      // Update Global Settings
-      patchSettings({
-        analysisStatus: 'ready',
-        lastAnalysisDate: new Date().toISOString()
-      });
-
-      // Update Local State (Immediate transition if app is open)
-      setCurrentScreen("ready");
-    });
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
-  }, [patchSettings, settings.hasOnboarded]);
 
 
   const handleContinue = () => {
@@ -91,17 +66,25 @@ const Index = () => {
     console.log("Agent complete (no-op in production)");
   };
 
-  const handleViewAnalysis = () => {
-    // Navigate to the latest analysis in the Archive hub
-    // Prioritize the ID received from the background event (latestAnalysisId)
-    // as hooks might be stale immediately after generation.
-    const targetId = latestAnalysisId || (analyses.length > 0 ? analyses[0].id : null);
+  const handleViewAnalysis = async () => {
+    // Force-fetch the latest list from the store to avoid stale React state
+    try {
+      const freshAnalyses = await window.api.analyses.get();
+      // Sort by date manually to be absolutely sure (newest first)
+      const latest = freshAnalyses.sort((a: any, b: any) =>
+        new Date(b.data.date).getTime() - new Date(a.data.date).getTime()
+      )[0];
 
-    if (targetId) {
-      patchSettings({ analysisStatus: "idle" });
-      navigate(`/archive/${targetId}`);
-    } else {
-      // Fallback: go to archive list
+      if (latest && latest.id) {
+        console.log("Viewing Latest Analysis (Direct Fetch):", latest.id);
+        patchSettings({ analysisStatus: "idle" });
+        navigate(`/archive/${latest.id}`);
+      } else {
+        console.warn("No analyses found in store. Going to archive root.");
+        navigate("/archive");
+      }
+    } catch (e) {
+      console.error("Failed to fetch latest analysis for navigation:", e);
       navigate("/archive");
     }
   };

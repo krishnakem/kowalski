@@ -1,4 +1,6 @@
-import { powerMonitor } from 'electron';
+import { app, powerMonitor, powerSaveBlocker } from 'electron';
+import fs from 'fs';
+import path from 'path';
 import { LoremIpsumGenerator } from './LoremIpsumGenerator.js';
 // Next-Day Effect: Locked schedule that only updates on new calendar days
 // (Imported ActiveSchedule)
@@ -8,6 +10,7 @@ export class SchedulerService {
     mainWindow = null;
     alignmentTimeout = null;
     lastWakeTime = new Date(); // Track when app started/woke
+    suspensionBlockerId = null;
     constructor() { }
     static getInstance() {
         if (!SchedulerService.instance) {
@@ -47,13 +50,15 @@ export class SchedulerService {
         console.log('⏰ SchedulerService: Initialized.');
         this.lastWakeTime = new Date();
         console.log('⏰ Wake Time set to:', this.lastWakeTime.toLocaleString());
+        // Start preventing app suspension to ensure overnight execution
+        this.suspensionBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+        console.log(`🔋 Power Save Blocker active (ID: ${this.suspensionBlockerId})`);
         // DAEMON MODE: No Catch-Up. Start watching immediately.
         this.startHeartbeat();
         // Restart heartbeat on system wake to ensure accuracy
+        // Restart heartbeat on system wake to ensure accuracy
         powerMonitor.on('resume', () => {
-            console.log('⚡️ System Resumed: Restarting Heartbeat.');
-            this.lastWakeTime = new Date(); // Reset wake time on resume
-            console.log('⏰ Wake Time updated to:', this.lastWakeTime.toLocaleString());
+            console.log(`⚡️ System Resumed. Heartbeat active. App Uptime: ${Math.floor(process.uptime() / 60)}m. Last Wake (Start) Time: ${this.lastWakeTime.toLocaleString()}`);
             this.startHeartbeat();
         });
     }
@@ -65,12 +70,12 @@ export class SchedulerService {
             clearTimeout(this.alignmentTimeout);
         const now = new Date();
         const msUntilNextMinute = 60000 - (now.getTime() % 60000);
-        console.log(`⏰ SchedulerService: Aligning heartbeat. Waiting ${msUntilNextMinute}ms for minute boundary.`);
+        // console.log(`⏰ SchedulerService: Aligning heartbeat. Waiting ${msUntilNextMinute}ms for minute boundary.`);
         // Run immediate check for catch-up (in case we missed a slot while app was closed)
         this.checkSchedule();
         // Wait for top of minute
         this.alignmentTimeout = setTimeout(() => {
-            console.log('⏰ SchedulerService: Minute boundary reached. Starting precision intervals.');
+            // console.log('⏰ SchedulerService: Minute boundary reached. Starting precision intervals.');
             // Execute exactly on the minute
             this.checkSchedule();
             // Start regular interval
@@ -107,6 +112,7 @@ export class SchedulerService {
             };
             store.set('activeSchedule', activeSchedule);
             console.log(`📅 First Daily Snapshot Created. Active starting ${tomorrowStr}:`, activeSchedule);
+            this.mainWindow?.webContents.send('schedule-updated', activeSchedule);
             return activeSchedule;
         }
         // If snapshot exists but is from a PREVIOUS day (past), refresh it from current settings.
@@ -120,12 +126,13 @@ export class SchedulerService {
             };
             store.set('activeSchedule', activeSchedule);
             console.log(`📅 Daily Snapshot Refreshed for ${today}:`, activeSchedule);
+            this.mainWindow?.webContents.send('schedule-updated', activeSchedule);
         }
         return activeSchedule;
     }
     async checkSchedule() {
         // Log precise execution time for debugging
-        console.log("Scheduler Triggered at: " + new Date().toISOString());
+        // console.log("Scheduler Triggered at: " + new Date().toISOString());
         try {
             const store = await this.getStore();
             // Get the locked schedule for today (or null if not onboarded)
@@ -185,11 +192,17 @@ export class SchedulerService {
         // 1.5 CHECK: 3-Hour Preparation Buffer
         // If the machine woke up too close to the target time, skip it.
         // Diff = TargetTime - WakeTime
+        // Diff = TargetTime - WakeTime
         const prepTimeMs = targetTimeToday.getTime() - this.lastWakeTime.getTime();
-        const threeHoursMs = 3 * 60 * 60 * 1000;
-        // Condition: triggers only if we have > 3 hours of "uptime" before the slot
-        if (prepTimeMs < threeHoursMs) {
-            console.log(`🛡️ Skipping Slot ${targetTimeStr}: Not enough prep time (${Math.floor(prepTimeMs / 60000)}m < 180m)`);
+        // TEST OVERRIDE: 15 seconds instead of 3 hours
+        const threeHoursMs = 15 * 1000;
+        // Condition: triggers only if we have > 15 seconds of "uptime" before the slot
+        // LOGIC FIX: Check BOTH "Date-based" prep time AND "Process Uptime"
+        // If the app has been running for > 15 seconds (process.uptime), we consider it buffered/ready regardless of wake quirks.
+        const uptimeSeconds = process.uptime();
+        const threeHoursSeconds = 15;
+        if (prepTimeMs < threeHoursMs && uptimeSeconds < threeHoursSeconds) {
+            console.log(`🛡️ Skipping Slot ${targetTimeStr}: Not enough prep time (DateDiff: ${Math.floor(prepTimeMs / 60000)}m, Uptime: ${Math.floor(uptimeSeconds / 60)}m < 180m)`);
             return false;
         }
         // 2. Check if we already ran for this slot TODAY (or after it)
@@ -218,15 +231,42 @@ export class SchedulerService {
             scheduledTime: scheduledTime,
             targetDate: effectiveDate
         });
+        console.log(`🌑 Background Task Started at ${new Date().toLocaleString()}`);
         // 2. Persist
         const newRecord = {
             id: `analysis-sim-${Date.now()}-${Math.floor(Math.random() * 1000)}`, // Random suffix to avoid collision in fast loops
             data: mockAnalysis,
             leadStoryPreview: mockAnalysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
         };
-        const currentAnalyses = store.get('analyses') || [];
-        const updatedAnalyses = [newRecord, ...currentAnalyses];
-        store.set('analyses', updatedAnalyses);
+        // FILE-BASED STORAGE MIGRATION
+        // A. Save FULL object to disk
+        const userDataPath = app.getPath('userData');
+        const recordPath = path.join(userDataPath, 'analysis_records', `${newRecord.id}.json`);
+        try {
+            fs.writeFileSync(recordPath, JSON.stringify(newRecord, null, 2));
+            console.log(`💾 Saved Full Analysis to disk: ${recordPath}`);
+            // B. Save METADATA ONLY to Store (Lightweight)
+            // MOVED INSIDE TRY: Only update store if file write succeeded
+            const metadataRecord = {
+                id: newRecord.id,
+                // Keep critical fields for sorting/listing
+                data: {
+                    date: newRecord.data.date, // Used for sorting
+                    title: newRecord.data.title,
+                    scheduledTime: newRecord.data.scheduledTime,
+                    location: newRecord.data.location
+                    // REMOVED: sections (heavy text)
+                },
+                leadStoryPreview: newRecord.leadStoryPreview
+            };
+            const currentAnalyses = store.get('analyses') || [];
+            const updatedAnalyses = [metadataRecord, ...currentAnalyses];
+            store.set('analyses', updatedAnalyses);
+        }
+        catch (e) {
+            console.error('❌ Failed to save analysis to disk. Skipping metadata update.', e);
+            return; // Abort - Do not update metadata or notify user
+        }
         // 3. Update State
         // If silent (catch-up), mark as 'idle' so user isn't bombarded. Only final one (not silent) marks 'ready'.
         const newStatus = silent ? 'idle' : 'ready';
@@ -236,10 +276,12 @@ export class SchedulerService {
             analysisStatus: newStatus
         });
         // 4. Zero-Cost Logging
+        console.log(`🌕 Background Task Completed at ${new Date().toLocaleString()}`);
         console.log(`🤖 Simulation Complete (${silent ? 'Silent/Historical' : 'Live'}). Estimated Cost: $0.00`);
         // 5. Notify UI (Push) - Only if not silent
         if (!silent && this.mainWindow && !this.mainWindow.isDestroyed()) {
             console.log('📡 Push Notification Sent: analysis-ready');
+            // Send full record so UI doesn't have to fetch immediately
             this.mainWindow.webContents.send('analysis-ready', newRecord);
         }
     }
