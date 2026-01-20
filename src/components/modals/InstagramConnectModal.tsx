@@ -60,13 +60,15 @@ export const InstagramConnectModal = ({
                         setTimeout(() => onClose(), autoCloseDelay);
                     }
                 } else {
-                    // Start Over / Error
-                    hasLaunchedRef.current = false; // Allow retry?
-                    // Maybe show error state
+                    // Login failed or was cancelled - return to previous screen
+                    console.log("Login returned false, closing modal");
+                    hasLaunchedRef.current = false;
+                    onClose();
                 }
             } catch (e) {
                 console.error("Overlay Login Error:", e);
                 hasLaunchedRef.current = false;
+                onClose();
             }
         };
 

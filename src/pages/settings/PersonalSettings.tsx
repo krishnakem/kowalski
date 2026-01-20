@@ -19,6 +19,8 @@ const PersonalSettings = () => {
   const [editLocation, setEditLocation] = useState("");
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<{ isActive: boolean; reason?: string } | null>(null);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
 
   // Sync state when settings are loaded
   useEffect(() => {
@@ -28,6 +30,26 @@ const PersonalSettings = () => {
       setEditLocation(settings.location);
     }
   }, [isLoaded, settings.userName, settings.location]);
+
+  // Check Instagram session status on mount
+  const checkSessionStatus = async () => {
+    try {
+      setIsCheckingSession(true);
+      // @ts-ignore
+      const status = await window.api.checkInstagramSession();
+      console.log("Session status:", status);
+      setSessionStatus(status);
+    } catch (e) {
+      console.error("Failed to check session:", e);
+      setSessionStatus({ isActive: false, reason: "error" });
+    } finally {
+      setIsCheckingSession(false);
+    }
+  };
+
+  useEffect(() => {
+    checkSessionStatus();
+  }, []);
 
   const handleSave = () => {
     patchSettings({ userName: editName, location: editLocation });
@@ -121,8 +143,19 @@ const PersonalSettings = () => {
           <Label className="text-sm text-foreground font-sans">Instagram Account</Label>
           <div className="bg-card p-4 flex items-center justify-between border border-border/50">
             <div className="flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <span className="font-sans text-sm text-muted-foreground">Session Active</span>
+              {isCheckingSession ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-muted-foreground/30 animate-pulse" />
+                  <span className="font-sans text-sm text-muted-foreground/50">Checking...</span>
+                </>
+              ) : (
+                <>
+                  <div className={`w-2 h-2 rounded-full ${sessionStatus?.isActive ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                  <span className="font-sans text-sm text-muted-foreground">
+                    {sessionStatus?.isActive ? 'Session Active' : 'Session Inactive'}
+                  </span>
+                </>
+              )}
             </div>
             <Button
               variant="ghost"
@@ -171,10 +204,8 @@ const PersonalSettings = () => {
           isOpen={isLoginOpen}
           onClose={() => setIsLoginOpen(false)}
           onSuccess={() => {
-            // Session captured.
-            // We wait for auto-close (handled by modal prop)
-            // But we might want to refresh checking status?
-            // The UI says "Session Active" statically right now, which is fine since we just logged in.
+            // Session captured - re-check status to update indicator
+            checkSessionStatus();
           }}
           autoCloseDelay={2500} // 2.5 Seconds wait
         />

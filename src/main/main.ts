@@ -2,8 +2,6 @@ import { app, BrowserWindow, ipcMain, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-// Replace 'playwright' import with 'playwright-extra'
-// BrowserManager now handles the browser instance
 import { BrowserManager } from './services/BrowserManager.js';
 
 // --- GLOBAL ELECTRON FIXES ---
@@ -94,7 +92,7 @@ const createWindow = () => {
     // Open the DevTools.
     // mainWindow.webContents.openDevTools();
   } else {
-    const filePath = path.join(__dirname, '../dist/index.html');
+    const filePath = path.join(__dirname, '../../dist/index.html');
     console.log("Loading file path:", filePath);
     mainWindow.loadFile(filePath);
   }
@@ -224,6 +222,19 @@ function setupIPCHandlers() {
     } catch (e) {
       console.error('❌ Failed to clear electron-store:', e);
       return false;
+    }
+
+    // 4. Delete analysis_records folder (contains individual analysis JSON files)
+    try {
+      const userDataPath = app.getPath('userData');
+      const recordsPath = path.join(userDataPath, 'analysis_records');
+      if (fs.existsSync(recordsPath)) {
+        fs.rmSync(recordsPath, { recursive: true, force: true });
+        console.log('✅ Deleted analysis_records folder');
+      }
+    } catch (e) {
+      console.error('⚠️ Failed to delete analysis_records:', e);
+      // Non-critical, continue with reset
     }
 
     console.log('🎉 Session reset complete');
@@ -406,11 +417,96 @@ function setupIPCHandlers() {
       // 2. Clear ONLY the Instagram View partition
       await session.fromPartition(SHARED_PARTITION).clearStorageData();
 
+      // 3. Clear the Playwright persistent browser profile (kowalski_browser/)
+      // This ensures Switch Account launches a fresh browser without cached login
+      await BrowserManager.getInstance().clearData();
+
       // DO NOT clear defaultSession (preserves LocalStorage/Settings)
       return true;
     } catch (e) {
       console.error('Clear Instagram Session Error:', e);
       return false;
+    }
+  });
+
+  // --- Instagram Session Status Check ---
+  // Reads the Chromium SQLite cookies database directly (no network activity)
+  ipcMain.handle('check-instagram-session', async () => {
+    try {
+      const userDataPath = app.getPath('userData');
+      const persistentContextPath = path.join(userDataPath, 'kowalski_browser');
+
+      // Quick check: if no profile exists at all, definitely not logged in
+      if (!fs.existsSync(persistentContextPath)) {
+        return { isActive: false, reason: 'no_profile' };
+      }
+
+      // Check Chromium's SQLite cookies database for Instagram sessionid
+      const cookiesDbPath = path.join(persistentContextPath, 'Default', 'Cookies');
+      if (!fs.existsSync(cookiesDbPath)) {
+        return { isActive: false, reason: 'no_cookies_db' };
+      }
+
+      try {
+        // Copy the database to a temp location (Chromium may have it locked)
+        const tempDbPath = path.join(userDataPath, 'cookies_check_temp.db');
+        console.log('🔍 Session check: Copying cookies from', cookiesDbPath, 'to', tempDbPath);
+        fs.copyFileSync(cookiesDbPath, tempDbPath);
+
+        const Database = require('better-sqlite3');
+        const db = new Database(tempDbPath, { readonly: true });
+
+        // Query for Instagram sessionid cookie
+        // Chromium stores cookies with host_key like ".instagram.com"
+        const stmt = db.prepare(`
+          SELECT name, host_key, value, encrypted_value, expires_utc
+          FROM cookies
+          WHERE host_key LIKE '%instagram.com' AND name = 'sessionid'
+        `);
+        const rows = stmt.all();
+        console.log('🔍 Session check: Query returned', rows.length, 'rows');
+        if (rows.length > 0) {
+          console.log('🔍 Session check: Cookie data:', JSON.stringify(rows[0], (key, value) =>
+            key === 'encrypted_value' ? `[Buffer ${value?.length || 0} bytes]` : value
+          ));
+        }
+        db.close();
+
+        // Clean up temp file
+        try { fs.unlinkSync(tempDbPath); } catch {}
+
+        if (rows.length > 0) {
+          const cookie = rows[0];
+          // Check if cookie has expired (expires_utc is in microseconds since 1601-01-01)
+          // A value of 0 means session cookie (expires when browser closes)
+          if (cookie.expires_utc > 0) {
+            // Convert Chromium timestamp to JS timestamp
+            // Chromium epoch is 1601-01-01, JS epoch is 1970-01-01
+            const chromiumEpochDiff = 11644473600000000; // microseconds
+            const expiresMs = (cookie.expires_utc - chromiumEpochDiff) / 1000;
+            console.log('🔍 Session check: expires_utc =', cookie.expires_utc, '-> expiresMs =', expiresMs, '-> Date.now() =', Date.now());
+            if (Date.now() > expiresMs) {
+              console.log('❌ Session check: sessionid cookie EXPIRED');
+              return { isActive: false, reason: 'session_expired' };
+            }
+          }
+
+          // Cookie exists and is not expired - check if it has a value
+          // Note: Modern Chrome encrypts cookie values, so encrypted_value may have data
+          // even if value is empty. The presence of the row is what matters.
+          console.log('✅ Session check: sessionid cookie FOUND (valid)');
+          return { isActive: true, reason: 'sessionid_cookie_valid' };
+        } else {
+          console.log('❌ Session check: No sessionid cookie found');
+          return { isActive: false, reason: 'no_sessionid_cookie' };
+        }
+      } catch (dbErr) {
+        console.error('⚠️ Failed to read cookies database:', dbErr);
+        return { isActive: false, reason: 'db_read_error' };
+      }
+    } catch (e) {
+      console.error('❌ Error checking Instagram session:', e);
+      return { isActive: false, reason: 'error' };
     }
   });
 }

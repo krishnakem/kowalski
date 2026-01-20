@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('api', {
     startLogin: (bounds: any) => ipcRenderer.invoke('auth:login', bounds),
     resetSession: () => ipcRenderer.invoke('reset-session'),
     clearInstagramSession: () => ipcRenderer.invoke('clear-instagram-session'),
+    checkInstagramSession: () => ipcRenderer.invoke('check-instagram-session'),
     saveLoginSession: () => ipcRenderer.invoke('save-login-session'),
     onLoginSuccess: (callback: () => void) => {
         const subscription = (_event: any, _args: any) => callback();

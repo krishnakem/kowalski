@@ -1,3 +1,8 @@
+
+// CJS shims for ESM compatibility
+const { fileURLToPath: __fileURLToPath } = require('url');
+const __importMetaUrl = require('url').pathToFileURL(__filename).toString();
+
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -250,33 +255,39 @@ var BrowserManager = class _BrowserManager {
       const extraArgs = [];
       if (config.bounds) {
         extraArgs.push(`--app=https://www.instagram.com/accounts/login/`);
-        extraArgs.push("--frameless");
-        extraArgs.push("--always-on-top");
         extraArgs.push(`--window-position=${config.bounds.x},${config.bounds.y}`);
         extraArgs.push(`--window-size=${config.bounds.width},${config.bounds.height}`);
       }
       const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
+      console.log("\u{1F50D} DEBUG: Custom executable path:", customExecutablePath);
       let executablePath = "";
       if (import_fs2.default.existsSync(customExecutablePath)) {
         console.log("\u{1F575}\uFE0F\u200D\u2640\uFE0F BrowserManager: Using Custom Stealth Browser:", customExecutablePath);
         executablePath = customExecutablePath;
       } else {
-        console.warn("\u26A0\uFE0F BrowserManager: Custom browser not found. Using default.");
+        console.warn("\u26A0\uFE0F BrowserManager: Custom browser not found at:", customExecutablePath);
+        console.warn("\u26A0\uFE0F BrowserManager: Using Playwright default browser.");
       }
       const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      console.log("\u{1F50D} DEBUG: About to launch with config:", {
+        headless: config.headless,
+        executablePath: executablePath || "DEFAULT",
+        persistentContextPath,
+        extraArgs,
+        userAgent: ChromiumVersionHelper.generateUserAgent()
+      });
       this.browserContext = await import_playwright_extra.chromium.launchPersistentContext(persistentContextPath, {
         headless: config.headless,
         executablePath: executablePath || void 0,
         viewport: null,
-        // Let window size dictate viewport
+        // Let window size dictate viewport (deviceScaleFactor not compatible with null viewport)
         // Dynamic User-Agent that matches actual Chromium version (auto-detected)
         userAgent: ChromiumVersionHelper.generateUserAgent(),
         // Fingerprint consistency options
         locale: "en-US",
         timezoneId: systemTimezone,
         colorScheme: "light",
-        deviceScaleFactor: 2,
-        // Retina Mac
+        // Note: deviceScaleFactor removed - not compatible with viewport: null
         // HTTP headers that Chrome normally sends
         extraHTTPHeaders: {
           "Accept-Language": "en-US,en;q=0.9"
@@ -331,13 +342,16 @@ var BrowserManager = class _BrowserManager {
       } catch (err) {
         console.error("\u26A0\uFE0F BrowserManager: Failed to sync session.json cookies:", err);
       }
+      console.log("\u2705 DEBUG: Browser context created successfully");
       this.browserContext.on("close", () => {
         console.log("\u274C BrowserManager: Context closed unexpectedly (or manually). Clearing reference.");
         this.browserContext = null;
       });
+      console.log("\u2705 DEBUG: Returning browser context, pages count:", this.browserContext.pages().length);
       return this.browserContext;
     } catch (error) {
       console.error("\u{1F525} BrowserManager: Failed to launch browser:", error);
+      console.error("\u{1F525} Stack trace:", error.stack);
       this.browserContext = null;
       throw error;
     }
@@ -383,9 +397,13 @@ var BrowserManager = class _BrowserManager {
     console.log("\u{1F510} BrowserManager: Starting Single Vehicle Login Overlay...");
     mainWindow2.setMovable(false);
     try {
+      console.log("\u{1F50D} DEBUG login: Bounds received:", bounds);
       const context = await this.launch({ headless: false, bounds });
+      console.log("\u{1F50D} DEBUG login: Context launched successfully");
       const pages = context.pages();
+      console.log("\u{1F50D} DEBUG login: Pages count:", pages.length);
       const page = pages.length > 0 ? pages[0] : await context.newPage();
+      console.log("\u{1F50D} DEBUG login: Got page, URL:", page.url());
       context.on("page", async (newPage) => {
         await new Promise((resolve) => setTimeout(resolve, 100));
         const allPages = context.pages();
@@ -1017,9 +1035,9 @@ import_electron5.app.commandLine.appendSwitch("disable-gpu");
 import_electron5.app.commandLine.appendSwitch("disable-software-rasterizer");
 import_electron5.app.commandLine.appendSwitch("disable-dev-shm-usage");
 import_electron5.app.commandLine.appendSwitch("disable-renderer-backgrounding");
-var __filename = (0, import_url.fileURLToPath)(void 0);
+var __filename = (0, import_url.fileURLToPath)(__importMetaUrl);
 var __dirname = import_path4.default.dirname(__filename);
-var require2 = (0, import_module.createRequire)(void 0);
+var require2 = (0, import_module.createRequire)(__importMetaUrl);
 if (!import_electron5.app.getLoginItemSettings().openAtLogin) {
   import_electron5.app.setLoginItemSettings({
     openAtLogin: true,
@@ -1067,7 +1085,7 @@ var createWindow = () => {
     console.log("Creating window with URL:", url);
     mainWindow.loadURL(url);
   } else {
-    const filePath = import_path4.default.join(__dirname, "../dist/index.html");
+    const filePath = import_path4.default.join(__dirname, "../../dist/index.html");
     console.log("Loading file path:", filePath);
     mainWindow.loadFile(filePath);
   }
@@ -1147,6 +1165,16 @@ function setupIPCHandlers() {
     } catch (e) {
       console.error("\u274C Failed to clear electron-store:", e);
       return false;
+    }
+    try {
+      const userDataPath = import_electron5.app.getPath("userData");
+      const recordsPath = import_path4.default.join(userDataPath, "analysis_records");
+      if (import_fs4.default.existsSync(recordsPath)) {
+        import_fs4.default.rmSync(recordsPath, { recursive: true, force: true });
+        console.log("\u2705 Deleted analysis_records folder");
+      }
+    } catch (e) {
+      console.error("\u26A0\uFE0F Failed to delete analysis_records:", e);
     }
     console.log("\u{1F389} Session reset complete");
     return true;
@@ -1290,6 +1318,67 @@ function setupIPCHandlers() {
       return false;
     }
   });
+  import_electron5.ipcMain.handle("check-instagram-session", async () => {
+    try {
+      const userDataPath = import_electron5.app.getPath("userData");
+      const persistentContextPath = import_path4.default.join(userDataPath, "kowalski_browser");
+      if (!import_fs4.default.existsSync(persistentContextPath)) {
+        return { isActive: false, reason: "no_profile" };
+      }
+      const cookiesDbPath = import_path4.default.join(persistentContextPath, "Default", "Cookies");
+      if (!import_fs4.default.existsSync(cookiesDbPath)) {
+        return { isActive: false, reason: "no_cookies_db" };
+      }
+      try {
+        const tempDbPath = import_path4.default.join(userDataPath, "cookies_check_temp.db");
+        console.log("\u{1F50D} Session check: Copying cookies from", cookiesDbPath, "to", tempDbPath);
+        import_fs4.default.copyFileSync(cookiesDbPath, tempDbPath);
+        const Database = require2("better-sqlite3");
+        const db = new Database(tempDbPath, { readonly: true });
+        const stmt = db.prepare(`
+          SELECT name, host_key, value, encrypted_value, expires_utc
+          FROM cookies
+          WHERE host_key LIKE '%instagram.com' AND name = 'sessionid'
+        `);
+        const rows = stmt.all();
+        console.log("\u{1F50D} Session check: Query returned", rows.length, "rows");
+        if (rows.length > 0) {
+          console.log("\u{1F50D} Session check: Cookie data:", JSON.stringify(
+            rows[0],
+            (key, value) => key === "encrypted_value" ? `[Buffer ${value?.length || 0} bytes]` : value
+          ));
+        }
+        db.close();
+        try {
+          import_fs4.default.unlinkSync(tempDbPath);
+        } catch {
+        }
+        if (rows.length > 0) {
+          const cookie = rows[0];
+          if (cookie.expires_utc > 0) {
+            const chromiumEpochDiff = 116444736e8;
+            const expiresMs = (cookie.expires_utc - chromiumEpochDiff) / 1e3;
+            console.log("\u{1F50D} Session check: expires_utc =", cookie.expires_utc, "-> expiresMs =", expiresMs, "-> Date.now() =", Date.now());
+            if (Date.now() > expiresMs) {
+              console.log("\u274C Session check: sessionid cookie EXPIRED");
+              return { isActive: false, reason: "session_expired" };
+            }
+          }
+          console.log("\u2705 Session check: sessionid cookie FOUND (valid)");
+          return { isActive: true, reason: "sessionid_cookie_valid" };
+        } else {
+          console.log("\u274C Session check: No sessionid cookie found");
+          return { isActive: false, reason: "no_sessionid_cookie" };
+        }
+      } catch (dbErr) {
+        console.error("\u26A0\uFE0F Failed to read cookies database:", dbErr);
+        return { isActive: false, reason: "db_read_error" };
+      }
+    } catch (e) {
+      console.error("\u274C Error checking Instagram session:", e);
+      return { isActive: false, reason: "error" };
+    }
+  });
 }
 import_electron5.app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -1303,4 +1392,4 @@ import_electron5.app.on("activate", () => {
     mainWindow?.show();
   }
 });
-//# sourceMappingURL=main.js.map
+//# sourceMappingURL=main.cjs.map
