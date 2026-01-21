@@ -4,7 +4,7 @@
  * Uses OpenAI Vision API ONLY for content extraction (not navigation).
  * Each call is stateless - no conversation history maintained.
  *
- * Cost: ~$0.01 per viewport (using low detail + gpt-4o-mini)
+ * Cost: ~$0.003-0.005 per viewport (using low detail + gpt-4o)
  *
  * Key principles:
  * - NO DOM fallback (bot-detectable)
@@ -191,7 +191,7 @@ export class ContentVision {
                         'Authorization': `Bearer ${this.apiKey}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o-mini',  // Cheaper than gpt-4-vision
+                        model: 'gpt-4o',  // Best vision model
                         messages: [{
                             role: 'user',
                             content: [
@@ -323,7 +323,7 @@ If no posts visible, return: {"posts": []}`
                         'Authorization': `Bearer ${this.apiKey}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o-mini',
+                        model: 'gpt-4o',  // Best vision model
                         messages: [{
                             role: 'user',
                             content: [

@@ -28,6 +28,17 @@ stealth.enabledEvasions.add('window.outerdimensions');
 
 chromium.use(stealth);
 
+// GPU profiles for WebGL fingerprint randomization
+// Using common GPU configurations to avoid statistical anomalies
+const GPU_PROFILES = [
+    { vendor: 'Intel Inc.', renderer: 'Intel Iris OpenGL Engine' },
+    { vendor: 'Intel Inc.', renderer: 'Intel HD Graphics 630' },
+    { vendor: 'Intel Inc.', renderer: 'Intel UHD Graphics 620' },
+    { vendor: 'Apple Inc.', renderer: 'Apple M1' },
+    { vendor: 'Apple Inc.', renderer: 'Apple M2' },
+    { vendor: 'Google Inc. (Apple)', renderer: 'ANGLE (Apple, Apple M1, OpenGL 4.1)' },
+];
+
 interface BrowserLaunchConfig {
     headless: boolean;
     bounds?: Electron.Rectangle;
@@ -143,18 +154,22 @@ export class BrowserManager {
                 acceptDownloads: true,
             });
 
-            // WebGL fingerprint masking - make GPU appear as common Intel integrated graphics
-            await this.browserContext.addInitScript(() => {
+            // WebGL fingerprint masking - randomize GPU from common profiles
+            // Select a random GPU profile for this session to avoid statistical anomalies
+            const selectedGpu = GPU_PROFILES[Math.floor(Math.random() * GPU_PROFILES.length)];
+            console.log(`🎮 WebGL Fingerprint: ${selectedGpu.vendor} / ${selectedGpu.renderer}`);
+
+            await this.browserContext.addInitScript((gpu: { vendor: string; renderer: string }) => {
                 // Override WebGL vendor/renderer to avoid unique fingerprint detection
                 const getParameterProto = WebGLRenderingContext.prototype.getParameter;
                 WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
                     // UNMASKED_VENDOR_WEBGL
                     if (parameter === 37445) {
-                        return 'Intel Inc.';
+                        return gpu.vendor;
                     }
                     // UNMASKED_RENDERER_WEBGL
                     if (parameter === 37446) {
-                        return 'Intel Iris OpenGL Engine';
+                        return gpu.renderer;
                     }
                     return getParameterProto.call(this, parameter);
                 };
@@ -163,14 +178,14 @@ export class BrowserManager {
                 const getParameterProto2 = WebGL2RenderingContext.prototype.getParameter;
                 WebGL2RenderingContext.prototype.getParameter = function(parameter: number) {
                     if (parameter === 37445) {
-                        return 'Intel Inc.';
+                        return gpu.vendor;
                     }
                     if (parameter === 37446) {
-                        return 'Intel Iris OpenGL Engine';
+                        return gpu.renderer;
                     }
                     return getParameterProto2.call(this, parameter);
                 };
-            });
+            }, selectedGpu);
 
             // 2.5 MIGRATION: Sync Session from Onboarding (session.json) -> Persistent Context
             // The user logs in via the Electron Webview (Onboarding), which saves to "session.json".

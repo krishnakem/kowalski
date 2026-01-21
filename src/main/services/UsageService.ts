@@ -12,10 +12,11 @@ interface OpenAITokenUsage {
     };
 }
 
+// GPT-4o pricing (used for both Vision and Analysis)
 const MODEL_RATES = {
-    INPUT_TOKEN: 0.0000025,       // $2.50 / 1M
-    CACHED_INPUT_TOKEN: 0.00000125, // $1.25 / 1M
-    OUTPUT_TOKEN: 0.00001,        // $10.00 / 1M
+    INPUT_TOKEN: 0.0000025,       // $2.50 / 1M tokens
+    CACHED_INPUT_TOKEN: 0.00000125, // $1.25 / 1M tokens
+    OUTPUT_TOKEN: 0.00001,        // $10.00 / 1M tokens
 };
 
 export class UsageService {

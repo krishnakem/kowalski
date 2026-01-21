@@ -227,6 +227,14 @@ stealth.enabledEvasions.add("user-agent-override");
 stealth.enabledEvasions.add("webgl.vendor");
 stealth.enabledEvasions.add("window.outerdimensions");
 import_playwright_extra.chromium.use(stealth);
+var GPU_PROFILES = [
+  { vendor: "Intel Inc.", renderer: "Intel Iris OpenGL Engine" },
+  { vendor: "Intel Inc.", renderer: "Intel HD Graphics 630" },
+  { vendor: "Intel Inc.", renderer: "Intel UHD Graphics 620" },
+  { vendor: "Apple Inc.", renderer: "Apple M1" },
+  { vendor: "Apple Inc.", renderer: "Apple M2" },
+  { vendor: "Google Inc. (Apple)", renderer: "ANGLE (Apple, Apple M1, OpenGL 4.1)" }
+];
 var BrowserManager = class _BrowserManager {
   static instance;
   browserContext = null;
@@ -307,28 +315,30 @@ var BrowserManager = class _BrowserManager {
         // Accept downloads if needed later
         acceptDownloads: true
       });
-      await this.browserContext.addInitScript(() => {
+      const selectedGpu = GPU_PROFILES[Math.floor(Math.random() * GPU_PROFILES.length)];
+      console.log(`\u{1F3AE} WebGL Fingerprint: ${selectedGpu.vendor} / ${selectedGpu.renderer}`);
+      await this.browserContext.addInitScript((gpu) => {
         const getParameterProto = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function(parameter) {
           if (parameter === 37445) {
-            return "Intel Inc.";
+            return gpu.vendor;
           }
           if (parameter === 37446) {
-            return "Intel Iris OpenGL Engine";
+            return gpu.renderer;
           }
           return getParameterProto.call(this, parameter);
         };
         const getParameterProto2 = WebGL2RenderingContext.prototype.getParameter;
         WebGL2RenderingContext.prototype.getParameter = function(parameter) {
           if (parameter === 37445) {
-            return "Intel Inc.";
+            return gpu.vendor;
           }
           if (parameter === 37446) {
-            return "Intel Iris OpenGL Engine";
+            return gpu.renderer;
           }
           return getParameterProto2.call(this, parameter);
         };
-      });
+      }, selectedGpu);
       try {
         const sessionPath = import_path2.default.join(userDataPath, "session.json");
         if (import_fs2.default.existsSync(sessionPath)) {
@@ -630,11 +640,11 @@ var SecureKeyManager = class _SecureKeyManager {
 // src/main/services/UsageService.ts
 var MODEL_RATES = {
   INPUT_TOKEN: 25e-7,
-  // $2.50 / 1M
+  // $2.50 / 1M tokens
   CACHED_INPUT_TOKEN: 125e-8,
-  // $1.25 / 1M
+  // $1.25 / 1M tokens
   OUTPUT_TOKEN: 1e-5
-  // $10.00 / 1M
+  // $10.00 / 1M tokens
 };
 var UsageService = class _UsageService {
   static instance;
@@ -2260,8 +2270,14 @@ var GhostMouse = class {
   page;
   currentPosition = { x: 0, y: 0 };
   cursorVisible = false;
+  // Session-level entropy (randomized once per GhostMouse instance)
+  // This ensures timing patterns vary across sessions, defeating pattern analysis
+  sessionTimingMultiplier;
+  sessionJitterMultiplier;
   constructor(page) {
     this.page = page;
+    this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
+    this.sessionJitterMultiplier = 0.6 + Math.random() * 0.8;
   }
   /**
    * Enable visible cursor for debugging.
@@ -2305,6 +2321,10 @@ var GhostMouse = class {
       overshootProbability = 0.15,
       jitterAmount = 2
     } = config;
+    const movementDistance = Math.hypot(
+      target.x - this.currentPosition.x,
+      target.y - this.currentPosition.y
+    );
     const controlPoints = this.generateBezierControlPoints(
       this.currentPosition,
       target
@@ -2320,14 +2340,18 @@ var GhostMouse = class {
       controlPoints.end.y
     );
     const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
-    for (const point of points) {
-      const jitteredPoint = this.addJitter(point, jitterAmount);
+    const effectiveJitter = jitterAmount * this.sessionJitterMultiplier;
+    for (let i = 0; i < points.length; i++) {
+      const jitteredPoint = this.addJitter(points[i], effectiveJitter);
       await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
       await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
-      await this.microDelay(5, 15);
+      await this.microDelay(12, 45);
+      if (i > 0 && i < points.length - 1 && Math.random() < 0.05) {
+        await this.microDelay(80, 200);
+      }
     }
     if (Math.random() < overshootProbability) {
-      await this.overshootAndCorrect(target);
+      await this.overshootAndCorrect(target, movementDistance);
     }
     this.currentPosition = target;
   }
@@ -2386,37 +2410,59 @@ var GhostMouse = class {
     return t2 < 0.5 ? 2 * t2 * t2 : 1 - Math.pow(-2 * t2 + 2, 2) / 2;
   }
   /**
-   * Add random micro-jitter to a point.
-   * Humans have small involuntary hand movements.
+   * Add random micro-jitter to a point with layered noise.
+   * Humans have small involuntary hand movements at multiple frequencies.
+   *
+   * Layer 1: Base jitter (primary hand tremor)
+   * Layer 2: Micro-tremor (higher frequency, smaller amplitude neurological noise)
+   *
+   * This two-layer approach defeats bot detection that looks for
+   * geometrically perfect Bezier curves.
    */
   addJitter(point, amount) {
+    const baseJitter = {
+      x: (Math.random() - 0.5) * amount,
+      y: (Math.random() - 0.5) * amount
+    };
+    const tremor = {
+      x: (Math.random() - 0.5) * (amount * 0.3),
+      y: (Math.random() - 0.5) * (amount * 0.3)
+    };
     return {
-      x: point.x + (Math.random() - 0.5) * amount,
-      y: point.y + (Math.random() - 0.5) * amount
+      x: point.x + baseJitter.x + tremor.x,
+      y: point.y + baseJitter.y + tremor.y
     };
   }
   /**
    * Simulate human overshoot: move past target, then correct.
    * This happens when moving quickly - we slightly overshoot, then adjust.
    *
+   * Physics-based: Faster movements = more overshoot (human momentum).
+   *
    * IMPORTANT: Correction movement uses a micro-curve, NOT a straight line.
    * Straight-line correction is a bot signal (humans don't move perfectly).
+   *
+   * @param target - The intended target point
+   * @param movementDistance - Distance traveled to reach target (affects overshoot magnitude)
    */
-  async overshootAndCorrect(target) {
+  async overshootAndCorrect(target, movementDistance = 100) {
+    const baseOvershoot = Math.min(30, Math.max(5, movementDistance * 0.08));
+    const overshootAmount = baseOvershoot * (0.5 + Math.random());
+    const overshootAngle = Math.random() * Math.PI * 2;
     const overshoot = {
-      x: target.x + (Math.random() - 0.5) * 20,
-      y: target.y + (Math.random() - 0.5) * 20
+      x: target.x + Math.cos(overshootAngle) * overshootAmount,
+      y: target.y + Math.sin(overshootAngle) * overshootAmount
     };
     await this.page.mouse.move(overshoot.x, overshoot.y);
     await this.updateVisibleCursor(overshoot.x, overshoot.y);
-    await this.microDelay(50, 150);
+    await this.microDelay(50, 180);
     const midpoint = {
-      x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * 5,
-      y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * 5
+      x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * 8,
+      y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * 8
     };
     await this.page.mouse.move(midpoint.x, midpoint.y);
     await this.updateVisibleCursor(midpoint.x, midpoint.y);
-    await this.microDelay(8, 20);
+    await this.microDelay(10, 30);
     await this.page.mouse.move(target.x, target.y);
     await this.updateVisibleCursor(target.x, target.y);
   }
@@ -2430,6 +2476,54 @@ var GhostMouse = class {
     await this.microDelay(50, 150);
     await this.page.mouse.up();
     await this.microDelay(200, 500);
+  }
+  /**
+   * Hover over a target for a duration without clicking.
+   * Used to verify element actionability before clicking (e.g., carousel buttons).
+   *
+   * @param target - Point to hover over
+   * @param durationMs - How long to hover (in milliseconds)
+   */
+  async hover(target, durationMs = 1e3) {
+    await this.moveTo(target);
+    const jitterDuration = durationMs * 0.8;
+    const jitterInterval = 150;
+    let elapsed = 0;
+    while (elapsed < jitterDuration) {
+      await this.microDelay(jitterInterval * 0.8, jitterInterval * 1.2);
+      const microMove = {
+        x: target.x + (Math.random() - 0.5) * 3,
+        y: target.y + (Math.random() - 0.5) * 3
+      };
+      await this.page.mouse.move(microMove.x, microMove.y);
+      elapsed += jitterInterval;
+    }
+    await this.page.mouse.move(target.x, target.y);
+    await this.microDelay(durationMs * 0.15, durationMs * 0.25);
+  }
+  /**
+   * Hover over an element with randomized offset within its bounds.
+   *
+   * @param boundingBox - Element's bounding box
+   * @param durationMs - How long to hover
+   * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center)
+   */
+  async hoverElement(boundingBox, durationMs = 1e3, centerBias = 0.3) {
+    const offsetX = this.gaussianRandom(centerBias) * boundingBox.width;
+    const offsetY = this.gaussianRandom(centerBias) * boundingBox.height;
+    let hoverPoint = {
+      x: boundingBox.x + offsetX,
+      y: boundingBox.y + offsetY
+    };
+    hoverPoint.x = Math.max(
+      boundingBox.x + 5,
+      Math.min(hoverPoint.x, boundingBox.x + boundingBox.width - 5)
+    );
+    hoverPoint.y = Math.max(
+      boundingBox.y + 5,
+      Math.min(hoverPoint.y, boundingBox.y + boundingBox.height - 5)
+    );
+    await this.hover(hoverPoint, durationMs);
   }
   /**
    * Click an element with randomized offset within its bounds.
@@ -2472,10 +2566,13 @@ var GhostMouse = class {
   }
   /**
    * Small random delay for human-like timing variation.
+   * Applies session-level timing multiplier for cross-session variation,
+   * defeating pattern analysis that looks for consistent timing signatures.
    */
   microDelay(min2, max2) {
-    const delay = min2 + Math.random() * (max2 - min2);
-    return new Promise((resolve) => setTimeout(resolve, delay));
+    const baseDelay = min2 + Math.random() * (max2 - min2);
+    const sessionAdjustedDelay = baseDelay * this.sessionTimingMultiplier;
+    return new Promise((resolve) => setTimeout(resolve, sessionAdjustedDelay));
   }
   /**
    * Get current mouse position.
@@ -2973,6 +3070,217 @@ var A11yNavigator = class {
     return stories;
   }
   /**
+   * Find carousel "Next" button for multi-image posts.
+   * Instagram uses a button with name containing "Next" or arrow patterns.
+   *
+   * @returns InteractiveElement with bounding box, or null if not found
+   */
+  async findCarouselNextButton() {
+    const nodes = await this.getAccessibilityTree();
+    const nextPatterns = [
+      /^next$/i,
+      /next slide/i,
+      /go to slide/i,
+      /chevron.*right/i
+    ];
+    for (const pattern of nextPatterns) {
+      const matches = this.findMatchingNodes(nodes, "button", pattern);
+      if (matches.length > 0) {
+        const match = matches[0];
+        if (match.backendDOMNodeId) {
+          let cdpSession = null;
+          try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+            const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+            if (box && box.width > 0 && box.height > 0) {
+              return {
+                role: match.role?.value || "button",
+                name: match.name?.value || "Next",
+                selector: "",
+                boundingBox: box
+              };
+            }
+          } finally {
+            if (cdpSession) {
+              await cdpSession.detach().catch(() => {
+              });
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+  /**
+   * Find Story Highlights on a profile page.
+   * Highlights appear as circular buttons below the bio, similar to stories.
+   *
+   * @returns Array of InteractiveElements with bounding boxes
+   */
+  async findHighlights() {
+    const highlights = [];
+    const nodes = await this.getAccessibilityTree();
+    const highlightPattern = /highlight/i;
+    const highlightNodes = nodes.filter((node) => {
+      if (node.ignored) return false;
+      const role = node.role?.value?.toLowerCase();
+      const name = (node.name?.value || "").toLowerCase();
+      if (role !== "button" && role !== "link") return false;
+      return highlightPattern.test(name) || // Also match buttons in the highlight tray area (usually short names)
+      role === "button" && name.length > 0 && name.length < 30 && !name.includes("follow");
+    });
+    if (highlightNodes.length === 0) {
+      return highlights;
+    }
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      for (const node of highlightNodes.slice(0, 5)) {
+        if (!node.backendDOMNodeId) continue;
+        const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+        if (box && box.width > 0 && box.height > 0) {
+          if (box.width >= 30 && box.width <= 100 && box.height >= 30 && box.height <= 100) {
+            highlights.push({
+              role: node.role?.value || "button",
+              name: node.name?.value || "Highlight",
+              selector: "",
+              boundingBox: box
+            });
+          }
+        }
+      }
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+    return highlights;
+  }
+  /**
+   * Get the current carousel slide indicator (e.g., "Slide 2 of 5").
+   * Used to verify carousel navigation actually occurred.
+   *
+   * @returns Object with current slide number, total slides, and raw text, or null if not found
+   */
+  async getCarouselSlideIndicator() {
+    const nodes = await this.getAccessibilityTree();
+    const slidePatterns = [
+      /slide\s*(\d+)\s*of\s*(\d+)/i,
+      /photo\s*(\d+)\s*of\s*(\d+)/i,
+      /(\d+)\s*of\s*(\d+)/i,
+      /(\d+)\/(\d+)/
+      // 2/5 format
+    ];
+    for (const node of nodes) {
+      if (node.ignored) continue;
+      const name = node.name?.value || "";
+      for (const pattern of slidePatterns) {
+        const match = name.match(pattern);
+        if (match) {
+          return {
+            current: parseInt(match[1], 10),
+            total: parseInt(match[2], 10),
+            raw: name
+          };
+        }
+      }
+    }
+    return null;
+  }
+  /**
+   * Find post caption text in the accessibility tree.
+   * Instagram captions appear as StaticText nodes below the post content.
+   *
+   * @returns Caption text or null if not found
+   */
+  async findPostCaption() {
+    const nodes = await this.getAccessibilityTree();
+    const captionCandidates = [];
+    for (const node of nodes) {
+      if (node.ignored) continue;
+      const role = node.role?.value?.toLowerCase();
+      const name = node.name?.value || "";
+      if (name.length < 20) continue;
+      if (role === "button" || role === "link" || role === "textbox") continue;
+      if (/^(home|search|explore|reels|messages|notifications|create|profile)$/i.test(name)) continue;
+      if (name.includes("#") || name.includes("@")) {
+        captionCandidates.unshift(name);
+      } else if (name.length > 50) {
+        captionCandidates.push(name);
+      }
+    }
+    return captionCandidates.length > 0 ? captionCandidates[0] : null;
+  }
+  /**
+   * Find the "more" button for truncated captions.
+   * Instagram shows "more" or "... more" for long captions.
+   *
+   * @returns InteractiveElement with bounding box, or null if not found
+   */
+  async findMoreButton() {
+    const nodes = await this.getAccessibilityTree();
+    const morePatterns = [
+      /^more$/i,
+      /^…\s*more$/i,
+      /^\.{3}\s*more$/i,
+      /^see\s*more$/i
+    ];
+    for (const pattern of morePatterns) {
+      const matches = this.findMatchingNodes(nodes, "button", pattern);
+      if (matches.length > 0) {
+        const match = matches[0];
+        if (match.backendDOMNodeId) {
+          let cdpSession = null;
+          try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+            const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+            if (box && box.width > 0 && box.height > 0) {
+              return {
+                role: match.role?.value || "button",
+                name: match.name?.value || "more",
+                selector: "",
+                boundingBox: box
+              };
+            }
+          } finally {
+            if (cdpSession) {
+              await cdpSession.detach().catch(() => {
+              });
+            }
+          }
+        }
+      }
+    }
+    for (const pattern of morePatterns) {
+      const matches = this.findMatchingNodes(nodes, "link", pattern);
+      if (matches.length > 0) {
+        const match = matches[0];
+        if (match.backendDOMNodeId) {
+          let cdpSession = null;
+          try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+            const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+            if (box && box.width > 0 && box.height > 0) {
+              return {
+                role: match.role?.value || "link",
+                name: match.name?.value || "more",
+                selector: "",
+                boundingBox: box
+              };
+            }
+          } finally {
+            if (cdpSession) {
+              await cdpSession.detach().catch(() => {
+              });
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+  /**
    * Find elements by accessible name containing specific text.
    * Useful for finding "Like", "Comment", "Share" buttons without DOM queries.
    */
@@ -3343,6 +3651,105 @@ var A11yNavigator = class {
     await new Promise((r) => setTimeout(r, 200 + Math.random() * 300));
     await this.pressEnter();
   }
+  // =========================================================================
+  // Human Search Method (Type-Wait-Click)
+  // =========================================================================
+  /**
+   * Human-like delay with random variation.
+   */
+  humanDelay(min2, max2) {
+    const delay = min2 + Math.random() * (max2 - min2);
+    return new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  /**
+   * Human-like search: Type term, wait for dropdown, click matching result.
+   *
+   * This mimics how a human searches:
+   * 1. Type the search term (character by character)
+   * 2. Wait for autocomplete dropdown to appear (2.5-3.5 seconds)
+   * 3. Scan dropdown for matching result in accessibility tree
+   * 4. Click the result using GhostMouse (or press Enter as fallback)
+   *
+   * This is MORE human-like than typing + pressing Enter because:
+   * - Humans typically click on dropdown suggestions
+   * - The interaction with the dropdown is visible and natural
+   * - Avoids the "instant Enter press" pattern that bots use
+   *
+   * @param term - The search term to enter
+   * @param ghost - GhostMouse instance for human-like clicking
+   * @returns SearchInteractionResult with navigation status
+   */
+  async enterSearchTerm(term, ghost) {
+    console.log(`  \u{1F524} Typing search term: "${term}"`);
+    await this.typeText(term, true);
+    const waitTime = 2500 + Math.random() * 1e3;
+    console.log(`  \u23F3 Waiting ${(waitTime / 1e3).toFixed(1)}s for dropdown...`);
+    await this.humanDelay(waitTime, waitTime + 200);
+    const nodes = await this.getAccessibilityTree();
+    const termLower = term.toLowerCase();
+    const navItems = ["home", "search", "explore", "reels", "messages", "notifications", "create", "profile", "more"];
+    const matchingResults = nodes.filter((node) => {
+      if (node.ignored) return false;
+      const role = node.role?.value?.toLowerCase();
+      const name = (node.name?.value || "").toLowerCase();
+      if (role !== "link" && role !== "button") return false;
+      if (navItems.some((nav) => name === nav)) return false;
+      return name.includes(termLower) && name.length > 2;
+    });
+    const dropdownResults = nodes.filter((node) => {
+      if (node.ignored) return false;
+      const role = node.role?.value?.toLowerCase();
+      const name = node.name?.value || "";
+      if (role !== "link" || !name) return false;
+      if (navItems.some((nav) => name.toLowerCase() === nav)) return false;
+      return name.length > 2 && name.length < 100;
+    });
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      const targetNode = matchingResults[0] || dropdownResults[0];
+      if (targetNode?.backendDOMNodeId) {
+        const box = await this.getNodeBoundingBox(cdpSession, targetNode.backendDOMNodeId);
+        if (box && box.width > 0 && box.height > 0) {
+          const resultName = targetNode.name?.value || "Unknown";
+          console.log(`  \u{1F3AF} Clicking dropdown result: "${resultName}"`);
+          await ghost.clickElement(box, 0.3);
+          await this.humanDelay(500, 1e3);
+          return {
+            success: true,
+            navigated: true,
+            matchedResult: resultName,
+            fallbackUsed: false
+          };
+        }
+      }
+      console.log("  \u26A0\uFE0F No dropdown result found, pressing Enter as fallback...");
+      await this.pressEnter();
+      return {
+        success: true,
+        navigated: false,
+        matchedResult: void 0,
+        fallbackUsed: true
+      };
+    } catch (error) {
+      console.error("  \u274C Search interaction error:", error.message);
+      try {
+        await this.pressEnter();
+      } catch {
+      }
+      return {
+        success: false,
+        navigated: false,
+        matchedResult: void 0,
+        fallbackUsed: true
+      };
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+  }
 };
 
 // src/main/services/ContentVision.ts
@@ -3469,8 +3876,8 @@ var ContentVision = class {
             "Authorization": `Bearer ${this.apiKey}`
           },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
-            // Cheaper than gpt-4-vision
+            model: "gpt-4o",
+            // Best vision model
             messages: [{
               role: "user",
               content: [
@@ -3583,7 +3990,8 @@ If no posts visible, return: {"posts": []}`
             "Authorization": `Bearer ${this.apiKey}`
           },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
+            model: "gpt-4o",
+            // Best vision model
             messages: [{
               role: "user",
               content: [
@@ -3793,11 +4201,32 @@ var InstagramScraper = class {
         }
         await this.ghost.clickElement(searchInput.boundingBox, 0.5);
         await this.humanDelay(300, 600);
-        console.log(`  \u2328\uFE0F Typing "${interest}" and pressing Enter...`);
-        await this.navigator.typeAndSubmit(interest, true);
-        const waitTime = 5e3 + Math.random() * 3e3;
+        console.log(`  \u2328\uFE0F Typing "${interest}" and selecting from dropdown...`);
+        const searchResult = await this.navigator.enterSearchTerm(interest, this.ghost);
+        if (searchResult.matchedResult) {
+          console.log(`  \u2705 Clicked dropdown result: "${searchResult.matchedResult}"`);
+        } else if (searchResult.fallbackUsed) {
+          console.log(`  \u26A0\uFE0F Used Enter key fallback (no dropdown match)`);
+        }
+        const waitTime = 3e3 + Math.random() * 2e3;
         console.log(`  \u23F3 Waiting ${(waitTime / 1e3).toFixed(1)}s for results to load...`);
         await this.humanDelay(waitTime, waitTime + 500);
+        const currentView = await this.navigator.getContentState();
+        if (currentView.currentView === "profile") {
+          const profileUsername = this.navigator.getProfileUsername() || interest;
+          console.log(`  \u{1F4CD} Detected profile page: ${profileUsername}`);
+          const deepContent = await this.exploreProfileDeep(interest, profileUsername);
+          if (deepContent.length > 0) {
+            captures.push({
+              interest,
+              posts: deepContent,
+              capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+            });
+            console.log(`  \u2705 Deep-dive captured ${deepContent.length} items from ${profileUsername}`);
+          }
+          await this.returnToHome();
+          continue;
+        }
         const scrollCount = 1 + Math.floor(Math.random() * 2);
         console.log(`  \u{1F4DC} Scrolling ${scrollCount}x to trigger lazy loading...`);
         for (let i = 0; i < scrollCount; i++) {
@@ -3872,7 +4301,7 @@ var InstagramScraper = class {
       console.log("  Could not click first story (no bounding box)");
       return stories;
     }
-    const maxStories = Math.min(maxCalls, storyCircles.length, 8);
+    const maxStories = Math.min(maxCalls, storyCircles.length, 12);
     let storiesWatched = 0;
     for (let i = 0; i < maxStories; i++) {
       if (storiesWatched >= maxCalls) {
@@ -3895,7 +4324,18 @@ var InstagramScraper = class {
         stories.push(storyContent);
         console.log(`  \u{1F4D6} Story ${i + 1}: ${storyContent.username}`);
       }
-      await this.humanDelay(4e3, 8e3);
+      const isTextHeavy = storyContent?.caption && storyContent.caption.length > 50;
+      const isVideo = storyContent?.isVideoContent;
+      if (isVideo) {
+        console.log(`  \u{1F3AC} Video story - watching...`);
+        await this.humanDelay(5e3, 15e3);
+      } else if (isTextHeavy) {
+        console.log(`  \u{1F4DD} Text-heavy story - reading...`);
+        await this.humanDelay(6e3, 1e4);
+      } else {
+        console.log(`  \u{1F4F7} Photo story - quick view...`);
+        await this.humanDelay(2e3, 4e3);
+      }
       const viewportSize = this.page.viewportSize();
       if (viewportSize) {
         const rightZone = {
@@ -3956,7 +4396,7 @@ var InstagramScraper = class {
         baseDistance: 300 + Math.random() * 200,
         variability: 0.25,
         microAdjustProb: 0.2,
-        readingPauseMs: [3e3, 6e3]
+        readingPauseMs: [4e3, 8e3]
       });
       scrollCount++;
       const state = await this.navigator.getContentState();
@@ -3996,15 +4436,206 @@ var InstagramScraper = class {
           } else {
             consecutiveDuplicates = 0;
           }
+          const carouselNext = await this.navigator.findCarouselNextButton();
+          if (carouselNext?.boundingBox) {
+            console.log(`  \u{1F3A0} Carousel detected, exploring slides...`);
+            const carouselSlides = await this.exploreCarousel("feed", "feed_carousel");
+            for (const slide of carouselSlides) {
+              const slideKey = `${slide.username}-${slide.caption.slice(0, 50)}`;
+              if (!seenPostKeys.has(slideKey)) {
+                seenPostKeys.add(slideKey);
+                extractedContent.push(slide);
+              }
+            }
+          }
         }
       }
-      if (Math.random() < 0.1) {
+      if (Math.random() < 0.12) {
         console.log("\u2615 Taking a longer pause...");
-        await this.humanDelay(5e3, 1e4);
+        await this.humanDelay(8e3, 15e3);
       }
     }
     console.log(`\u2705 Feed exploration complete. Extracted ${extractedContent.length} posts`);
     return extractedContent;
+  }
+  // =========================================================================
+  // RECURSIVE EXPLORATION METHODS
+  // =========================================================================
+  /**
+   * Explore a carousel post by clicking through all slides.
+   * Captures each slide with Vision API.
+   *
+   * FIXED: Proper actionability checks with hover, animation buffer, and slide verification.
+   *
+   * @param context - Context label for the carousel (e.g., "feed", interest name)
+   * @param slidePrefix - Prefix for slide labels
+   * @returns Array of captured slides as ExtractedPosts
+   */
+  async exploreCarousel(context, slidePrefix) {
+    const slides = [];
+    let slideNumber = 1;
+    const maxSlides = 10;
+    const maxRetries = 2;
+    console.log(`    \u{1F3A0} Exploring carousel for "${context}"...`);
+    let previousSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+    if (previousSlideIndicator) {
+      console.log(`    \u{1F3A0} Starting at slide ${previousSlideIndicator.current} of ${previousSlideIndicator.total}`);
+    }
+    while (slideNumber <= maxSlides) {
+      const nextButton = await this.navigator.findCarouselNextButton();
+      if (!nextButton?.boundingBox) {
+        console.log(`    \u{1F3A0} Carousel complete (${slideNumber - 1} slides captured)`);
+        break;
+      }
+      const hoverDuration = 800 + Math.random() * 700;
+      console.log(`    \u{1F3A0} Hovering over Next button...`);
+      await this.ghost.hoverElement(nextButton.boundingBox, hoverDuration, 0.3);
+      const nextButtonAfterHover = await this.navigator.findCarouselNextButton();
+      if (!nextButtonAfterHover?.boundingBox) {
+        console.log(`    \u26A0\uFE0F Next button disappeared after hover, skipping`);
+        break;
+      }
+      let navigationSucceeded = false;
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        await this.ghost.clickElement(nextButtonAfterHover.boundingBox, 0.3);
+        await this.humanDelay(1500, 3e3);
+        const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+        if (currentSlideIndicator) {
+          if (!previousSlideIndicator || currentSlideIndicator.current !== previousSlideIndicator.current) {
+            console.log(`    \u{1F3A0} Navigation verified: now on slide ${currentSlideIndicator.current} of ${currentSlideIndicator.total}`);
+            previousSlideIndicator = currentSlideIndicator;
+            navigationSucceeded = true;
+            break;
+          } else {
+            console.log(`    \u26A0\uFE0F Slide indicator unchanged (attempt ${attempt + 1}/${maxRetries}), retrying...`);
+            await this.humanDelay(500, 800);
+          }
+        } else {
+          console.log(`    \u{1F3A0} No slide indicator found, assuming navigation succeeded`);
+          navigationSucceeded = true;
+          break;
+        }
+      }
+      if (!navigationSucceeded) {
+        console.log(`    \u26A0\uFE0F Failed to navigate after ${maxRetries} attempts, stopping carousel`);
+        break;
+      }
+      const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
+      if (!canAfford) {
+        console.log("    \u{1F4B8} Budget exhausted during carousel");
+        break;
+      }
+      const moreButton = await this.navigator.findMoreButton();
+      if (moreButton?.boundingBox) {
+        console.log(`    \u{1F4DD} Expanding truncated caption...`);
+        await this.ghost.clickElement(moreButton.boundingBox, 0.3);
+        await this.humanDelay(500, 800);
+      }
+      const rawCaption = await this.navigator.findPostCaption();
+      const result = await this.vision.extractVisibleContent(this.page);
+      this.visionApiCalls++;
+      if (result.success && result.posts.length > 0) {
+        for (const post of result.posts) {
+          const captionText = rawCaption || post.caption || post.visualDescription || "";
+          slides.push({
+            ...post,
+            caption: `[CAROUSEL: ${context} slide ${slideNumber}] ${captionText}`
+          });
+        }
+        console.log(`    \u{1F3A0} Captured slide ${slideNumber}${rawCaption ? " (with caption)" : ""}`);
+      }
+      slideNumber++;
+    }
+    return slides;
+  }
+  /**
+   * Deep exploration of a profile page.
+   * 1. Scroll through recent posts grid (2 minutes)
+   * 2. Explore first 2 Story Highlights (30s each)
+   *
+   * @param interest - The search interest (for labeling)
+   * @param profileUsername - Username being explored
+   * @returns Array of captured content as ExtractedPosts
+   */
+  async exploreProfileDeep(interest, profileUsername) {
+    const content = [];
+    const startTime = Date.now();
+    const profileDuration = (90 + Math.random() * 60) * 1e3;
+    const highlightDuration = (25 + Math.random() * 15) * 1e3;
+    console.log(`    \u{1F464} Deep-diving into ${profileUsername}'s profile...`);
+    let scrollCount = 0;
+    const maxGridScrolls = 6;
+    while (Date.now() - startTime < profileDuration && scrollCount < maxGridScrolls) {
+      await this.scroll.scroll({
+        baseDistance: 250 + Math.random() * 150,
+        variability: 0.2,
+        microAdjustProb: 0.1,
+        readingPauseMs: [2e3, 4e3]
+      });
+      scrollCount++;
+      if (scrollCount % 2 === 0) {
+        const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
+        if (!canAfford) {
+          console.log("    \u{1F4B8} Budget exhausted during profile grid");
+          break;
+        }
+        const result = await this.vision.extractVisibleContent(this.page);
+        this.visionApiCalls++;
+        if (result.success && result.posts.length > 0) {
+          for (const post of result.posts) {
+            content.push({
+              ...post,
+              caption: `[PROFILE: ${profileUsername}] ${post.caption || post.visualDescription || ""}`
+            });
+          }
+          console.log(`    \u{1F464} Captured ${result.posts.length} grid posts`);
+        }
+      }
+    }
+    await this.scroll.scrollToTop();
+    await this.humanDelay(1500, 2500);
+    const highlights = await this.navigator.findHighlights();
+    const highlightsToExplore = Math.min(highlights.length, 2);
+    console.log(`    \u2728 Found ${highlights.length} highlights, exploring ${highlightsToExplore}...`);
+    for (let i = 0; i < highlightsToExplore; i++) {
+      const highlight = highlights[i];
+      if (!highlight.boundingBox) continue;
+      console.log(`    \u2728 Opening highlight: "${highlight.name}"`);
+      await this.ghost.clickElement(highlight.boundingBox, 0.3);
+      await this.humanDelay(2e3, 3e3);
+      const highlightStart = Date.now();
+      let captureCount = 0;
+      while (Date.now() - highlightStart < highlightDuration && captureCount < 3) {
+        const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
+        if (!canAfford) break;
+        const result = await this.vision.extractVisibleContent(this.page);
+        this.visionApiCalls++;
+        captureCount++;
+        if (result.success && result.posts.length > 0) {
+          for (const post of result.posts) {
+            content.push({
+              ...post,
+              caption: `[HIGHLIGHT: ${profileUsername} - ${highlight.name}] ${post.caption || post.visualDescription || ""}`
+            });
+          }
+        }
+        const viewportSize = this.page.viewportSize();
+        if (viewportSize) {
+          const rightZone = {
+            x: viewportSize.width * 0.7,
+            y: viewportSize.height * 0.3,
+            width: viewportSize.width * 0.25,
+            height: viewportSize.height * 0.4
+          };
+          await this.ghost.clickElement(rightZone, 0.2);
+        }
+        await this.humanDelay(5e3, 8e3);
+      }
+      await this.page.keyboard.press("Escape");
+      await this.humanDelay(1e3, 1500);
+    }
+    console.log(`    \u{1F464} Profile deep-dive complete. Captured ${content.length} items`);
+    return content;
   }
   // =========================================================================
   // UTILITY METHODS
@@ -4032,7 +4663,6 @@ var InstagramScraper = class {
 
 // src/main/services/AnalysisGenerator.ts
 var MAX_CAPTION_LENGTH = 280;
-var MAX_TOTAL_CONTENT_CHARS = 8e3;
 var AnalysisGenerator = class {
   apiKey;
   usageService;
@@ -4057,45 +4687,72 @@ var AnalysisGenerator = class {
     };
   }
   /**
-   * Prepare a structured summary of browsed content for the LLM.
-   * Groups by content type and applies token-aware truncation.
+   * Prepare content as a structured JSON array for strict data attribution.
+   * Each item is an atomic unit that cannot be cross-pollinated.
+   *
+   * This format prevents the LLM from mixing up accounts or inventing narratives
+   * by treating each post as an isolated, numbered object with explicit fields.
    */
   prepareContentSummary(session2) {
-    const sections = [];
-    let totalChars = 0;
-    if (session2.feedContent.length > 0) {
-      sections.push("## Feed Posts");
-      for (let i = 0; i < session2.feedContent.length && totalChars < MAX_TOTAL_CONTENT_CHARS; i++) {
-        const post = session2.feedContent[i];
-        const caption = this.truncateCaption(post.caption || post.visualDescription || "No caption");
-        let line;
-        if (post.isVideoContent) {
-          line = `${i + 1}. ${post.username} [Video/Reel]: "${caption}"`;
-        } else {
-          line = `${i + 1}. ${post.username}: "${caption}"`;
-        }
-        if (totalChars + line.length > MAX_TOTAL_CONTENT_CHARS) break;
-        sections.push(line);
-        totalChars += line.length;
+    const items = [];
+    let itemId = 1;
+    for (const post of session2.feedContent) {
+      const caption = post.caption || "";
+      let source = "feed";
+      let interest;
+      let cleanCaption = caption;
+      const searchMatch = caption.match(/\[SEARCH: ([^\]]+)\]/);
+      const carouselMatch = caption.match(/\[CAROUSEL: ([^\]]+)\]/);
+      const profileMatch = caption.match(/\[PROFILE: ([^\]]+)\]/);
+      const highlightMatch = caption.match(/\[HIGHLIGHT: ([^\]]+)\]/);
+      if (searchMatch) {
+        source = "search";
+        interest = searchMatch[1];
+        cleanCaption = caption.replace(/\[SEARCH: [^\]]+\]\s*/, "");
+      } else if (carouselMatch) {
+        source = "carousel";
+        cleanCaption = caption.replace(/\[CAROUSEL: [^\]]+\]\s*/, "");
+      } else if (profileMatch) {
+        source = "profile";
+        cleanCaption = caption.replace(/\[PROFILE: [^\]]+\]\s*/, "");
+      } else if (highlightMatch) {
+        source = "highlight";
+        cleanCaption = caption.replace(/\[HIGHLIGHT: [^\]]+\]\s*/, "");
       }
-    }
-    if (session2.storiesContent.length > 0 && totalChars < MAX_TOTAL_CONTENT_CHARS) {
-      sections.push("\n## Stories");
-      for (const story of session2.storiesContent.slice(0, 10)) {
-        const desc = this.truncateCaption(story.visualDescription || story.caption || "Visual story");
-        const line = `- ${story.username}: ${desc}`;
-        if (totalChars + line.length > MAX_TOTAL_CONTENT_CHARS) break;
-        sections.push(line);
-        totalChars += line.length;
+      const item = {
+        id: itemId++,
+        handle: `@${post.username}`,
+        caption: this.truncateCaption(cleanCaption),
+        image_description: this.truncateCaption(post.visualDescription || ""),
+        content_type: post.isVideoContent ? "video" : "image",
+        source
+      };
+      if (interest) {
+        item.interest = interest;
       }
+      items.push(item);
     }
-    const postsIncluded = sections.filter((s) => /^\d+\./.test(s)).length;
-    sections.push(`
-## Session Info`);
-    sections.push(`- Total posts browsed: ${session2.feedContent.length}`);
-    sections.push(`- Total stories viewed: ${session2.storiesContent.length}`);
-    sections.push(`- Posts included in summary: ${postsIncluded}`);
-    return sections.join("\n");
+    for (const story of session2.storiesContent) {
+      items.push({
+        id: itemId++,
+        handle: `@${story.username}`,
+        caption: this.truncateCaption(story.caption || ""),
+        image_description: this.truncateCaption(story.visualDescription || ""),
+        content_type: story.isVideoContent ? "video" : "image",
+        source: "story"
+      });
+    }
+    const searchCount = items.filter((i) => i.source === "search").length;
+    const feedCount = items.filter((i) => i.source === "feed").length;
+    const storyCount = items.filter((i) => i.source === "story").length;
+    const otherCount = items.length - searchCount - feedCount - storyCount;
+    return `CONTENT ITEMS (${items.length} total):
+- Search results: ${searchCount}
+- Feed posts: ${feedCount}
+- Stories: ${storyCount}
+- Other (carousel/profile/highlight): ${otherCount}
+
+${JSON.stringify(items, null, 2)}`;
   }
   /**
    * Truncate caption to reasonable length, preserving meaning.
@@ -4119,97 +4776,99 @@ var AnalysisGenerator = class {
     const dayName = now.toLocaleDateString("en-US", { weekday: "long" });
     const dateStr = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     const interestsList = config.interests.length > 0 ? config.interests.map((i) => `"${i}"`).join(", ") : "General news and trends";
-    const prompt = `You are a senior analyst creating a personalized intelligence briefing for ${config.userName}.
+    const prompt = `You are a FACTUAL REPORTER creating a news briefing for ${config.userName}.
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+CRITICAL DATA INTEGRITY RULES (VIOLATIONS = FAILURE)
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+1. ATOMIC UNITS: You will receive an array of content objects. Each object is ISOLATED.
+   - NEVER combine data from different objects into the same bullet point
+   - NEVER attribute @account_A's content to @account_B
+   - If object #5 has a sunset photo and object #8 has a football game, they are SEPARATE items
+
+2. HANDLE ACCOUNTABILITY: Every bullet MUST start with the exact handle from the data.
+   - Format: "\u2022 @handle: [Specific fact from THIS object only]"
+   - The handle anchors the bullet to its source - no exceptions
+
+3. AD FILTERING: Skip these items entirely (do NOT report on them):
+   - Generic advertisements (e.g., "Shop now", "Limited time offer", brand promotions)
+   - Sponsored content unrelated to user interests
+   - Empty or meaningless captions with stock photos
+   - Exception: Ads that directly relate to user's interests (${interestsList})
+
+4. JUST THE FACTS: Only report what is EXPLICITLY in the data.
+   - If caption says "Great day" and image shows a lake, say "@handle: Posted a lake scene"
+   - Do NOT invent meaning like "fostering lifelong connections" or "celebrating team spirit"
+   - If you add context, it must be verifiable external knowledge (scores, dates, known events)
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 USER PROFILE
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
 Name: ${config.userName}
 Location: ${config.location || "Not specified"}
-PRIORITY INTERESTS: ${interestsList}
+Priority Interests: ${interestsList}
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-TODAY'S RAW INSTAGRAM FEED
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+CONTENT DATA (ATOMIC OBJECTS)
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
 ${contentSummary}
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 OUTPUT FORMAT
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-# [Punchy Title]
-### [One-line insight] \u2014 ${dayName}, ${dateStr}${config.location ? `, ${config.location}` : ""}
+BULLET FORMAT (MANDATORY):
+\u2022 @handle: [Specific event/fact from this object]. [Brief external context if relevant].
 
-## Your Interests
-- [First interest-related bullet with SPECIFIC details]
-- [Second interest-related bullet with SPECIFIC details]
+EXAMPLES OF CORRECT ATTRIBUTION:
 
-## [Other Thematic Section]
-- Topic: Specific detail from content.
-- ...
+\u2705 CORRECT:
+\u2022 @CalFootball: Posted "Class is in session" with a photo of the football facility. This aligns with the early signing period.
+\u2022 @Warriors: Shared a locker room celebration video after tonight's win over the Lakers.
+\u2022 @nytimes: Breaking news headline about the Fed's rate decision.
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-CRITICAL RULES - READ CAREFULLY
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+\u274C WRONG (mixing objects):
+\u2022 @CalFootball celebrated the Warriors' victory... (NEVER mix handles)
+\u2022 @Warriors posted about football recruitment... (WRONG - mixing sources)
 
-\u{1F6A8} EXTREME SPECIFICITY (MOST IMPORTANT):
-Do NOT generalize. Do NOT abstract. Report EXACTLY what you see.
+\u274C WRONG (inventing narrative):
+\u2022 @UniversityAccount: "Fostering lifelong connections through education" (if caption just said "Beautiful day on campus")
+\u2022 @BrandAccount: "Celebrating innovation and pushing boundaries" (if it was just a product photo)
 
-BAD EXAMPLES (NEVER DO THIS):
-  \u274C "A sports figure holding a trophy underscores the importance of winning"
-  \u274C "A football player celebrated a victory"
-  \u274C "A growing trend in the fitness space..."
-  \u274C "One creator highlighted the intersection of..."
-  \u274C "A tech company announced new features"
+\u274C WRONG (reporting ads):
+\u2022 @BrandAccount: Promoting their new product line... (SKIP unless directly relevant to user interests)
 
-GOOD EXAMPLES (DO THIS):
-  \u2705 "Jim Harbaugh celebrated Michigan's 34-13 win over Washington"
-  \u2705 "J.J. McCarthy threw for 3 touchdowns in the National Championship"
-  \u2705 "Apple announced Vision Pro pre-orders start February 2nd at $3,499"
-  \u2705 "Taylor Swift's Eras Tour grossed $1 billion in 2024"
+SECTION STRUCTURE:
 
-DIRECT REPORTING:
-  - If you see a NAME, write the NAME
-  - If you see a SCORE, write the SCORE
-  - If you see a DATE, write the DATE
-  - If you see a PRICE, write the PRICE
-  - If you see STATS, write the STATS
-  - NEVER replace specific info with vague descriptors
+# [Title based on top story]
+### [Key insight] \u2014 ${dayName}, ${dateStr}${config.location ? `, ${config.location}` : ""}
 
-\u{1F3AF} "YOUR INTERESTS" SECTION (REQUIRED FIRST SECTION):
-This section MUST contain news matching: ${interestsList}
-  - Search results for these interests were captured FIRST
-  - Report the SPECIFIC news/updates found for each interest
-  - Use real names, scores, dates, announcements
-  - If we searched "Indiana Football", write what Indiana Football news was found
+## \u{1F3AF} [Section for User Interests: ${interestsList}]
+[4-6 bullets from items matching user interests, each starting with @handle]
 
-HANDLE RULE:
-  - Use real names for PUBLIC FIGURES (athletes, celebrities, executives)
-  - Use descriptors only for random unknown accounts
-  - Exception: Always name authorities in ${config.userName}'s interests
+## \u{1F30D} [Section for General News]
+[3-4 bullets from other newsworthy items, each starting with @handle]
 
-FORMAT:
-  - 2-4 sections, 2-4 bullets each
-  - Each bullet: Topic + 1-2 sentences with SPECIFIC details
-  - NO asterisks or bold markers
-  - Standard dash (-) for bullets
-  - "Your Interests" section MUST be first
+## \u26A1 Quick Hits
+[2-3 single-line items for remaining notable content]
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+CROSS-REFERENCE RULES:
+- Use the "caption" field for QUOTES and exact wording
+- Use the "image_description" field for visual context
+- Items with source="search" are HIGH PRIORITY (match user interests)
+- Items with source="story" are ephemeral updates
 
 Return valid JSON:
 {
-    "title": "string (punchy, specific)",
-    "subtitle": "string (insight + date/location)",
+    "title": "string",
+    "subtitle": "string",
     "sections": [
-        {
-            "heading": "Your Interests",
-            "content": ["- Topic: Specific news about user's interests.", "- Topic: More specific details."]
-        },
-        {
-            "heading": "string (thematic)",
-            "content": ["- Topic: Specific detail.", "- Topic: More details."]
-        }
+        {"heading": "string", "content": ["\u2022 @handle: Fact from object. Context.", "\u2022 @handle: Fact from object. Context."]},
+        {"heading": "string", "content": ["\u2022 @handle: Fact from object. Context."]},
+        {"heading": "string", "content": ["\u2022 @handle: Quick fact."]}
     ]
 }`;
     console.log("\u{1F916} Generating analysis with GPT-4...");
@@ -4220,11 +4879,12 @@ Return valid JSON:
         "Authorization": `Bearer ${this.apiKey}`
       },
       body: JSON.stringify({
-        model: "gpt-4-turbo-preview",
+        model: "gpt-4o",
+        // Best model for analysis
         messages: [{ role: "user", content: prompt }],
         max_tokens: 2e3,
-        temperature: 0.7,
-        // Some creativity
+        temperature: 0.3,
+        // Low for factual accuracy, strict attribution
         response_format: { type: "json_object" }
       })
     });

@@ -30,8 +30,17 @@ export class GhostMouse {
     private currentPosition: Point = { x: 0, y: 0 };
     private cursorVisible: boolean = false;
 
+    // Session-level entropy (randomized once per GhostMouse instance)
+    // This ensures timing patterns vary across sessions, defeating pattern analysis
+    private sessionTimingMultiplier: number;
+    private sessionJitterMultiplier: number;
+
     constructor(page: Page) {
         this.page = page;
+        // Vary timing by ±30% per session (0.7 to 1.3)
+        this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
+        // Vary jitter by ±40% per session (0.6 to 1.4)
+        this.sessionJitterMultiplier = 0.6 + Math.random() * 0.8;
     }
 
     /**
@@ -87,6 +96,12 @@ export class GhostMouse {
             jitterAmount = 2
         } = config;
 
+        // Calculate movement distance for physics-based overshoot
+        const movementDistance = Math.hypot(
+            target.x - this.currentPosition.x,
+            target.y - this.currentPosition.y
+        );
+
         // 1. Generate control points for Bezier curve
         const controlPoints = this.generateBezierControlPoints(
             this.currentPosition,
@@ -104,17 +119,27 @@ export class GhostMouse {
         // 3. Calculate points along curve with variable velocity
         const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
 
-        // 4. Execute movement with micro-jitter
-        for (const point of points) {
-            const jitteredPoint = this.addJitter(point, jitterAmount);
+        // 4. Execute movement with micro-jitter and session-adjusted timing
+        // Apply session jitter multiplier for cross-session variation
+        const effectiveJitter = jitterAmount * this.sessionJitterMultiplier;
+
+        for (let i = 0; i < points.length; i++) {
+            const jitteredPoint = this.addJitter(points[i], effectiveJitter);
             await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
             await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
-            await this.microDelay(5, 15);  // 5-15ms between micro-movements
+            // Human-realistic timing: 12-45ms (was 5-15ms - too fast and narrow)
+            await this.microDelay(12, 45);
+
+            // Hesitation point: 5% chance of longer pause during movement
+            // Humans don't move smoothly for long distances - they pause to "think"
+            if (i > 0 && i < points.length - 1 && Math.random() < 0.05) {
+                await this.microDelay(80, 200);  // Brief "thinking" pause
+            }
         }
 
-        // 5. Optional overshoot and correction
+        // 5. Optional overshoot and correction (with distance-based physics)
         if (Math.random() < overshootProbability) {
-            await this.overshootAndCorrect(target);
+            await this.overshootAndCorrect(target, movementDistance);
         }
 
         this.currentPosition = target;
@@ -196,13 +221,32 @@ export class GhostMouse {
     }
 
     /**
-     * Add random micro-jitter to a point.
-     * Humans have small involuntary hand movements.
+     * Add random micro-jitter to a point with layered noise.
+     * Humans have small involuntary hand movements at multiple frequencies.
+     *
+     * Layer 1: Base jitter (primary hand tremor)
+     * Layer 2: Micro-tremor (higher frequency, smaller amplitude neurological noise)
+     *
+     * This two-layer approach defeats bot detection that looks for
+     * geometrically perfect Bezier curves.
      */
     private addJitter(point: Point, amount: number): Point {
+        // Layer 1: Base jitter (primary hand tremor)
+        const baseJitter = {
+            x: (Math.random() - 0.5) * amount,
+            y: (Math.random() - 0.5) * amount
+        };
+
+        // Layer 2: Micro-tremor (higher frequency, ~30% of base amplitude)
+        // Simulates fine motor control imperfection
+        const tremor = {
+            x: (Math.random() - 0.5) * (amount * 0.3),
+            y: (Math.random() - 0.5) * (amount * 0.3)
+        };
+
         return {
-            x: point.x + (Math.random() - 0.5) * amount,
-            y: point.y + (Math.random() - 0.5) * amount
+            x: point.x + baseJitter.x + tremor.x,
+            y: point.y + baseJitter.y + tremor.y
         };
     }
 
@@ -210,31 +254,43 @@ export class GhostMouse {
      * Simulate human overshoot: move past target, then correct.
      * This happens when moving quickly - we slightly overshoot, then adjust.
      *
+     * Physics-based: Faster movements = more overshoot (human momentum).
+     *
      * IMPORTANT: Correction movement uses a micro-curve, NOT a straight line.
      * Straight-line correction is a bot signal (humans don't move perfectly).
+     *
+     * @param target - The intended target point
+     * @param movementDistance - Distance traveled to reach target (affects overshoot magnitude)
      */
-    private async overshootAndCorrect(target: Point): Promise<void> {
-        // Overshoot by 10-20 pixels in random direction
+    private async overshootAndCorrect(target: Point, movementDistance: number = 100): Promise<void> {
+        // Physics-based overshoot: faster/longer movements = more overshoot
+        // Range: 5-30px based on movement distance (8% of distance, clamped)
+        const baseOvershoot = Math.min(30, Math.max(5, movementDistance * 0.08));
+        // Add randomization: ±50% of base overshoot
+        const overshootAmount = baseOvershoot * (0.5 + Math.random());
+
+        // Random direction for overshoot (full 360°)
+        const overshootAngle = Math.random() * Math.PI * 2;
         const overshoot: Point = {
-            x: target.x + (Math.random() - 0.5) * 20,
-            y: target.y + (Math.random() - 0.5) * 20
+            x: target.x + Math.cos(overshootAngle) * overshootAmount,
+            y: target.y + Math.sin(overshootAngle) * overshootAmount
         };
 
         await this.page.mouse.move(overshoot.x, overshoot.y);
         await this.updateVisibleCursor(overshoot.x, overshoot.y);
-        await this.microDelay(50, 150);  // Pause to "realize" overshoot
+        await this.microDelay(50, 180);  // Pause to "realize" overshoot (widened range)
 
-        // FIXED: Use micro-curve for correction instead of straight line
+        // Use micro-curve for correction instead of straight line
         // Humans don't move in perfect straight lines, even for small corrections
         const midpoint: Point = {
-            x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * 5,
-            y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * 5
+            x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * 8,
+            y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * 8
         };
 
         // Move through midpoint with slight curve
         await this.page.mouse.move(midpoint.x, midpoint.y);
         await this.updateVisibleCursor(midpoint.x, midpoint.y);
-        await this.microDelay(8, 20);  // Very brief pause
+        await this.microDelay(10, 30);  // Brief pause (widened from 8-20)
         await this.page.mouse.move(target.x, target.y);
         await this.updateVisibleCursor(target.x, target.y);
     }
@@ -249,6 +305,69 @@ export class GhostMouse {
         await this.microDelay(50, 150);   // Hold duration varies
         await this.page.mouse.up();
         await this.microDelay(200, 500);  // Post-click pause
+    }
+
+    /**
+     * Hover over a target for a duration without clicking.
+     * Used to verify element actionability before clicking (e.g., carousel buttons).
+     *
+     * @param target - Point to hover over
+     * @param durationMs - How long to hover (in milliseconds)
+     */
+    async hover(target: Point, durationMs: number = 1000): Promise<void> {
+        await this.moveTo(target);
+        // Add slight jitter during hover (humans don't hold perfectly still)
+        const jitterDuration = durationMs * 0.8;  // 80% of duration with micro-movements
+        const jitterInterval = 150;  // Check/jitter every 150ms
+        let elapsed = 0;
+
+        while (elapsed < jitterDuration) {
+            await this.microDelay(jitterInterval * 0.8, jitterInterval * 1.2);
+            // Tiny micro-movements during hover (1-3px)
+            const microMove = {
+                x: target.x + (Math.random() - 0.5) * 3,
+                y: target.y + (Math.random() - 0.5) * 3
+            };
+            await this.page.mouse.move(microMove.x, microMove.y);
+            elapsed += jitterInterval;
+        }
+
+        // Settle back to target for final 20%
+        await this.page.mouse.move(target.x, target.y);
+        await this.microDelay(durationMs * 0.15, durationMs * 0.25);
+    }
+
+    /**
+     * Hover over an element with randomized offset within its bounds.
+     *
+     * @param boundingBox - Element's bounding box
+     * @param durationMs - How long to hover
+     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center)
+     */
+    async hoverElement(
+        boundingBox: BoundingBox,
+        durationMs: number = 1000,
+        centerBias: number = 0.3
+    ): Promise<void> {
+        const offsetX = this.gaussianRandom(centerBias) * boundingBox.width;
+        const offsetY = this.gaussianRandom(centerBias) * boundingBox.height;
+
+        let hoverPoint: Point = {
+            x: boundingBox.x + offsetX,
+            y: boundingBox.y + offsetY
+        };
+
+        // Ensure we're within the element (safety clamp with 5px margin)
+        hoverPoint.x = Math.max(
+            boundingBox.x + 5,
+            Math.min(hoverPoint.x, boundingBox.x + boundingBox.width - 5)
+        );
+        hoverPoint.y = Math.max(
+            boundingBox.y + 5,
+            Math.min(hoverPoint.y, boundingBox.y + boundingBox.height - 5)
+        );
+
+        await this.hover(hoverPoint, durationMs);
     }
 
     /**
@@ -311,10 +430,14 @@ export class GhostMouse {
 
     /**
      * Small random delay for human-like timing variation.
+     * Applies session-level timing multiplier for cross-session variation,
+     * defeating pattern analysis that looks for consistent timing signatures.
      */
     private microDelay(min: number, max: number): Promise<void> {
-        const delay = min + Math.random() * (max - min);
-        return new Promise(resolve => setTimeout(resolve, delay));
+        const baseDelay = min + Math.random() * (max - min);
+        // Apply session-level timing variation (set once per GhostMouse instance)
+        const sessionAdjustedDelay = baseDelay * this.sessionTimingMultiplier;
+        return new Promise(resolve => setTimeout(resolve, sessionAdjustedDelay));
     }
 
     /**

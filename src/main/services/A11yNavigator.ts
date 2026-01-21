@@ -23,6 +23,7 @@ import {
     InteractiveElement,
     BoundingBox
 } from '../../types/instagram.js';
+import type { GhostMouse } from './GhostMouse.js';
 
 /**
  * Raw CDP Accessibility Node structure.
@@ -45,6 +46,16 @@ interface CDPAXNode {
  */
 interface CDPAXTreeResponse {
     nodes: CDPAXNode[];
+}
+
+/**
+ * Result of a human-like search interaction.
+ */
+export interface SearchInteractionResult {
+    success: boolean;
+    navigated: boolean;
+    matchedResult?: string;
+    fallbackUsed: boolean;
 }
 
 export class A11yNavigator {
@@ -390,6 +401,263 @@ export class A11yNavigator {
         }
 
         return stories;
+    }
+
+    /**
+     * Find carousel "Next" button for multi-image posts.
+     * Instagram uses a button with name containing "Next" or arrow patterns.
+     *
+     * @returns InteractiveElement with bounding box, or null if not found
+     */
+    async findCarouselNextButton(): Promise<InteractiveElement | null> {
+        const nodes = await this.getAccessibilityTree();
+
+        // Look for "Next" button patterns used by Instagram carousels
+        const nextPatterns = [
+            /^next$/i,
+            /next slide/i,
+            /go to slide/i,
+            /chevron.*right/i
+        ];
+
+        for (const pattern of nextPatterns) {
+            const matches = this.findMatchingNodes(nodes, 'button', pattern);
+            if (matches.length > 0) {
+                const match = matches[0];
+                if (match.backendDOMNodeId) {
+                    let cdpSession: CDPSession | null = null;
+                    try {
+                        cdpSession = await this.page.context().newCDPSession(this.page);
+                        const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+                        if (box && box.width > 0 && box.height > 0) {
+                            return {
+                                role: match.role?.value || 'button',
+                                name: match.name?.value || 'Next',
+                                selector: '',
+                                boundingBox: box
+                            };
+                        }
+                    } finally {
+                        if (cdpSession) {
+                            await cdpSession.detach().catch(() => {});
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Find Story Highlights on a profile page.
+     * Highlights appear as circular buttons below the bio, similar to stories.
+     *
+     * @returns Array of InteractiveElements with bounding boxes
+     */
+    async findHighlights(): Promise<InteractiveElement[]> {
+        const highlights: InteractiveElement[] = [];
+        const nodes = await this.getAccessibilityTree();
+
+        // Instagram highlights use patterns like "Highlight: [name]" or just the highlight name
+        const highlightPattern = /highlight/i;
+
+        // Find buttons that look like highlights
+        const highlightNodes = nodes.filter(node => {
+            if (node.ignored) return false;
+            const role = node.role?.value?.toLowerCase();
+            const name = (node.name?.value || '').toLowerCase();
+
+            // Must be button or link
+            if (role !== 'button' && role !== 'link') return false;
+
+            // Look for highlight-related patterns
+            return highlightPattern.test(name) ||
+                   // Also match buttons in the highlight tray area (usually short names)
+                   (role === 'button' && name.length > 0 && name.length < 30 && !name.includes('follow'));
+        });
+
+        if (highlightNodes.length === 0) {
+            return highlights;
+        }
+
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+
+            for (const node of highlightNodes.slice(0, 5)) { // Limit to 5 highlights
+                if (!node.backendDOMNodeId) continue;
+
+                const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+                if (box && box.width > 0 && box.height > 0) {
+                    // Highlight buttons are typically small circles (40-80px)
+                    if (box.width >= 30 && box.width <= 100 && box.height >= 30 && box.height <= 100) {
+                        highlights.push({
+                            role: node.role?.value || 'button',
+                            name: node.name?.value || 'Highlight',
+                            selector: '',
+                            boundingBox: box
+                        });
+                    }
+                }
+            }
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
+
+        return highlights;
+    }
+
+    /**
+     * Get the current carousel slide indicator (e.g., "Slide 2 of 5").
+     * Used to verify carousel navigation actually occurred.
+     *
+     * @returns Object with current slide number, total slides, and raw text, or null if not found
+     */
+    async getCarouselSlideIndicator(): Promise<{ current: number; total: number; raw: string } | null> {
+        const nodes = await this.getAccessibilityTree();
+
+        // Look for patterns like "Slide 2 of 5", "2 of 5", "Photo 3 of 10"
+        const slidePatterns = [
+            /slide\s*(\d+)\s*of\s*(\d+)/i,
+            /photo\s*(\d+)\s*of\s*(\d+)/i,
+            /(\d+)\s*of\s*(\d+)/i,
+            /(\d+)\/(\d+)/  // 2/5 format
+        ];
+
+        for (const node of nodes) {
+            if (node.ignored) continue;
+            const name = node.name?.value || '';
+
+            for (const pattern of slidePatterns) {
+                const match = name.match(pattern);
+                if (match) {
+                    return {
+                        current: parseInt(match[1], 10),
+                        total: parseInt(match[2], 10),
+                        raw: name
+                    };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Find post caption text in the accessibility tree.
+     * Instagram captions appear as StaticText nodes below the post content.
+     *
+     * @returns Caption text or null if not found
+     */
+    async findPostCaption(): Promise<string | null> {
+        const nodes = await this.getAccessibilityTree();
+
+        // Look for StaticText nodes that look like captions
+        // Captions typically:
+        // - Are not too short (>20 chars) - excludes "Like", "Comment", etc.
+        // - Don't match button/link patterns
+        // - May contain hashtags (#) or mentions (@)
+        const captionCandidates: string[] = [];
+
+        for (const node of nodes) {
+            if (node.ignored) continue;
+            const role = node.role?.value?.toLowerCase();
+            const name = node.name?.value || '';
+
+            // Skip if too short
+            if (name.length < 20) continue;
+
+            // Skip if it's an interactive element (button, link, textbox)
+            if (role === 'button' || role === 'link' || role === 'textbox') continue;
+
+            // Skip navigation/header patterns
+            if (/^(home|search|explore|reels|messages|notifications|create|profile)$/i.test(name)) continue;
+
+            // Prefer text with hashtags or mentions (strong caption signal)
+            if (name.includes('#') || name.includes('@')) {
+                captionCandidates.unshift(name);  // High priority
+            } else if (name.length > 50) {
+                captionCandidates.push(name);  // Lower priority but still valid
+            }
+        }
+
+        return captionCandidates.length > 0 ? captionCandidates[0] : null;
+    }
+
+    /**
+     * Find the "more" button for truncated captions.
+     * Instagram shows "more" or "... more" for long captions.
+     *
+     * @returns InteractiveElement with bounding box, or null if not found
+     */
+    async findMoreButton(): Promise<InteractiveElement | null> {
+        const nodes = await this.getAccessibilityTree();
+
+        // Look for "more" patterns
+        const morePatterns = [
+            /^more$/i,
+            /^…\s*more$/i,
+            /^\.{3}\s*more$/i,
+            /^see\s*more$/i
+        ];
+
+        for (const pattern of morePatterns) {
+            const matches = this.findMatchingNodes(nodes, 'button', pattern);
+            if (matches.length > 0) {
+                const match = matches[0];
+                if (match.backendDOMNodeId) {
+                    let cdpSession: CDPSession | null = null;
+                    try {
+                        cdpSession = await this.page.context().newCDPSession(this.page);
+                        const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+                        if (box && box.width > 0 && box.height > 0) {
+                            return {
+                                role: match.role?.value || 'button',
+                                name: match.name?.value || 'more',
+                                selector: '',
+                                boundingBox: box
+                            };
+                        }
+                    } finally {
+                        if (cdpSession) {
+                            await cdpSession.detach().catch(() => {});
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also check for links with "more" pattern
+        for (const pattern of morePatterns) {
+            const matches = this.findMatchingNodes(nodes, 'link', pattern);
+            if (matches.length > 0) {
+                const match = matches[0];
+                if (match.backendDOMNodeId) {
+                    let cdpSession: CDPSession | null = null;
+                    try {
+                        cdpSession = await this.page.context().newCDPSession(this.page);
+                        const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+                        if (box && box.width > 0 && box.height > 0) {
+                            return {
+                                role: match.role?.value || 'link',
+                                name: match.name?.value || 'more',
+                                selector: '',
+                                boundingBox: box
+                            };
+                        }
+                    } finally {
+                        if (cdpSession) {
+                            await cdpSession.detach().catch(() => {});
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -824,5 +1092,156 @@ export class A11yNavigator {
         // Small delay before pressing Enter (human hesitation)
         await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
         await this.pressEnter();
+    }
+
+    // =========================================================================
+    // Human Search Method (Type-Wait-Click)
+    // =========================================================================
+
+    /**
+     * Human-like delay with random variation.
+     */
+    private humanDelay(min: number, max: number): Promise<void> {
+        const delay = min + Math.random() * (max - min);
+        return new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    /**
+     * Human-like search: Type term, wait for dropdown, click matching result.
+     *
+     * This mimics how a human searches:
+     * 1. Type the search term (character by character)
+     * 2. Wait for autocomplete dropdown to appear (2.5-3.5 seconds)
+     * 3. Scan dropdown for matching result in accessibility tree
+     * 4. Click the result using GhostMouse (or press Enter as fallback)
+     *
+     * This is MORE human-like than typing + pressing Enter because:
+     * - Humans typically click on dropdown suggestions
+     * - The interaction with the dropdown is visible and natural
+     * - Avoids the "instant Enter press" pattern that bots use
+     *
+     * @param term - The search term to enter
+     * @param ghost - GhostMouse instance for human-like clicking
+     * @returns SearchInteractionResult with navigation status
+     */
+    async enterSearchTerm(
+        term: string,
+        ghost: GhostMouse
+    ): Promise<SearchInteractionResult> {
+        console.log(`  🔤 Typing search term: "${term}"`);
+
+        // Step 1: Type the term character by character (human-like)
+        await this.typeText(term, true);
+
+        // Step 2: Human pause after typing (looking at dropdown results)
+        // Instagram needs 2-3 seconds to populate the dropdown
+        const waitTime = 2500 + Math.random() * 1000;
+        console.log(`  ⏳ Waiting ${(waitTime / 1000).toFixed(1)}s for dropdown...`);
+        await this.humanDelay(waitTime, waitTime + 200);
+
+        // Step 3: Refresh accessibility tree and scan for matching results
+        const nodes = await this.getAccessibilityTree();
+        const termLower = term.toLowerCase();
+
+        // Navigation items to exclude from search results
+        const navItems = ['home', 'search', 'explore', 'reels', 'messages', 'notifications', 'create', 'profile', 'more'];
+
+        // Priority 1: Find link/button with name containing the search term
+        // These are the most relevant results (e.g., "Indiana Football" for "indiana football")
+        const matchingResults = nodes.filter(node => {
+            if (node.ignored) return false;
+            const role = node.role?.value?.toLowerCase();
+            const name = (node.name?.value || '').toLowerCase();
+
+            // Must be interactive (link or button)
+            if (role !== 'link' && role !== 'button') return false;
+
+            // Exclude navigation items
+            if (navItems.some(nav => name === nav)) return false;
+
+            // Must contain the search term (case-insensitive)
+            return name.includes(termLower) && name.length > 2;
+        });
+
+        // Priority 2: Find any link that looks like a search result
+        // (fallback if exact match not found)
+        const dropdownResults = nodes.filter(node => {
+            if (node.ignored) return false;
+            const role = node.role?.value?.toLowerCase();
+            const name = node.name?.value || '';
+
+            // Must be a link with a non-empty name
+            if (role !== 'link' || !name) return false;
+
+            // Exclude navigation items
+            if (navItems.some(nav => name.toLowerCase() === nav)) return false;
+
+            // Must have a reasonable name length (not too short, not navigation)
+            return name.length > 2 && name.length < 100;
+        });
+
+        // Step 4: Try to click the best matching result
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+
+            // Determine which result to click (prioritize exact matches)
+            const targetNode = matchingResults[0] || dropdownResults[0];
+
+            if (targetNode?.backendDOMNodeId) {
+                const box = await this.getNodeBoundingBox(cdpSession, targetNode.backendDOMNodeId);
+
+                if (box && box.width > 0 && box.height > 0) {
+                    const resultName = targetNode.name?.value || 'Unknown';
+                    console.log(`  🎯 Clicking dropdown result: "${resultName}"`);
+
+                    // Use GhostMouse for human-like click
+                    await ghost.clickElement(box, 0.3);
+
+                    // Brief pause after clicking (human reaction time)
+                    await this.humanDelay(500, 1000);
+
+                    return {
+                        success: true,
+                        navigated: true,
+                        matchedResult: resultName,
+                        fallbackUsed: false
+                    };
+                }
+            }
+
+            // Step 5: Fallback - Press Enter if no clickable result found
+            console.log('  ⚠️ No dropdown result found, pressing Enter as fallback...');
+            await this.pressEnter();
+
+            return {
+                success: true,
+                navigated: false,
+                matchedResult: undefined,
+                fallbackUsed: true
+            };
+
+        } catch (error: any) {
+            console.error('  ❌ Search interaction error:', error.message);
+
+            // Last resort fallback - try pressing Enter
+            try {
+                await this.pressEnter();
+            } catch {
+                // Ignore
+            }
+
+            return {
+                success: false,
+                navigated: false,
+                matchedResult: undefined,
+                fallbackUsed: true
+            };
+
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
     }
 }

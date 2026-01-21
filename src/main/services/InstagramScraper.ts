@@ -6,10 +6,10 @@
  * - Blind Layer (A11yNavigator) - Cost: $0
  * - Vision Layer (ContentVision) - Cost: ~$0.01/viewport
  *
- * Research Sequence (10-12 minute session):
+ * Research Sequence (15 minute session):
  * - Phase A: Active Search (~2-3 min) - Search each user interest
- * - Phase B: Story Watch (~4 min) - Watch available stories
- * - Phase C: Feed Scroll (~4 min) - Browse main feed
+ * - Phase B: Story Watch (~7 min) - Watch available stories
+ * - Phase C: Feed Scroll (~8 min) - Browse main feed
  *
  * Estimated cost per session: $0.08 - $0.15
  */
@@ -127,8 +127,8 @@ export class InstagramScraper {
             // === RESEARCH SEQUENCE ===
             // Time allocation (approximate):
             // - Phase A (Search): ~2-3 minutes (depends on interest count)
-            // - Phase B (Stories): ~4 minutes
-            // - Phase C (Feed): ~4 minutes
+            // - Phase B (Stories): ~7 minutes
+            // - Phase C (Feed): ~8 minutes
 
             // Budget allocation:
             // - Search: 1 call per interest (max 5)
@@ -264,14 +264,48 @@ export class InstagramScraper {
                 await this.ghost.clickElement(searchInput.boundingBox, 0.5);
                 await this.humanDelay(300, 600);
 
-                // Type the interest term AND press Enter to commit search
-                console.log(`  ⌨️ Typing "${interest}" and pressing Enter...`);
-                await this.navigator.typeAndSubmit(interest, true);
+                // Human-like search: Type, wait for dropdown, click result
+                // This is MORE human-like than typing + pressing Enter
+                console.log(`  ⌨️ Typing "${interest}" and selecting from dropdown...`);
+                const searchResult = await this.navigator.enterSearchTerm(interest, this.ghost);
 
-                // 3. WAIT for results to load (5-8 seconds randomized)
-                const waitTime = 5000 + Math.random() * 3000;
+                if (searchResult.matchedResult) {
+                    console.log(`  ✅ Clicked dropdown result: "${searchResult.matchedResult}"`);
+                } else if (searchResult.fallbackUsed) {
+                    console.log(`  ⚠️ Used Enter key fallback (no dropdown match)`);
+                }
+
+                // 3. WAIT for results/navigation to complete
+                // If we clicked a result, we may have navigated to a profile/hashtag page
+                // If we pressed Enter, we're on the search results page
+                const waitTime = 3000 + Math.random() * 2000;  // Reduced from 5-8s since dropdown already waited
                 console.log(`  ⏳ Waiting ${(waitTime / 1000).toFixed(1)}s for results to load...`);
                 await this.humanDelay(waitTime, waitTime + 500);
+
+                // === NEW: Check if we navigated to a profile page ===
+                // If so, do deep exploration (grid scroll + highlights)
+                const currentView = await this.navigator.getContentState();
+                if (currentView.currentView === 'profile') {
+                    const profileUsername = this.navigator.getProfileUsername() || interest;
+                    console.log(`  📍 Detected profile page: ${profileUsername}`);
+
+                    // Deep exploration of the profile
+                    const deepContent = await this.exploreProfileDeep(interest, profileUsername);
+
+                    // Add to captures with proper tagging
+                    if (deepContent.length > 0) {
+                        captures.push({
+                            interest,
+                            posts: deepContent,
+                            capturedAt: new Date().toISOString()
+                        });
+                        console.log(`  ✅ Deep-dive captured ${deepContent.length} items from ${profileUsername}`);
+                    }
+
+                    // Return home before next search
+                    await this.returnToHome();
+                    continue; // Skip the normal capture flow since we did deep exploration
+                }
 
                 // 4. SCROLL to trigger lazy loading (1-2 small scrolls)
                 const scrollCount = 1 + Math.floor(Math.random() * 2); // 1 or 2 scrolls
@@ -365,8 +399,8 @@ export class InstagramScraper {
             return stories;
         }
 
-        // Watch stories up to budget limit
-        const maxStories = Math.min(maxCalls, storyCircles.length, 8);
+        // Watch stories up to budget limit (extended for 7-minute target)
+        const maxStories = Math.min(maxCalls, storyCircles.length, 12);
         let storiesWatched = 0;
 
         for (let i = 0; i < maxStories; i++) {
@@ -399,8 +433,27 @@ export class InstagramScraper {
                 console.log(`  📖 Story ${i + 1}: ${storyContent.username}`);
             }
 
-            // "Watch" the story (human viewing time)
-            await this.humanDelay(4000, 8000);
+            // === CONTENT-AWARE TIMING ===
+            // Humans spend different amounts of time based on content type:
+            // - Text-heavy stories (captions, announcements): 6-10 seconds to read
+            // - Photo-only stories: 2-4 seconds
+            // - Video content: watch duration varies (handled by video detection)
+            const isTextHeavy = storyContent?.caption && storyContent.caption.length > 50;
+            const isVideo = storyContent?.isVideoContent;
+
+            if (isVideo) {
+                // Video: medium viewing time (assume 5-15 second videos)
+                console.log(`  🎬 Video story - watching...`);
+                await this.humanDelay(5000, 15000);
+            } else if (isTextHeavy) {
+                // Text-heavy: longer reading time (6-10 seconds)
+                console.log(`  📝 Text-heavy story - reading...`);
+                await this.humanDelay(6000, 10000);
+            } else {
+                // Photo-only: quick glance (2-4 seconds)
+                console.log(`  📷 Photo story - quick view...`);
+                await this.humanDelay(2000, 4000);
+            }
 
             // Advance to next story (click right side of screen)
             const viewportSize = this.page.viewportSize();
@@ -479,12 +532,12 @@ export class InstagramScraper {
                 break;
             }
 
-            // MOVE: Human-like scroll (FREE)
+            // MOVE: Human-like scroll (FREE) - extended pauses for 8-minute target
             await this.scroll.scroll({
                 baseDistance: 300 + Math.random() * 200,
                 variability: 0.25,
                 microAdjustProb: 0.2,
-                readingPauseMs: [3000, 6000]
+                readingPauseMs: [4000, 8000]
             });
 
             scrollCount++;
@@ -538,18 +591,286 @@ export class InstagramScraper {
                     } else {
                         consecutiveDuplicates = 0;  // Reset on new content
                     }
+
+                    // === NEW: Check for carousel and explore all slides ===
+                    const carouselNext = await this.navigator.findCarouselNextButton();
+                    if (carouselNext?.boundingBox) {
+                        console.log(`  🎠 Carousel detected, exploring slides...`);
+                        const carouselSlides = await this.exploreCarousel('feed', 'feed_carousel');
+                        for (const slide of carouselSlides) {
+                            const slideKey = `${slide.username}-${slide.caption.slice(0, 50)}`;
+                            if (!seenPostKeys.has(slideKey)) {
+                                seenPostKeys.add(slideKey);
+                                extractedContent.push(slide);
+                            }
+                        }
+                    }
                 }
             }
 
-            // Random longer pause occasionally (human behavior)
-            if (Math.random() < 0.1) {
+            // Random longer pause occasionally (human behavior) - extended for 8-minute target
+            if (Math.random() < 0.12) {
                 console.log('☕ Taking a longer pause...');
-                await this.humanDelay(5000, 10000);
+                await this.humanDelay(8000, 15000);
             }
         }
 
         console.log(`✅ Feed exploration complete. Extracted ${extractedContent.length} posts`);
         return extractedContent;
+    }
+
+    // =========================================================================
+    // RECURSIVE EXPLORATION METHODS
+    // =========================================================================
+
+    /**
+     * Explore a carousel post by clicking through all slides.
+     * Captures each slide with Vision API.
+     *
+     * FIXED: Proper actionability checks with hover, animation buffer, and slide verification.
+     *
+     * @param context - Context label for the carousel (e.g., "feed", interest name)
+     * @param slidePrefix - Prefix for slide labels
+     * @returns Array of captured slides as ExtractedPosts
+     */
+    private async exploreCarousel(
+        context: string,
+        slidePrefix: string
+    ): Promise<ExtractedPost[]> {
+        const slides: ExtractedPost[] = [];
+        let slideNumber = 1;
+        const maxSlides = 10; // Safety limit
+        const maxRetries = 2; // Retry failed navigations
+
+        console.log(`    🎠 Exploring carousel for "${context}"...`);
+
+        // Get initial slide indicator (if available)
+        let previousSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+        if (previousSlideIndicator) {
+            console.log(`    🎠 Starting at slide ${previousSlideIndicator.current} of ${previousSlideIndicator.total}`);
+        }
+
+        while (slideNumber <= maxSlides) {
+            // Check for Next button
+            const nextButton = await this.navigator.findCarouselNextButton();
+
+            if (!nextButton?.boundingBox) {
+                // No more slides
+                console.log(`    🎠 Carousel complete (${slideNumber - 1} slides captured)`);
+                break;
+            }
+
+            // === ACTIONABILITY CHECK: Hover before clicking ===
+            // Hover for 0.8-1.5 seconds to verify element is interactable (randomized)
+            const hoverDuration = 800 + Math.random() * 700;
+            console.log(`    🎠 Hovering over Next button...`);
+            await this.ghost.hoverElement(nextButton.boundingBox, hoverDuration, 0.3);
+
+            // Re-check button is still there after hover (element may have moved)
+            const nextButtonAfterHover = await this.navigator.findCarouselNextButton();
+            if (!nextButtonAfterHover?.boundingBox) {
+                console.log(`    ⚠️ Next button disappeared after hover, skipping`);
+                break;
+            }
+
+            // === CLICK with retry logic ===
+            let navigationSucceeded = false;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                // Click Next
+                await this.ghost.clickElement(nextButtonAfterHover.boundingBox, 0.3);
+
+                // === ANIMATION BUFFER: Wait for slide transition ===
+                // 1.5-3 second buffer for CSS transitions to complete (randomized)
+                await this.humanDelay(1500, 3000);
+
+                // === VERIFICATION: Check slide indicator changed ===
+                const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+
+                if (currentSlideIndicator) {
+                    // Check if we actually moved to a new slide
+                    if (!previousSlideIndicator ||
+                        currentSlideIndicator.current !== previousSlideIndicator.current) {
+                        console.log(`    🎠 Navigation verified: now on slide ${currentSlideIndicator.current} of ${currentSlideIndicator.total}`);
+                        previousSlideIndicator = currentSlideIndicator;
+                        navigationSucceeded = true;
+                        break;
+                    } else {
+                        console.log(`    ⚠️ Slide indicator unchanged (attempt ${attempt + 1}/${maxRetries}), retrying...`);
+                        await this.humanDelay(500, 800);
+                    }
+                } else {
+                    // No indicator found - assume navigation worked if button was clicked
+                    console.log(`    🎠 No slide indicator found, assuming navigation succeeded`);
+                    navigationSucceeded = true;
+                    break;
+                }
+            }
+
+            if (!navigationSucceeded) {
+                console.log(`    ⚠️ Failed to navigate after ${maxRetries} attempts, stopping carousel`);
+                break;
+            }
+
+            // Budget check
+            const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
+            if (!canAfford) {
+                console.log('    💸 Budget exhausted during carousel');
+                break;
+            }
+
+            // === CAPTION EXTRACTION (FREE - A11y tree) ===
+            // Try to get caption from accessibility tree before Vision call
+            const moreButton = await this.navigator.findMoreButton();
+            if (moreButton?.boundingBox) {
+                console.log(`    📝 Expanding truncated caption...`);
+                await this.ghost.clickElement(moreButton.boundingBox, 0.3);
+                await this.humanDelay(500, 800);
+            }
+            const rawCaption = await this.navigator.findPostCaption();
+
+            // Capture this slide with Vision API
+            const result = await this.vision.extractVisibleContent(this.page);
+            this.visionApiCalls++;
+
+            if (result.success && result.posts.length > 0) {
+                // Tag with carousel context and include raw caption
+                for (const post of result.posts) {
+                    const captionText = rawCaption || post.caption || post.visualDescription || '';
+                    slides.push({
+                        ...post,
+                        caption: `[CAROUSEL: ${context} slide ${slideNumber}] ${captionText}`
+                    });
+                }
+                console.log(`    🎠 Captured slide ${slideNumber}${rawCaption ? ' (with caption)' : ''}`);
+            }
+
+            slideNumber++;
+        }
+
+        return slides;
+    }
+
+    /**
+     * Deep exploration of a profile page.
+     * 1. Scroll through recent posts grid (2 minutes)
+     * 2. Explore first 2 Story Highlights (30s each)
+     *
+     * @param interest - The search interest (for labeling)
+     * @param profileUsername - Username being explored
+     * @returns Array of captured content as ExtractedPosts
+     */
+    private async exploreProfileDeep(
+        interest: string,
+        profileUsername: string
+    ): Promise<ExtractedPost[]> {
+        const content: ExtractedPost[] = [];
+        const startTime = Date.now();
+        // Randomize durations to avoid predictable patterns
+        // Profile grid: 1.5-2.5 minutes (randomized)
+        const profileDuration = (90 + Math.random() * 60) * 1000;
+        // Highlight viewing: 25-40 seconds per highlight (randomized)
+        const highlightDuration = (25 + Math.random() * 15) * 1000;
+
+        console.log(`    👤 Deep-diving into ${profileUsername}'s profile...`);
+
+        // === PHASE 1: Grid Scroll (2 minutes) ===
+        let scrollCount = 0;
+        const maxGridScrolls = 6; // Limit scrolls to stay within time
+
+        while (Date.now() - startTime < profileDuration && scrollCount < maxGridScrolls) {
+            // Scroll down the profile grid
+            await this.scroll.scroll({
+                baseDistance: 250 + Math.random() * 150,
+                variability: 0.2,
+                microAdjustProb: 0.1,
+                readingPauseMs: [2000, 4000]
+            });
+            scrollCount++;
+
+            // Capture every other scroll
+            if (scrollCount % 2 === 0) {
+                const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
+                if (!canAfford) {
+                    console.log('    💸 Budget exhausted during profile grid');
+                    break;
+                }
+
+                const result = await this.vision.extractVisibleContent(this.page);
+                this.visionApiCalls++;
+
+                if (result.success && result.posts.length > 0) {
+                    for (const post of result.posts) {
+                        content.push({
+                            ...post,
+                            caption: `[PROFILE: ${profileUsername}] ${post.caption || post.visualDescription || ''}`
+                        });
+                    }
+                    console.log(`    👤 Captured ${result.posts.length} grid posts`);
+                }
+            }
+        }
+
+        // === PHASE 2: Story Highlights (30s each, max 2) ===
+        // Scroll back to top first
+        await this.scroll.scrollToTop();
+        await this.humanDelay(1500, 2500);
+
+        const highlights = await this.navigator.findHighlights();
+        const highlightsToExplore = Math.min(highlights.length, 2);
+
+        console.log(`    ✨ Found ${highlights.length} highlights, exploring ${highlightsToExplore}...`);
+
+        for (let i = 0; i < highlightsToExplore; i++) {
+            const highlight = highlights[i];
+            if (!highlight.boundingBox) continue;
+
+            // Click highlight
+            console.log(`    ✨ Opening highlight: "${highlight.name}"`);
+            await this.ghost.clickElement(highlight.boundingBox, 0.3);
+            await this.humanDelay(2000, 3000);
+
+            // Watch highlight for 30 seconds, capturing periodically
+            const highlightStart = Date.now();
+            let captureCount = 0;
+
+            while (Date.now() - highlightStart < highlightDuration && captureCount < 3) {
+                const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
+                if (!canAfford) break;
+
+                const result = await this.vision.extractVisibleContent(this.page);
+                this.visionApiCalls++;
+                captureCount++;
+
+                if (result.success && result.posts.length > 0) {
+                    for (const post of result.posts) {
+                        content.push({
+                            ...post,
+                            caption: `[HIGHLIGHT: ${profileUsername} - ${highlight.name}] ${post.caption || post.visualDescription || ''}`
+                        });
+                    }
+                }
+
+                // Advance to next slide in highlight
+                const viewportSize = this.page.viewportSize();
+                if (viewportSize) {
+                    const rightZone = {
+                        x: viewportSize.width * 0.7,
+                        y: viewportSize.height * 0.3,
+                        width: viewportSize.width * 0.25,
+                        height: viewportSize.height * 0.4
+                    };
+                    await this.ghost.clickElement(rightZone, 0.2);
+                }
+                await this.humanDelay(5000, 8000);
+            }
+
+            // Exit highlight (Escape)
+            await this.page.keyboard.press('Escape');
+            await this.humanDelay(1000, 1500);
+        }
+
+        console.log(`    👤 Profile deep-dive complete. Captured ${content.length} items`);
+        return content;
     }
 
     // =========================================================================
