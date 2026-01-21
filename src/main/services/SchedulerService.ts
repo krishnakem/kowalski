@@ -6,12 +6,30 @@ import { spawn } from 'child_process';
 import { LoremIpsumGenerator } from './LoremIpsumGenerator.js';
 import { v4 as uuidv4 } from 'uuid';
 import { ActiveSchedule } from '../../types/schedule.js';
+import { BrowserManager } from './BrowserManager.js';
+import { InstagramScraper } from './InstagramScraper.js';
+import { AnalysisGenerator } from './AnalysisGenerator.js';
+import { SecureKeyManager } from './SecureKeyManager.js';
+import { AutomationErrorType } from '../../types/instagram.js';
+
+// ============ SCHEDULER CONFIGURATION ============
+// TESTING VALUES (for quick verification)
+const BAKER_LEAD_TIME_MS = 2 * 60 * 1000;     // 2 minutes before delivery
+const PREP_BUFFER_MS = 15 * 1000;              // 15 seconds buffer
+
+// PRODUCTION VALUES (uncomment for production)
+// const BAKER_LEAD_TIME_MS = 3 * 60 * 60 * 1000;  // 3 hours before delivery
+// const PREP_BUFFER_MS = 3 * 60 * 60 * 1000;      // 3 hours buffer
+// ================================================
 
 interface SchedulerSettings {
     digestFrequency: 1 | 2;
     morningTime: string;
     eveningTime: string;
-    lastAnalysisDate?: string;
+    lastAnalysisDate?: string;      // Keep for backwards compatibility
+    lastBakeDate?: string;          // When Baker last ran
+    lastDeliveryDate?: string;      // When Delivery Boy last ran
+    analysisStatus?: 'idle' | 'pending_delivery' | 'ready';
     hasOnboarded?: boolean;
     userName?: string;
     location?: string;
@@ -58,6 +76,30 @@ export class SchedulerService {
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const day = String(date.getDate()).padStart(2, '0');
         return `${year}-${month}-${day}`;
+    }
+
+    // Parse time string (e.g., "8:00 AM") into a Date object for the given reference date
+    private parseTimeString(timeStr: string, referenceDate: Date): Date {
+        const [time, modifier] = timeStr.split(' ');
+        let [hours, minutes] = time.split(':').map(Number);
+        if (modifier === 'PM' && hours < 12) hours += 12;
+        if (modifier === 'AM' && hours === 12) hours = 0;
+        const result = new Date(referenceDate);
+        result.setHours(hours, minutes, 0, 0);
+        return result;
+    }
+
+    // Deterministic random offset (0-30 minutes) based on date string hash (djb2 algorithm)
+    // This makes bake time vary day-to-day (stealth) but stay fixed within a single day (predictable)
+    private getDeterministicBakeOffset(dateStr: string): number {
+        let hash = 0;
+        for (let i = 0; i < dateStr.length; i++) {
+            hash = ((hash << 5) - hash) + dateStr.charCodeAt(i);
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        // Map to 0-30 minute range (in milliseconds)
+        const offsetMinutes = Math.abs(hash) % 31; // 0-30 minutes
+        return offsetMinutes * 60 * 1000;
     }
 
     public stop() {
@@ -251,6 +293,7 @@ export class SchedulerService {
             const settings = (store.get('settings') || {}) as SchedulerSettings;
             const now = new Date();
             const todayStr = this.formatLocalDate(now);
+            const analysisStatus = settings.analysisStatus || 'idle';
 
             // Only check if today matches the active schedule date
             if (activeSchedule.activeDate !== todayStr) {
@@ -259,24 +302,44 @@ export class SchedulerService {
             }
 
             // PULSE: Send Heartbeat to UI
-            // This ensures that if the UI is stuck in "Tomorrow" mode (due to clock jump/race condition),
-            // it receives a fresh signal that the schedule is indeed TODAY.
-            // We do this every minute.
             this.mainWindow?.webContents.send('schedule-updated', activeSchedule);
 
-            // Check Morning Slot using LOCKED schedule times
-            if (this.shouldTrigger(now, activeSchedule.morningTime, settings.lastAnalysisDate)) {
-                console.log(`🚀 Scheduling Trigger (Morning: ${activeSchedule.morningTime})`);
-                await this.triggerSimulation(now, store, activeSchedule.morningTime);
+            // ==================== TWO-PHASE SCHEDULER ====================
+
+            // === PHASE 1: BAKER (2.5-3h before delivery, randomized) ===
+            // Morning slot
+            if (this.shouldTriggerBaker(now, activeSchedule.morningTime, settings.lastBakeDate)) {
+                console.log(`🥐 Baker triggered for Morning slot (Delivery: ${activeSchedule.morningTime})`);
+                await this.triggerBaker(now, store, activeSchedule.morningTime);
                 return;
             }
 
-            // Check Evening Slot (if frequency is 2) using LOCKED schedule
-            if (activeSchedule.digestFrequency === 2 && this.shouldTrigger(now, activeSchedule.eveningTime, settings.lastAnalysisDate)) {
-                console.log(`🚀 Scheduling Trigger (Evening: ${activeSchedule.eveningTime})`);
-                await this.triggerSimulation(now, store, activeSchedule.eveningTime);
+            // === PHASE 2: DELIVERY BOY (at/after delivery time - infinite window) ===
+            // Morning slot
+            if (this.shouldTriggerDelivery(now, activeSchedule.morningTime, analysisStatus, settings.lastDeliveryDate)) {
+                console.log(`📬 Delivery Boy triggered for Morning slot`);
+                await this.triggerDelivery(store, activeSchedule.morningTime);
                 return;
             }
+
+            // Evening slot (if frequency is 2)
+            if (activeSchedule.digestFrequency === 2) {
+                // Baker for evening
+                if (this.shouldTriggerBaker(now, activeSchedule.eveningTime, settings.lastBakeDate)) {
+                    console.log(`🥐 Baker triggered for Evening slot (Delivery: ${activeSchedule.eveningTime})`);
+                    await this.triggerBaker(now, store, activeSchedule.eveningTime);
+                    return;
+                }
+
+                // Delivery Boy for evening
+                if (this.shouldTriggerDelivery(now, activeSchedule.eveningTime, analysisStatus, settings.lastDeliveryDate)) {
+                    console.log(`📬 Delivery Boy triggered for Evening slot`);
+                    await this.triggerDelivery(store, activeSchedule.eveningTime);
+                    return;
+                }
+            }
+
+            // ==================== END TWO-PHASE SCHEDULER ====================
 
         } catch (error) {
             console.error('Scheduler Check Failed:', error);
@@ -290,26 +353,17 @@ export class SchedulerService {
      */
     private canScheduleForToday(targetTimeStr: string): boolean {
         const now = new Date();
-        const [time, modifier] = targetTimeStr.split(' ');
-        let [hours, minutes] = time.split(':').map(Number);
-
-        if (modifier === 'PM' && hours < 12) hours += 12;
-        if (modifier === 'AM' && hours === 12) hours = 0;
-
-        const targetDate = new Date(now);
-        targetDate.setHours(hours, minutes, 0, 0);
+        const targetDate = this.parseTimeString(targetTimeStr, now);
 
         // 1. If time passed, obviously not.
         if (now >= targetDate) return false;
 
-        // 2. Check Buffer (Reuse logic from shouldTrigger or duplicate for safety)
+        // 2. Check Buffer using PREP_BUFFER_MS constant
         const prepTimeMs = targetDate.getTime() - this.lastWakeTime.getTime();
-        // TEST OVERRIDE: 15 seconds
-        const threeHoursMs = 15 * 1000;
         const uptimeSeconds = process.uptime();
-        const threeHoursSeconds = 15;
+        const prepBufferSeconds = PREP_BUFFER_MS / 1000;
 
-        if (prepTimeMs < threeHoursMs && uptimeSeconds < threeHoursSeconds) {
+        if (prepTimeMs < PREP_BUFFER_MS && uptimeSeconds < prepBufferSeconds) {
             console.log(`🛡️ Initial Snapshot: Skipping Today. Too close to wake/boot. (${Math.floor(uptimeSeconds)}s uptime)`);
             return false;
         }
@@ -317,66 +371,109 @@ export class SchedulerService {
         return true;
     }
 
+    // ==================== TWO-JOB SCHEDULER (INVISIBLE BUTLER) ====================
+
     /**
-     * Determines if we should trigger based on current time, target time, and last run.
-     * Logic: 
-     * 1. Parse target time (e.g., "8:00 AM") into a Date object for TODAY.
-     * 2. If NOW is >= Target Time AND Last Run was BEFORE Target Time (or never), then TRIGGER.
-     * 3. Tolerance: Only trigger if within 12 hours of the missed slot to avoid ancient catch-ups.
+     * BAKER: Determines if we should start the preparation phase.
+     * Triggers 2.5-3 hours BEFORE delivery time (with deterministic random offset).
      */
-    private shouldTrigger(now: Date, targetTimeStr: string, lastRunIso?: string): boolean {
-        if (!targetTimeStr) return false;
+    private shouldTriggerBaker(now: Date, deliveryTimeStr: string, lastBakeIso?: string): boolean {
+        if (!deliveryTimeStr) return false;
 
-        // Parse target time for TODAY
-        const [time, modifier] = targetTimeStr.split(' ');
-        let [hours, minutes] = time.split(':').map(Number);
+        const todayStr = this.formatLocalDate(now);
+        const deliveryTime = this.parseTimeString(deliveryTimeStr, now);
 
-        if (modifier === 'PM' && hours < 12) hours += 12;
-        if (modifier === 'AM' && hours === 12) hours = 0;
+        // Deterministic random offset: 0-30 minutes (varies by day, fixed within day)
+        const offset = this.getDeterministicBakeOffset(todayStr);
+        console.log(`🎲 Deterministic offset for ${todayStr}: ${offset / 60000} minutes`);
 
-        const targetTimeToday = new Date(now);
-        targetTimeToday.setHours(hours, minutes, 0, 0);
+        // Bake time: BAKER_LEAD_TIME before delivery + offset (so 2.5-3h before in production)
+        const bakeTime = new Date(deliveryTime.getTime() - BAKER_LEAD_TIME_MS + offset);
 
-        // 1. If we haven't reached the target time yet today, wait.
-        if (now < targetTimeToday) return false;
+        // 1. Must be within baking window (bakeTime <= now < deliveryTime)
+        if (now < bakeTime || now >= deliveryTime) return false;
 
-        // 1.5 CHECK: 3-Hour Preparation Buffer
-        // If the machine woke up too close to the target time, skip it.
-        // Diff = TargetTime - WakeTime
-        // Diff = TargetTime - WakeTime
-        const prepTimeMs = targetTimeToday.getTime() - this.lastWakeTime.getTime();
-        // TEST OVERRIDE: 15 seconds instead of 3 hours
-        const threeHoursMs = 15 * 1000;
+        // 2. Check if already baked for this slot today
+        if (lastBakeIso) {
+            const lastBake = new Date(lastBakeIso);
+            if (lastBake >= bakeTime) return false;
+        }
 
-        // Condition: triggers only if we have > 15 seconds of "uptime" before the slot
-        // LOGIC FIX: Check BOTH "Date-based" prep time AND "Process Uptime"
-        // If the app has been running for > 15 seconds (process.uptime), we consider it buffered/ready regardless of wake quirks.
+        // 3. Preparation buffer (machine must have been on for reasonable time)
+        const prepTimeMs = bakeTime.getTime() - this.lastWakeTime.getTime();
         const uptimeSeconds = process.uptime();
-        const threeHoursSeconds = 15;
+        const prepBufferSeconds = PREP_BUFFER_MS / 1000;
 
-        if (prepTimeMs < threeHoursMs && uptimeSeconds < threeHoursSeconds) {
-            console.log(`🛡️ Skipping Slot ${targetTimeStr}: Not enough prep time (DateDiff: ${Math.floor(prepTimeMs / 60000)}m, Uptime: ${Math.floor(uptimeSeconds / 60)}m < 180m)`);
-            return false;
-        }
-
-        // 2. Check if we already ran for this slot TODAY (or after it)
-        if (lastRunIso) {
-            const lastRun = new Date(lastRunIso);
-            if (lastRun.getTime() >= targetTimeToday.getTime()) {
-                return false;
-            }
-        }
-
-        // 3. Catch-Up Tolerance (e.g., 30 minutes for daemon mode)
-        const diffMs = now.getTime() - targetTimeToday.getTime();
-        const thirtyMinutesMs = 30 * 60 * 1000;
-
-        if (diffMs > thirtyMinutesMs) {
+        if (prepTimeMs < PREP_BUFFER_MS && uptimeSeconds < prepBufferSeconds) {
+            console.log(`🛡️ Baker: Skipping - machine woke too close to bake time (uptime: ${Math.floor(uptimeSeconds)}s)`);
             return false;
         }
 
         return true;
     }
+
+    /**
+     * DELIVERY BOY: Determines if we should deliver the prepared analysis.
+     * Triggers AT or AFTER the exact delivery time - INFINITE WINDOW (no 30-min tolerance).
+     * If status === 'pending_delivery' and time has passed, deliver it.
+     */
+    private shouldTriggerDelivery(
+        now: Date,
+        deliveryTimeStr: string,
+        analysisStatus: string,
+        lastDeliveryIso?: string
+    ): boolean {
+        if (!deliveryTimeStr) return false;
+        if (analysisStatus !== 'pending_delivery') return false;  // Nothing to deliver
+
+        const deliveryTime = this.parseTimeString(deliveryTimeStr, now);
+
+        // Must have reached/passed delivery time
+        if (now < deliveryTime) return false;
+
+        // Check if already delivered for this slot today (prevent double delivery)
+        if (lastDeliveryIso) {
+            const lastDelivery = new Date(lastDeliveryIso);
+            if (lastDelivery >= deliveryTime) return false;
+        }
+
+        // NO 30-MIN TOLERANCE - "Never Throw Away" Policy
+        // If user opens laptop at 5:59 PM, they still get their 8:00 AM paper
+        return true;
+    }
+
+    /**
+     * COLLISION HANDLER: Archives any pending undelivered paper before baking a new one.
+     * This ensures no paper is ever lost - they go to the Archive.
+     */
+    private async archivePendingAnalysis(store: any): Promise<void> {
+        const settings = store.get('settings') || {};
+
+        // Only archive if there's actually a pending delivery
+        if (settings.analysisStatus !== 'pending_delivery') return;
+
+        const analyses = store.get('analyses') || [];
+        if (analyses.length === 0) return;
+
+        const pendingAnalysis = analyses[0];
+
+        console.log(`📦 Archiving undelivered paper: ${pendingAnalysis.id}`);
+
+        // The paper is already in the analyses array (archive) and persisted to disk.
+        // We just need to reset the status so the new bake can proceed.
+        // The old paper remains accessible in the Archive screen.
+
+        store.set('settings', {
+            ...settings,
+            analysisStatus: 'idle'
+        });
+
+        console.log(`📦 Previous paper archived. Ready for new bake.`);
+    }
+
+    // ==================== END TWO-JOB SCHEDULER ====================
+
+    // Old shouldTrigger() method removed - replaced by shouldTriggerBaker() and shouldTriggerDelivery()
 
     private async triggerSimulation(now: Date, store: any, scheduledTime: string, targetDate?: Date, silent: boolean = false) {
         const settings = store.get('settings') || {};
@@ -474,4 +571,636 @@ export class SchedulerService {
             return; // Abort - Do not update metadata or notify user
         }
     }
+
+    /**
+     * REAL Analysis Pipeline - Instagram Exploration + GPT-4 Synthesis
+     *
+     * This is the production method that:
+     * 1. Validates Instagram session
+     * 2. Launches browser and explores feed/stories
+     * 3. Generates newspaper-style analysis via GPT-4
+     * 4. Saves and notifies UI
+     *
+     * Cost: ~$0.08 - $0.12 per session
+     */
+    private async triggerAnalysis(now: Date, store: any, scheduledTime: string) {
+        const settings = store.get('settings') || {};
+        const MINIMUM_POSTS_FOR_ANALYSIS = 5;
+
+        console.log(`🚀 Starting REAL Analysis Pipeline at ${new Date().toLocaleString()}`);
+
+        const browserManager = BrowserManager.getInstance();
+        let context = null;
+
+        try {
+            // 1. Get API Key
+            const apiKey = await SecureKeyManager.getInstance().getKey();
+            if (!apiKey) {
+                throw new Error('NO_API_KEY');
+            }
+
+            // 2. Launch browser (VISIBLE for flight test)
+            console.log('🌐 Launching browser (visible mode)...');
+            context = await browserManager.launch({ headless: false });
+
+            // 3. Validate session
+            console.log('🔐 Validating Instagram session...');
+            const sessionCheck = await browserManager.validateSession();
+            if (!sessionCheck.valid) {
+                throw new Error(sessionCheck.reason || 'SESSION_EXPIRED');
+            }
+
+            // 4. Explore Instagram
+            console.log('📱 Exploring Instagram feed and stories...');
+            const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
+            const session = await scraper.scrapeFeedAndStories(
+                5,  // 5 minutes of human-paced browsing
+                settings.interests || []
+            );
+
+            console.log(`📊 Exploration complete: ${session.feedContent.length} posts, ${session.storiesContent.length} stories`);
+            console.log(`📊 Vision API calls: ${session.visionApiCalls}, Skipped: ${session.skippedViewports}`);
+
+            // 5. Close browser before generation (free up resources)
+            await browserManager.close();
+            context = null;
+
+            // 6. Check minimum content threshold
+            const totalContent = session.feedContent.length + session.storiesContent.length;
+            if (totalContent < MINIMUM_POSTS_FOR_ANALYSIS) {
+                console.warn(`⚠️ Insufficient content: ${totalContent} items (need ${MINIMUM_POSTS_FOR_ANALYSIS})`);
+                throw new Error('INSUFFICIENT_CONTENT');
+            }
+
+            // 7. Generate analysis (NO fallback - if this fails, we notify user)
+            console.log('🤖 Generating analysis...');
+            const generator = new AnalysisGenerator(apiKey);
+            const analysis = await generator.generate(session, {
+                userName: settings.userName || 'User',
+                interests: settings.interests || [],
+                location: settings.location || '',
+                scheduledTime: scheduledTime
+            });
+
+            // 8. Save analysis to file (same pattern as triggerSimulation)
+            const recordId = uuidv4();
+            const newRecord = {
+                id: recordId,
+                data: analysis,
+                leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+            };
+
+            const userDataPath = app.getPath('userData');
+            const recordDir = path.join(userDataPath, 'analysis_records');
+            const recordPath = path.join(recordDir, `${recordId}.json`);
+            const tempPath = path.join(recordDir, `${recordId}.tmp`);
+
+            // Ensure directory exists
+            await fs.promises.mkdir(recordDir, { recursive: true });
+
+            // Atomic write
+            await fs.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+            await fs.promises.rename(tempPath, recordPath);
+
+            console.log(`💾 Saved Analysis to disk: ${recordPath}`);
+
+            // 9. Save metadata to store
+            const metadataRecord = {
+                id: newRecord.id,
+                data: {
+                    date: newRecord.data.date,
+                    title: newRecord.data.title,
+                    scheduledTime: newRecord.data.scheduledTime,
+                    location: newRecord.data.location
+                },
+                leadStoryPreview: newRecord.leadStoryPreview
+            };
+
+            const currentAnalyses = store.get('analyses') || [];
+            store.set('analyses', [metadataRecord, ...currentAnalyses]);
+
+            // 10. Update settings
+            store.set('settings', {
+                ...settings,
+                lastAnalysisDate: now.toISOString(),
+                analysisStatus: 'ready'
+            });
+
+            // 11. Notify UI
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                console.log('📡 Notifying UI: analysis-ready');
+                this.mainWindow.webContents.send('analysis-ready', metadataRecord);
+            }
+
+            console.log(`✅ Analysis Pipeline Complete. Cost: ~$${(session.visionApiCalls * 0.01 + 0.02).toFixed(2)}`);
+
+        } catch (error: any) {
+            console.error('❌ Analysis pipeline failed:', error.message);
+
+            // Ensure browser is closed
+            if (context) {
+                await browserManager.close();
+            }
+
+            // Handle error with user notification
+            this.handleAnalysisError(error.message as AutomationErrorType, scheduledTime, store, settings);
+        }
+    }
+
+    /**
+     * Handle errors with user-facing messages and automatic retry scheduling.
+     * NO FALLBACK GENERATION - either quality content or transparent failure.
+     */
+    private handleAnalysisError(
+        errorType: AutomationErrorType | string,
+        scheduledTime: string,
+        store: any,
+        settings: any
+    ) {
+        const errorMap: Record<string, { userMessage: string; canRetry: boolean }> = {
+            'SESSION_EXPIRED': {
+                userMessage: 'Your Instagram session has expired. Please log in again.',
+                canRetry: false
+            },
+            'CHALLENGE_REQUIRED': {
+                userMessage: 'Instagram requires verification. Please log in manually.',
+                canRetry: false
+            },
+            'RATE_LIMITED': {
+                userMessage: 'Instagram is temporarily limiting access. We\'ll try again later.',
+                canRetry: true
+            },
+            'VISION_RATE_LIMITED': {
+                userMessage: 'Content analysis service is busy. We\'ll try again soon.',
+                canRetry: true
+            },
+            'INSUFFICIENT_CONTENT': {
+                userMessage: 'Not enough content was collected. We\'ll try again at the next scheduled time.',
+                canRetry: true
+            },
+            'GENERATION_FAILED': {
+                userMessage: 'Unable to generate your analysis. We\'ll try again later.',
+                canRetry: true
+            },
+            'NO_API_KEY': {
+                userMessage: 'API key not found. Please check your settings.',
+                canRetry: false
+            },
+            'NO_CONTEXT': {
+                userMessage: 'Browser session not available. Please try again.',
+                canRetry: true
+            },
+            'BUDGET_EXCEEDED': {
+                userMessage: 'Monthly API budget reached. Your next digest will be ready when the new month begins.',
+                canRetry: false
+            }
+        };
+
+        const errorInfo = errorMap[errorType] || {
+            userMessage: 'Something went wrong. We\'ll try again later.',
+            canRetry: true
+        };
+
+        // Notify UI with clear, actionable message
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            // Send specific error type for UI handling
+            if (errorType === 'SESSION_EXPIRED' || errorType === 'CHALLENGE_REQUIRED') {
+                this.mainWindow.webContents.send('instagram-session-expired', {});
+            } else if (errorType === 'RATE_LIMITED') {
+                this.mainWindow.webContents.send('instagram-rate-limited', {
+                    nextRetry: this.calculateNextRetryTime()
+                });
+            } else if (errorType === 'INSUFFICIENT_CONTENT') {
+                this.mainWindow.webContents.send('analysis-insufficient-content', {
+                    collected: 0,  // We don't have exact count here
+                    required: 5,
+                    reason: errorInfo.userMessage,
+                    nextRetry: this.calculateNextRetryTime()
+                });
+            } else if (errorType === 'BUDGET_EXCEEDED') {
+                this.mainWindow.webContents.send('budget-exceeded', {
+                    message: 'Monthly API budget reached. Kowalski will resume next month.',
+                    canRetry: false
+                });
+            } else {
+                this.mainWindow.webContents.send('analysis-error', {
+                    message: errorInfo.userMessage,
+                    canRetry: errorInfo.canRetry,
+                    nextRetry: errorInfo.canRetry ? this.calculateNextRetryTime() : null
+                });
+            }
+        }
+
+        // Update status to idle (not working, not ready)
+        store.set('settings', {
+            ...settings,
+            analysisStatus: 'idle'
+        });
+
+        console.log(`📢 Error notification sent: ${errorInfo.userMessage}`);
+    }
+
+    /**
+     * Calculate human-readable next retry time.
+     */
+    private calculateNextRetryTime(): string {
+        const retryTime = new Date(Date.now() + 30 * 60 * 1000);  // 30 min from now
+        return retryTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    }
+
+    // ==================== BAKER & DELIVERY BOY METHODS ====================
+
+    /**
+     * BAKER: Silently prepares the analysis (scrapes Instagram, generates content).
+     * CRUCIAL: This phase must be COMPLETELY SILENT - no notifications!
+     */
+    private async triggerBaker(now: Date, store: any, scheduledTime: string) {
+        console.log(`🥐 Baker starting at ${new Date().toLocaleString()} for delivery at ${scheduledTime}`);
+
+        // === COLLISION HANDLING: Archive undelivered paper first ===
+        await this.archivePendingAnalysis(store);
+
+        // Re-fetch settings in case archivePendingAnalysis modified them
+        const settings = store.get('settings') || {};
+
+        // Use the existing pipeline based on USE_REAL_ANALYSIS flag
+        if (SchedulerService.USE_REAL_ANALYSIS) {
+            await this.triggerBakerReal(now, store, scheduledTime);
+        } else {
+            await this.triggerBakerSimulation(now, store, scheduledTime);
+        }
+    }
+
+    /**
+     * BAKER (Simulation Mode): Generate mock analysis silently.
+     */
+    private async triggerBakerSimulation(now: Date, store: any, scheduledTime: string) {
+        const settings = store.get('settings') || {};
+
+        // 1. Generate Content
+        const mockAnalysis = LoremIpsumGenerator.generate({
+            userName: settings.userName,
+            location: settings.location,
+            scheduledTime: scheduledTime,
+            targetDate: now
+        });
+
+        console.log(`🌑 Baker (Simulation) - Background baking started`);
+
+        // 2. Persist to disk
+        const newRecord = {
+            id: `analysis-sim-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            data: mockAnalysis,
+            leadStoryPreview: mockAnalysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+        };
+
+        const userDataPath = app.getPath('userData');
+        const recordDir = path.join(userDataPath, 'analysis_records');
+        const recordPath = path.join(recordDir, `${newRecord.id}.json`);
+        const tempPath = path.join(recordDir, `${newRecord.id}.tmp`);
+
+        try {
+            // Ensure directory exists
+            await fs.promises.mkdir(recordDir, { recursive: true });
+
+            // Atomic write
+            await fs.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+            await fs.promises.rename(tempPath, recordPath);
+
+            console.log(`💾 Baker saved analysis to disk: ${recordPath}`);
+
+            // 3. Save metadata to store
+            const metadataRecord = {
+                id: newRecord.id,
+                data: {
+                    date: newRecord.data.date,
+                    title: newRecord.data.title,
+                    scheduledTime: newRecord.data.scheduledTime,
+                    location: newRecord.data.location
+                },
+                leadStoryPreview: newRecord.leadStoryPreview
+            };
+
+            const currentAnalyses = store.get('analyses') || [];
+            store.set('analyses', [metadataRecord, ...currentAnalyses]);
+
+            // 4. SILENT: Update status to 'pending_delivery' - NO NOTIFICATION!
+            store.set('settings', {
+                ...store.get('settings'),
+                lastBakeDate: now.toISOString(),
+                analysisStatus: 'pending_delivery'  // Awaiting delivery time
+            });
+
+            console.log(`🥐 Baker complete. Analysis saved, awaiting delivery at ${scheduledTime}`);
+            // NO mainWindow.webContents.send() here - SILENT!
+
+        } catch (e) {
+            console.error('❌ Baker failed to save analysis to disk:', e);
+            // Cleanup temp file if it exists
+            try {
+                if (fs.existsSync(tempPath)) await fs.promises.unlink(tempPath);
+            } catch (cleanupErr) { /* ignore */ }
+        }
+    }
+
+    /**
+     * BAKER (Real Mode): Run Instagram scraping and GPT-4 analysis silently.
+     */
+    private async triggerBakerReal(now: Date, store: any, scheduledTime: string) {
+        const settings = store.get('settings') || {};
+        const MINIMUM_POSTS_FOR_ANALYSIS = 5;
+
+        console.log(`🥐 Baker (Real) - Starting Instagram exploration at ${new Date().toLocaleString()}`);
+
+        const browserManager = BrowserManager.getInstance();
+        let context = null;
+
+        try {
+            // 1. Get API Key
+            const apiKey = await SecureKeyManager.getInstance().getKey();
+            if (!apiKey) {
+                throw new Error('NO_API_KEY');
+            }
+
+            // 2. Launch browser (headless for baker - user shouldn't see)
+            console.log('🌐 Baker launching browser (headless)...');
+            context = await browserManager.launch({ headless: true });
+
+            // 3. Validate session
+            console.log('🔐 Baker validating Instagram session...');
+            const sessionCheck = await browserManager.validateSession();
+            if (!sessionCheck.valid) {
+                throw new Error(sessionCheck.reason || 'SESSION_EXPIRED');
+            }
+
+            // 4. Explore Instagram
+            console.log('📱 Baker exploring Instagram feed and stories...');
+            const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
+            const session = await scraper.scrapeFeedAndStories(
+                5,  // 5 minutes of human-paced browsing
+                settings.interests || []
+            );
+
+            console.log(`📊 Baker exploration complete: ${session.feedContent.length} posts, ${session.storiesContent.length} stories`);
+
+            // 5. Close browser before generation
+            await browserManager.close();
+            context = null;
+
+            // 6. Check minimum content threshold
+            const totalContent = session.feedContent.length + session.storiesContent.length;
+            if (totalContent < MINIMUM_POSTS_FOR_ANALYSIS) {
+                console.warn(`⚠️ Baker: Insufficient content: ${totalContent} items (need ${MINIMUM_POSTS_FOR_ANALYSIS})`);
+                throw new Error('INSUFFICIENT_CONTENT');
+            }
+
+            // 7. Generate analysis
+            console.log('🤖 Baker generating analysis...');
+            const generator = new AnalysisGenerator(apiKey);
+            const analysis = await generator.generate(session, {
+                userName: settings.userName || 'User',
+                interests: settings.interests || [],
+                location: settings.location || '',
+                scheduledTime: scheduledTime
+            });
+
+            // 8. Save analysis to file
+            const recordId = uuidv4();
+            const newRecord = {
+                id: recordId,
+                data: analysis,
+                leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+            };
+
+            const userDataPath = app.getPath('userData');
+            const recordDir = path.join(userDataPath, 'analysis_records');
+            const recordPath = path.join(recordDir, `${recordId}.json`);
+            const tempPath = path.join(recordDir, `${recordId}.tmp`);
+
+            await fs.promises.mkdir(recordDir, { recursive: true });
+            await fs.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+            await fs.promises.rename(tempPath, recordPath);
+
+            console.log(`💾 Baker saved analysis to disk: ${recordPath}`);
+
+            // 9. Save metadata to store
+            const metadataRecord = {
+                id: newRecord.id,
+                data: {
+                    date: newRecord.data.date,
+                    title: newRecord.data.title,
+                    scheduledTime: newRecord.data.scheduledTime,
+                    location: newRecord.data.location
+                },
+                leadStoryPreview: newRecord.leadStoryPreview
+            };
+
+            const currentAnalyses = store.get('analyses') || [];
+            store.set('analyses', [metadataRecord, ...currentAnalyses]);
+
+            // 10. SILENT: Update status to 'pending_delivery' - NO NOTIFICATION!
+            store.set('settings', {
+                ...store.get('settings'),
+                lastBakeDate: now.toISOString(),
+                analysisStatus: 'pending_delivery'
+            });
+
+            console.log(`🥐 Baker complete. Analysis saved, awaiting delivery at ${scheduledTime}`);
+            console.log(`✅ Baker Pipeline Complete. Cost: ~$${(session.visionApiCalls * 0.01 + 0.02).toFixed(2)}`);
+            // NO mainWindow.webContents.send() here - SILENT!
+
+        } catch (error: any) {
+            console.error('❌ Baker pipeline failed:', error.message);
+
+            // Ensure browser is closed
+            if (context) {
+                await browserManager.close();
+            }
+
+            // Log error but DON'T notify UI - baker is silent
+            // The delivery phase will handle the missing content gracefully
+            console.log(`🥐 Baker failed silently. No paper to deliver at ${scheduledTime}`);
+        }
+    }
+
+    /**
+     * DELIVERY BOY: Delivers the prepared analysis to the user.
+     * This is where we notify the UI - at the user's requested time.
+     */
+    private async triggerDelivery(store: any, scheduledTime: string) {
+        const settings = store.get('settings') || {};
+        const analyses = store.get('analyses') || [];
+        const latestAnalysis = analyses[0];
+
+        if (!latestAnalysis) {
+            console.warn('📬 Delivery Boy: No analysis found to deliver');
+            return;
+        }
+
+        // Update status to 'ready'
+        store.set('settings', {
+            ...settings,
+            lastDeliveryDate: new Date().toISOString(),
+            analysisStatus: 'ready'
+        });
+
+        // NOW notify the user (could be at 8:00 AM or 5:59 PM - doesn't matter)
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            console.log(`📬 Delivering analysis (scheduled: ${scheduledTime}, actual: ${new Date().toLocaleTimeString()})`);
+            this.mainWindow.webContents.send('analysis-ready', latestAnalysis);
+        }
+
+        console.log(`📬 Delivery complete! User notified.`);
+    }
+
+    // ==================== END BAKER & DELIVERY BOY ====================
+
+    // ==================== DEBUG / TESTING ====================
+
+    /**
+     * DEBUG RUN: Immediately triggers the full analysis pipeline in VISIBLE mode.
+     * Shortcut: Cmd+Shift+H
+     *
+     * Behavior:
+     * - Bypasses all scheduling logic (Baker/Delivery phases)
+     * - Forces headless: false (visible browser)
+     * - Notifies UI immediately after completion (no pending_delivery state)
+     */
+    public async triggerDebugRun(): Promise<void> {
+        console.log('🧪 Debug Run: Starting Visible Analysis Pipeline');
+
+        const store = await this.getStore();
+        const settings = store.get('settings') || {};
+        const now = new Date();
+        const scheduledTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+        const MINIMUM_POSTS_FOR_ANALYSIS = 5;
+        const browserManager = BrowserManager.getInstance();
+        let context = null;
+
+        try {
+            // 1. Get API Key
+            const apiKey = await SecureKeyManager.getInstance().getKey();
+            if (!apiKey) {
+                console.error('🧪 Debug Run: NO API KEY');
+                this.mainWindow?.webContents.send('analysis-error', { message: 'API key not found.' });
+                return;
+            }
+
+            // 2. Launch browser in VISIBLE mode (forced)
+            console.log('🧪 Launching browser (VISIBLE mode)...');
+            context = await browserManager.launch({ headless: false });
+
+            // 3. Validate session
+            console.log('🧪 Validating Instagram session...');
+            const sessionCheck = await browserManager.validateSession();
+            if (!sessionCheck.valid) {
+                throw new Error(sessionCheck.reason || 'SESSION_EXPIRED');
+            }
+
+            // 4. Explore Instagram (with visible cursor in debug mode)
+            console.log('🧪 Exploring Instagram feed and stories...');
+            const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);  // debugMode = true
+            const session = await scraper.scrapeFeedAndStories(
+                5,  // 5 minutes of human-paced browsing
+                settings.interests || []
+            );
+
+            console.log(`🧪 Exploration complete: ${session.feedContent.length} posts, ${session.storiesContent.length} stories`);
+
+            // 5. Close browser before generation
+            await browserManager.close();
+            context = null;
+
+            // 6. Check minimum content threshold
+            const totalContent = session.feedContent.length + session.storiesContent.length;
+            if (totalContent < MINIMUM_POSTS_FOR_ANALYSIS) {
+                console.warn(`🧪 Insufficient content: ${totalContent} items (need ${MINIMUM_POSTS_FOR_ANALYSIS})`);
+                throw new Error('INSUFFICIENT_CONTENT');
+            }
+
+            // 7. Generate analysis
+            console.log('🧪 Generating analysis...');
+            const generator = new AnalysisGenerator(apiKey);
+            const analysis = await generator.generate(session, {
+                userName: settings.userName || 'User',
+                interests: settings.interests || [],
+                location: settings.location || '',
+                scheduledTime: scheduledTime
+            });
+
+            // 8. Save analysis to file
+            const recordId = uuidv4();
+            const newRecord = {
+                id: recordId,
+                data: analysis,
+                leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+            };
+
+            const userDataPath = app.getPath('userData');
+            const recordDir = path.join(userDataPath, 'analysis_records');
+            const recordPath = path.join(recordDir, `${recordId}.json`);
+            const tempPath = path.join(recordDir, `${recordId}.tmp`);
+
+            await fs.promises.mkdir(recordDir, { recursive: true });
+            await fs.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+            await fs.promises.rename(tempPath, recordPath);
+
+            console.log(`🧪 Saved analysis to disk: ${recordPath}`);
+
+            // 9. Save metadata to store
+            const metadataRecord = {
+                id: newRecord.id,
+                data: {
+                    date: newRecord.data.date,
+                    title: newRecord.data.title,
+                    scheduledTime: newRecord.data.scheduledTime,
+                    location: newRecord.data.location
+                },
+                leadStoryPreview: newRecord.leadStoryPreview
+            };
+
+            const currentAnalyses = store.get('analyses') || [];
+            store.set('analyses', [metadataRecord, ...currentAnalyses]);
+
+            // 10. IMMEDIATE DELIVERY: Set status to 'ready' and notify UI NOW
+            store.set('settings', {
+                ...store.get('settings'),
+                lastAnalysisDate: now.toISOString(),
+                analysisStatus: 'ready'  // NOT pending_delivery - immediate!
+            });
+
+            // 11. Notify UI immediately
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                console.log('🧪 Notifying UI: analysis-ready');
+                this.mainWindow.webContents.send('analysis-ready', metadataRecord);
+            }
+
+            console.log(`🧪 Debug Run Complete! Cost: ~$${(session.visionApiCalls * 0.01 + 0.02).toFixed(2)}`);
+
+        } catch (error: any) {
+            console.error('🧪 Debug Run Failed:', error.message);
+
+            // Ensure browser is closed
+            if (context) {
+                await browserManager.close();
+            }
+
+            // Notify UI of error
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('analysis-error', {
+                    message: `Debug run failed: ${error.message}`,
+                    canRetry: true
+                });
+            }
+        }
+    }
+
+    // ==================== END DEBUG / TESTING ====================
+
+    /**
+     * Switch between simulation mode and real analysis mode.
+     * Set USE_REAL_ANALYSIS to true for production.
+     */
+    private static USE_REAL_ANALYSIS = true;  // LIVE FLIGHT TEST: Real pipeline enabled
 }

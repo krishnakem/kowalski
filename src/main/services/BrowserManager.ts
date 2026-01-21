@@ -3,8 +3,9 @@ import path from 'path';
 import fs from 'fs';
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import { BrowserContext } from 'playwright';
+import { BrowserContext, Page } from 'playwright';
 import { ChromiumVersionHelper } from './ChromiumVersionHelper.js';
+import { SessionValidationResult } from '../../types/instagram.js';
 
 // Configure stealth plugin with all evasions enabled for maximum anti-detection
 const stealth = StealthPlugin();
@@ -304,16 +305,20 @@ export class BrowserManager {
             }
 
             // 4. Wait for Login Success
-            // We look for the "Home" icon SVG, or a specific cookie.
+            // Uses URL polling + CDP accessibility tree (NO waitForSelector - bot detectable!)
             try {
                 console.log('⏳ Waiting for user to complete login...');
-                await page.waitForSelector('svg[aria-label="Home"]', { timeout: 300000 }); // 5 min timeout for user to type
-                console.log('✅ INSTAGRAM LOGIN CONFIRMED (Overlay)');
+                const loginSuccess = await this.waitForLoginSuccessViaCDP(page, 300000); // 5 min timeout
 
-                // 5. Cleanup on Success
-                await this.close();
-                mainWindow.setMovable(true);
-                return true;
+                if (loginSuccess) {
+                    console.log('✅ INSTAGRAM LOGIN CONFIRMED (Overlay)');
+                    // 5. Cleanup on Success
+                    await this.close();
+                    mainWindow.setMovable(true);
+                    return true;
+                } else {
+                    throw new Error('Login timeout');
+                }
             } catch (e) {
                 console.log('❌ Login/Timeout failed.');
                 throw e; // Bubble up to close
@@ -333,5 +338,134 @@ export class BrowserManager {
      */
     public getContext(): BrowserContext | null {
         return this.browserContext;
+    }
+
+    /**
+     * Validates if the current session is still authenticated with Instagram.
+     * Uses the same check as login() but with shorter timeout.
+     *
+     * This consolidates session validation logic - callers should use this
+     * instead of implementing their own checks.
+     *
+     * @returns SessionValidationResult with valid flag and optional reason
+     */
+    public async validateSession(): Promise<SessionValidationResult> {
+        if (!this.browserContext) {
+            return { valid: false, reason: 'NO_CONTEXT' };
+        }
+
+        try {
+            const pages = this.browserContext.pages();
+            const page = pages.length > 0 ? pages[0] : await this.browserContext.newPage();
+
+            // Navigate to Instagram if not already there
+            const url = page.url();
+            if (!url.includes('instagram.com')) {
+                await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded' });
+            }
+
+            // Check URL for obvious failure states first (fast path)
+            const currentUrl = page.url();
+            if (currentUrl.includes('/accounts/login')) {
+                return { valid: false, reason: 'SESSION_EXPIRED' };
+            }
+            if (currentUrl.includes('/challenge')) {
+                return { valid: false, reason: 'CHALLENGE_REQUIRED' };
+            }
+            if (currentUrl.includes('/accounts/suspended')) {
+                return { valid: false, reason: 'RATE_LIMITED' };
+            }
+
+            // Validate via CDP accessibility tree (NO waitForSelector - bot detectable!)
+            const isValid = await this.checkLoginStateViaCDP(page);
+            if (isValid) {
+                console.log('✅ Session validation: Valid');
+                return { valid: true };
+            } else {
+                console.log('❌ Session validation: Not logged in');
+                return { valid: false, reason: 'SESSION_EXPIRED' };
+            }
+
+        } catch (error: any) {
+            console.error('❌ Session validation error:', error.message);
+            return { valid: false, reason: error.message };
+        }
+    }
+
+    // =========================================================================
+    // CDP-Based Login Detection (Undetectable)
+    // =========================================================================
+
+    /**
+     * Wait for login success using URL polling + CDP accessibility tree.
+     * NO waitForSelector - that injects MutationObserver (bot detectable).
+     *
+     * @param page - Playwright page
+     * @param timeout - Maximum wait time in ms
+     * @returns true if login detected, false if timeout
+     */
+    private async waitForLoginSuccessViaCDP(page: Page, timeout: number): Promise<boolean> {
+        const startTime = Date.now();
+        const pollInterval = 1500; // Check every 1.5 seconds
+
+        while (Date.now() - startTime < timeout) {
+            const url = page.url();
+
+            // Fast path: Still on login page
+            if (url.includes('/accounts/login') || url.includes('/challenge')) {
+                await new Promise(r => setTimeout(r, pollInterval));
+                continue;
+            }
+
+            // URL looks good - verify with CDP accessibility tree
+            if (url.includes('instagram.com')) {
+                const isLoggedIn = await this.checkLoginStateViaCDP(page);
+                if (isLoggedIn) {
+                    return true;
+                }
+            }
+
+            await new Promise(r => setTimeout(r, pollInterval));
+        }
+
+        return false;
+    }
+
+    /**
+     * Check login state using CDP accessibility tree.
+     * Looks for navigation elements that only appear when logged in.
+     *
+     * NO DOM queries, NO selectors - completely undetectable.
+     */
+    private async checkLoginStateViaCDP(page: Page): Promise<boolean> {
+        let cdpSession = null;
+        try {
+            cdpSession = await page.context().newCDPSession(page);
+            const { nodes } = await cdpSession.send('Accessibility.getFullAXTree') as { nodes: any[] };
+
+            // Look for logged-in indicators in the accessibility tree
+            // Instagram shows "Home", "Search", "Explore" links when logged in
+            const loggedInIndicators = ['home', 'search', 'explore', 'new post', 'profile'];
+
+            const hasLoggedInElement = nodes.some((node: any) => {
+                if (node.ignored) return false;
+                const nodeName = (node.name?.value || '').toLowerCase();
+                const nodeRole = node.role?.value?.toLowerCase();
+
+                // Must be a link or button (navigation elements)
+                if (nodeRole !== 'link' && nodeRole !== 'button') return false;
+
+                return loggedInIndicators.some(indicator => nodeName.includes(indicator));
+            });
+
+            return hasLoggedInElement;
+        } catch (error) {
+            console.warn('CDP accessibility check failed:', error);
+            return false;
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
     }
 }

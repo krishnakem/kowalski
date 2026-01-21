@@ -1,0 +1,333 @@
+/**
+ * GhostMouse - Human-like Mouse Movement Simulation
+ *
+ * Generates realistic mouse movements using Bezier curves with:
+ * - Variable velocity (acceleration/deceleration)
+ * - Natural curve trajectories (humans don't move in straight lines)
+ * - Overshoot and micro-corrections
+ * - Randomized click positions (never exactly center)
+ *
+ * Cost: $0 (pure physics simulation, no API calls)
+ */
+
+import { Bezier } from 'bezier-js';
+import { Page } from 'playwright';
+import { Point, MovementConfig, BoundingBox } from '../../types/instagram.js';
+import { ease } from '../../lib/animations.js';
+
+/**
+ * Control points for a cubic Bezier curve.
+ */
+interface BezierControlPoints {
+    start: Point;
+    cp1: Point;
+    cp2: Point;
+    end: Point;
+}
+
+export class GhostMouse {
+    private page: Page;
+    private currentPosition: Point = { x: 0, y: 0 };
+    private cursorVisible: boolean = false;
+
+    constructor(page: Page) {
+        this.page = page;
+    }
+
+    /**
+     * Enable visible cursor for debugging.
+     * Uses a custom CSS cursor image (data URI) - no DOM injection.
+     * This is safer than injecting elements which could trigger bot detection.
+     */
+    async enableVisibleCursor(): Promise<void> {
+        if (this.cursorVisible) return;
+
+        // Use CSS cursor with a data URI for a large, visible cursor
+        // This doesn't inject any detectable DOM elements
+        await this.page.addStyleTag({
+            content: `
+                * {
+                    cursor: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="rgba(255,0,0,0.7)" stroke="white" stroke-width="2"/><circle cx="16" cy="16" r="3" fill="white"/></svg>') 16 16, auto !important;
+                }
+            `
+        });
+
+        this.cursorVisible = true;
+        console.log('👁️ Visible cursor enabled (CSS mode)');
+    }
+
+    /**
+     * Disable visible cursor.
+     * Note: CSS cannot be easily removed, so this is a no-op.
+     * The cursor will reset on page navigation.
+     */
+    async disableVisibleCursor(): Promise<void> {
+        // CSS cursor styles persist until page reload
+        // For debug sessions this is fine
+        this.cursorVisible = false;
+    }
+
+    /**
+     * Update the visible cursor position.
+     * With CSS cursor mode, no update needed - cursor follows mouse automatically.
+     */
+    private async updateVisibleCursor(_x: number, _y: number): Promise<void> {
+        // No-op: CSS cursor follows mouse automatically
+    }
+
+    /**
+     * Move mouse to target with human-like Bezier curve trajectory.
+     * Includes variable velocity (acceleration/deceleration).
+     */
+    async moveTo(target: Point, config: MovementConfig = {}): Promise<void> {
+        const {
+            minSpeed = 2,
+            maxSpeed = 8,
+            overshootProbability = 0.15,
+            jitterAmount = 2
+        } = config;
+
+        // 1. Generate control points for Bezier curve
+        const controlPoints = this.generateBezierControlPoints(
+            this.currentPosition,
+            target
+        );
+
+        // 2. Create Bezier curve
+        const curve = new Bezier(
+            controlPoints.start.x, controlPoints.start.y,
+            controlPoints.cp1.x, controlPoints.cp1.y,
+            controlPoints.cp2.x, controlPoints.cp2.y,
+            controlPoints.end.x, controlPoints.end.y
+        );
+
+        // 3. Calculate points along curve with variable velocity
+        const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
+
+        // 4. Execute movement with micro-jitter
+        for (const point of points) {
+            const jitteredPoint = this.addJitter(point, jitterAmount);
+            await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
+            await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
+            await this.microDelay(5, 15);  // 5-15ms between micro-movements
+        }
+
+        // 5. Optional overshoot and correction
+        if (Math.random() < overshootProbability) {
+            await this.overshootAndCorrect(target);
+        }
+
+        this.currentPosition = target;
+    }
+
+    /**
+     * Generate Bezier control points that create natural curve.
+     * Humans don't move in straight lines - they curve slightly.
+     */
+    private generateBezierControlPoints(start: Point, end: Point): BezierControlPoints {
+        const distance = Math.hypot(end.x - start.x, end.y - start.y);
+
+        // Control points offset perpendicular to the line
+        const angle = Math.atan2(end.y - start.y, end.x - start.x);
+        const perpAngle = angle + Math.PI / 2;
+
+        // Randomize curve intensity
+        const curveIntensity = distance * (0.1 + Math.random() * 0.2);
+        const curveDirection = Math.random() > 0.5 ? 1 : -1;
+
+        return {
+            start,
+            cp1: {
+                x: start.x + (end.x - start.x) * 0.25 + Math.cos(perpAngle) * curveIntensity * curveDirection,
+                y: start.y + (end.y - start.y) * 0.25 + Math.sin(perpAngle) * curveIntensity * curveDirection
+            },
+            cp2: {
+                x: start.x + (end.x - start.x) * 0.75 + Math.cos(perpAngle) * curveIntensity * curveDirection * 0.5,
+                y: start.y + (end.y - start.y) * 0.75 + Math.sin(perpAngle) * curveIntensity * curveDirection * 0.5
+            },
+            end
+        };
+    }
+
+    /**
+     * Generate points with easing (slow start, fast middle, slow end).
+     * Mimics human acceleration/deceleration pattern.
+     *
+     * Uses the cinematic easing curve from animations.ts for consistency
+     * with the app's visual language.
+     */
+    private generateVariableVelocityPoints(
+        curve: Bezier,
+        minSpeed: number,
+        maxSpeed: number
+    ): Point[] {
+        const points: Point[] = [];
+        const curveLength = curve.length();
+        let t = 0;
+
+        while (t <= 1) {
+            const point = curve.get(t);
+            points.push({ x: point.x, y: point.y });
+
+            // Easing function: ease-in-out (slow-fast-slow)
+            // Uses adapted cinematic curve from animations.ts
+            const easing = this.easeInOutCinematic(t);
+            const speed = minSpeed + (maxSpeed - minSpeed) * (1 - Math.abs(easing - 0.5) * 2);
+
+            // Convert speed to t increment
+            const increment = speed / curveLength;
+            t += Math.max(increment, 0.01);  // Minimum increment to prevent infinite loop
+        }
+
+        return points;
+    }
+
+    /**
+     * Easing function adapted from animations.ts cinematic curve.
+     * [0.22, 1, 0.36, 1] converted to a function.
+     *
+     * This creates the characteristic "slow start, fast middle, slow end"
+     * that makes mouse movements feel natural.
+     */
+    private easeInOutCinematic(t: number): number {
+        // Approximate the cinematic bezier [0.22, 1, 0.36, 1]
+        // Using ease-in-out quad as a close approximation
+        return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    }
+
+    /**
+     * Add random micro-jitter to a point.
+     * Humans have small involuntary hand movements.
+     */
+    private addJitter(point: Point, amount: number): Point {
+        return {
+            x: point.x + (Math.random() - 0.5) * amount,
+            y: point.y + (Math.random() - 0.5) * amount
+        };
+    }
+
+    /**
+     * Simulate human overshoot: move past target, then correct.
+     * This happens when moving quickly - we slightly overshoot, then adjust.
+     *
+     * IMPORTANT: Correction movement uses a micro-curve, NOT a straight line.
+     * Straight-line correction is a bot signal (humans don't move perfectly).
+     */
+    private async overshootAndCorrect(target: Point): Promise<void> {
+        // Overshoot by 10-20 pixels in random direction
+        const overshoot: Point = {
+            x: target.x + (Math.random() - 0.5) * 20,
+            y: target.y + (Math.random() - 0.5) * 20
+        };
+
+        await this.page.mouse.move(overshoot.x, overshoot.y);
+        await this.updateVisibleCursor(overshoot.x, overshoot.y);
+        await this.microDelay(50, 150);  // Pause to "realize" overshoot
+
+        // FIXED: Use micro-curve for correction instead of straight line
+        // Humans don't move in perfect straight lines, even for small corrections
+        const midpoint: Point = {
+            x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * 5,
+            y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * 5
+        };
+
+        // Move through midpoint with slight curve
+        await this.page.mouse.move(midpoint.x, midpoint.y);
+        await this.updateVisibleCursor(midpoint.x, midpoint.y);
+        await this.microDelay(8, 20);  // Very brief pause
+        await this.page.mouse.move(target.x, target.y);
+        await this.updateVisibleCursor(target.x, target.y);
+    }
+
+    /**
+     * Human-like click with pre-click hover and post-click pause.
+     */
+    async click(target: Point): Promise<void> {
+        await this.moveTo(target);
+        await this.microDelay(100, 300);  // Pre-click hesitation
+        await this.page.mouse.down();
+        await this.microDelay(50, 150);   // Hold duration varies
+        await this.page.mouse.up();
+        await this.microDelay(200, 500);  // Post-click pause
+    }
+
+    /**
+     * Click an element with randomized offset within its bounds.
+     * Humans NEVER click exactly in the center of buttons.
+     *
+     * @param boundingBox - Element's bounding box
+     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center)
+     */
+    async clickElement(
+        boundingBox: BoundingBox,
+        centerBias: number = 0.3  // Slight bias toward center, but not exact
+    ): Promise<void> {
+        // Generate random offset with optional center bias
+        // Using gaussian-like distribution: more likely near center, but not exact
+        const offsetX = this.gaussianRandom(centerBias) * boundingBox.width;
+        const offsetY = this.gaussianRandom(centerBias) * boundingBox.height;
+
+        // Calculate click point (offset from top-left corner)
+        let clickPoint: Point = {
+            x: boundingBox.x + offsetX,
+            y: boundingBox.y + offsetY
+        };
+
+        // Ensure we're still within the element (safety clamp with 5px margin)
+        clickPoint.x = Math.max(
+            boundingBox.x + 5,
+            Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
+        );
+        clickPoint.y = Math.max(
+            boundingBox.y + 5,
+            Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
+        );
+
+        await this.click(clickPoint);
+    }
+
+    /**
+     * Generate a random number between 0 and 1 with gaussian-like distribution.
+     * centerBias: 0.0 = uniform distribution, 1.0 = always 0.5 (center)
+     *
+     * This mimics human click patterns: usually near center, but with natural variation.
+     */
+    private gaussianRandom(centerBias: number = 0.3): number {
+        // Box-Muller transform for gaussian distribution
+        const u1 = Math.random();
+        const u2 = Math.random();
+        const gaussian = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+
+        // Normalize to 0-1 range (gaussian has ~99.7% within +/-3 std dev)
+        const normalized = (gaussian / 6) + 0.5;  // Center at 0.5
+
+        // Clamp to valid range with margin
+        const clamped = Math.max(0.1, Math.min(0.9, normalized));
+
+        // Blend between uniform and gaussian based on centerBias
+        const uniform = 0.1 + Math.random() * 0.8;  // Uniform with margin
+        return clamped * centerBias + uniform * (1 - centerBias);
+    }
+
+    /**
+     * Small random delay for human-like timing variation.
+     */
+    private microDelay(min: number, max: number): Promise<void> {
+        const delay = min + Math.random() * (max - min);
+        return new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    /**
+     * Get current mouse position.
+     */
+    getPosition(): Point {
+        return { ...this.currentPosition };
+    }
+
+    /**
+     * Set current position (for initialization or after page navigation).
+     */
+    setPosition(position: Point): void {
+        this.currentPosition = { ...position };
+    }
+}

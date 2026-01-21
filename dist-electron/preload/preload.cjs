@@ -35,6 +35,27 @@ import_electron.contextBridge.exposeInMainWorld("api", {
       const subscription = (_event, schedule) => callback(schedule);
       import_electron.ipcRenderer.on("schedule-updated", subscription);
       return () => import_electron.ipcRenderer.removeListener("schedule-updated", subscription);
+    },
+    // New error event listeners for Instagram automation
+    onAnalysisError: (callback) => {
+      const subscription = (_event, error) => callback(error);
+      import_electron.ipcRenderer.on("analysis-error", subscription);
+      return () => import_electron.ipcRenderer.removeListener("analysis-error", subscription);
+    },
+    onSessionExpired: (callback) => {
+      const subscription = () => callback();
+      import_electron.ipcRenderer.on("instagram-session-expired", subscription);
+      return () => import_electron.ipcRenderer.removeListener("instagram-session-expired", subscription);
+    },
+    onRateLimited: (callback) => {
+      const subscription = (_event, info) => callback(info);
+      import_electron.ipcRenderer.on("instagram-rate-limited", subscription);
+      return () => import_electron.ipcRenderer.removeListener("instagram-rate-limited", subscription);
+    },
+    onInsufficientContent: (callback) => {
+      const subscription = (_event, info) => callback(info);
+      import_electron.ipcRenderer.on("analysis-insufficient-content", subscription);
+      return () => import_electron.ipcRenderer.removeListener("analysis-insufficient-content", subscription);
     }
   },
   analyses: {

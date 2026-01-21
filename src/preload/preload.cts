@@ -37,6 +37,27 @@ contextBridge.exposeInMainWorld('api', {
             const subscription = (_event: any, schedule: any) => callback(schedule);
             ipcRenderer.on('schedule-updated', subscription);
             return () => ipcRenderer.removeListener('schedule-updated', subscription);
+        },
+        // New error event listeners for Instagram automation
+        onAnalysisError: (callback: (error: { message: string; canRetry: boolean; nextRetry: string | null }) => void) => {
+            const subscription = (_event: any, error: any) => callback(error);
+            ipcRenderer.on('analysis-error', subscription);
+            return () => ipcRenderer.removeListener('analysis-error', subscription);
+        },
+        onSessionExpired: (callback: () => void) => {
+            const subscription = () => callback();
+            ipcRenderer.on('instagram-session-expired', subscription);
+            return () => ipcRenderer.removeListener('instagram-session-expired', subscription);
+        },
+        onRateLimited: (callback: (info: { nextRetry: string }) => void) => {
+            const subscription = (_event: any, info: any) => callback(info);
+            ipcRenderer.on('instagram-rate-limited', subscription);
+            return () => ipcRenderer.removeListener('instagram-rate-limited', subscription);
+        },
+        onInsufficientContent: (callback: (info: { collected: number; required: number; reason: string; nextRetry: string }) => void) => {
+            const subscription = (_event: any, info: any) => callback(info);
+            ipcRenderer.on('analysis-insufficient-content', subscription);
+            return () => ipcRenderer.removeListener('analysis-insufficient-content', subscription);
         }
     },
     analyses: {

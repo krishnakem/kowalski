@@ -165,4 +165,33 @@ export class UsageService {
         const store = await this.getStore();
         return store.get('usageData') || { currentMonthSpend: 0, lastResetDate: new Date().toISOString() };
     }
+
+    /**
+     * Returns remaining budget and estimated API calls available.
+     * Used for smart session planning.
+     */
+    public async getBudgetStatus(cap: number): Promise<{
+        currentSpend: number;
+        remaining: number;
+        estimatedCallsRemaining: number;
+    }> {
+        const store = await this.getStore();
+        const usage = store.get('usageData') as UsageData;
+        const currentSpend = usage?.currentMonthSpend || 0;
+        const remaining = Math.max(0, cap - currentSpend);
+
+        // Estimate: ~$0.01 per Vision API call (low detail mode)
+        const COST_PER_VISION_CALL = 0.01;
+        const estimatedCallsRemaining = Math.floor(remaining / COST_PER_VISION_CALL);
+
+        return { currentSpend, remaining, estimatedCallsRemaining };
+    }
+
+    /**
+     * Quick check if we can afford at least one more Vision API call.
+     */
+    public async canAffordVisionCall(cap: number): Promise<boolean> {
+        const COST_PER_VISION_CALL = 0.01;
+        return !(await this.isOverBudget(cap, COST_PER_VISION_CALL));
+    }
 }

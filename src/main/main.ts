@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, ipcMain, session, globalShortcut } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -146,6 +146,12 @@ app.on('ready', () => {
   // Initialize Scheduler
   SchedulerService.getInstance().initialize();
 
+  // === TESTING SHORTCUT: Cmd+Shift+H ===
+  globalShortcut.register('CommandOrControl+Shift+H', () => {
+    console.log('🧪 Testing Shortcut Triggered (Cmd+Shift+H)');
+    SchedulerService.getInstance().triggerDebugRun();
+  });
+
   // MIGRATION: Ensure storage directory exists
   const userDataPath = app.getPath('userData');
   const recordsPath = path.join(userDataPath, 'analysis_records');
@@ -164,6 +170,7 @@ app.on('ready', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  globalShortcut.unregisterAll();
   SchedulerService.getInstance().stop();
 });
 
