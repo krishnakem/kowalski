@@ -12,7 +12,7 @@
 
 import { Bezier } from 'bezier-js';
 import { Page } from 'playwright';
-import { Point, MovementConfig, BoundingBox } from '../../types/instagram.js';
+import { Point, MovementConfig, BoundingBox, GazeConfig, GazeTarget } from '../../types/instagram.js';
 import { ease } from '../../lib/animations.js';
 
 /**
@@ -34,6 +34,8 @@ export class GhostMouse {
     // This ensures timing patterns vary across sessions, defeating pattern analysis
     private sessionTimingMultiplier: number;
     private sessionJitterMultiplier: number;
+    // Session-level hesitation probability (3-7% per session, not fixed 5%)
+    private sessionHesitationProb: number;
 
     constructor(page: Page) {
         this.page = page;
@@ -41,6 +43,8 @@ export class GhostMouse {
         this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
         // Vary jitter by ±40% per session (0.6 to 1.4)
         this.sessionJitterMultiplier = 0.6 + Math.random() * 0.8;
+        // Vary hesitation probability per session (3-7% range)
+        this.sessionHesitationProb = 0.03 + Math.random() * 0.04;
     }
 
     /**
@@ -127,13 +131,15 @@ export class GhostMouse {
             const jitteredPoint = this.addJitter(points[i], effectiveJitter);
             await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
             await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
-            // Human-realistic timing: 12-45ms (was 5-15ms - too fast and narrow)
-            await this.microDelay(12, 45);
+            // Human-realistic timing with session variance (base 12-45ms scaled by session multiplier)
+            const baseMin = 12 * this.sessionTimingMultiplier;
+            const baseMax = 45 * this.sessionTimingMultiplier;
+            await this.microDelay(baseMin, baseMax);
 
-            // Hesitation point: 5% chance of longer pause during movement
+            // Hesitation point: session-varied probability (3-7%) of longer pause during movement
             // Humans don't move smoothly for long distances - they pause to "think"
-            if (i > 0 && i < points.length - 1 && Math.random() < 0.05) {
-                await this.microDelay(80, 200);  // Brief "thinking" pause
+            if (i > 0 && i < points.length - 1 && Math.random() < this.sessionHesitationProb) {
+                await this.microDelay(80 * this.sessionTimingMultiplier, 200 * this.sessionTimingMultiplier);
             }
         }
 
@@ -342,15 +348,17 @@ export class GhostMouse {
      *
      * @param boundingBox - Element's bounding box
      * @param durationMs - How long to hover
-     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center)
+     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
      */
     async hoverElement(
         boundingBox: BoundingBox,
         durationMs: number = 1000,
-        centerBias: number = 0.3
+        centerBias?: number
     ): Promise<void> {
-        const offsetX = this.gaussianRandom(centerBias) * boundingBox.width;
-        const offsetY = this.gaussianRandom(centerBias) * boundingBox.height;
+        // Use randomized center bias if not explicitly specified
+        const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
+        const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
+        const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
 
         let hoverPoint: Point = {
             x: boundingBox.x + offsetX,
@@ -375,16 +383,17 @@ export class GhostMouse {
      * Humans NEVER click exactly in the center of buttons.
      *
      * @param boundingBox - Element's bounding box
-     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center)
+     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
      */
     async clickElement(
         boundingBox: BoundingBox,
-        centerBias: number = 0.3  // Slight bias toward center, but not exact
+        centerBias?: number  // Randomized 0.2-0.4 if not specified
     ): Promise<void> {
-        // Generate random offset with optional center bias
+        // Generate random offset with randomized center bias
         // Using gaussian-like distribution: more likely near center, but not exact
-        const offsetX = this.gaussianRandom(centerBias) * boundingBox.width;
-        const offsetY = this.gaussianRandom(centerBias) * boundingBox.height;
+        const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
+        const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
+        const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
 
         // Calculate click point (offset from top-left corner)
         let clickPoint: Point = {
@@ -406,12 +415,22 @@ export class GhostMouse {
     }
 
     /**
+     * Get a randomized center bias value (0.2-0.4 range).
+     * Avoids using fixed 0.3 which creates detectable patterns.
+     */
+    private getRandomizedCenterBias(): number {
+        return 0.2 + Math.random() * 0.2;  // 0.2-0.4 range
+    }
+
+    /**
      * Generate a random number between 0 and 1 with gaussian-like distribution.
      * centerBias: 0.0 = uniform distribution, 1.0 = always 0.5 (center)
      *
      * This mimics human click patterns: usually near center, but with natural variation.
      */
-    private gaussianRandom(centerBias: number = 0.3): number {
+    private gaussianRandom(centerBias?: number): number {
+        // Use randomized default if not specified
+        const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
         // Box-Muller transform for gaussian distribution
         const u1 = Math.random();
         const u2 = Math.random();
@@ -423,9 +442,9 @@ export class GhostMouse {
         // Clamp to valid range with margin
         const clamped = Math.max(0.1, Math.min(0.9, normalized));
 
-        // Blend between uniform and gaussian based on centerBias
+        // Blend between uniform and gaussian based on effectiveBias
         const uniform = 0.1 + Math.random() * 0.8;  // Uniform with margin
-        return clamped * centerBias + uniform * (1 - centerBias);
+        return clamped * effectiveBias + uniform * (1 - effectiveBias);
     }
 
     /**
@@ -452,5 +471,307 @@ export class GhostMouse {
      */
     setPosition(position: Point): void {
         this.currentPosition = { ...position };
+    }
+
+    // =========================================================================
+    // Gaze-Lag Execution System (Human-like "Look, then Move")
+    // =========================================================================
+
+    /**
+     * Randomized value within a range - NO fixed values allowed.
+     */
+    private randomInRange(min: number, max: number): number {
+        return min + Math.random() * (max - min);
+    }
+
+    /**
+     * Default gaze configuration with all randomized ranges.
+     */
+    private getDefaultGazeConfig(): Required<GazeConfig> {
+        return {
+            enabled: true,
+            saccadicLatency: [280, 420],        // Human eye-to-hand reaction time
+            fixationPause: [200, 500],          // Visual fixation at gaze points
+            ballisticSplit: [0.75, 0.85],       // 75-85% of distance is ballistic
+            scanningSpeed: [2, 4],              // Slow, deliberate scanning
+            ballisticSpeed: [8, 12],            // Fast, committed movement
+            correctiveSpeed: [1, 3],            // Slow, precise final approach
+            scanningJitter: [1.5, 2.5],         // Relaxed hand
+            ballisticJitter: [0.5, 1.5],        // Minimal - focused movement
+            correctiveJitter: [2.5, 4.5]        // Increased - fine motor tension
+        };
+    }
+
+    /**
+     * Get element-specific hover duration based on role.
+     * Different element types require different amounts of visual processing.
+     *
+     * @param role - The accessibility role of the element
+     * @returns Randomized hover duration in milliseconds
+     */
+    getHoverDurationForRole(role: string): number {
+        const roleLower = role.toLowerCase();
+
+        const ranges: Record<string, [number, number]> = {
+            button: [50, 150],       // Large, easy targets
+            link: [150, 300],        // Precision required
+            textbox: [200, 400],     // Cognitive preparation for typing
+            searchbox: [200, 400],   // Same as textbox
+            combobox: [180, 350],    // Dropdown interaction
+            image: [100, 250],       // Visual inspection
+            img: [100, 250],         // Same as image
+            menuitem: [120, 280],    // Menu navigation
+            tab: [100, 220],         // Tab switching
+            checkbox: [80, 180],     // Quick toggle
+            radio: [80, 180],        // Quick selection
+        };
+
+        const [min, max] = ranges[roleLower] || [100, 300];  // Default range
+        return this.randomInRange(min, max) * this.sessionTimingMultiplier;
+    }
+
+    /**
+     * Human-like click with element-specific timing.
+     * Varies pre-click hover based on element role.
+     *
+     * @param target - Point to click
+     * @param role - Accessibility role for timing adjustment
+     */
+    async clickWithRole(target: Point, role: string = 'button'): Promise<void> {
+        await this.moveTo(target);
+
+        // Element-specific pre-click hover duration
+        const hoverDuration = this.getHoverDurationForRole(role);
+        await new Promise(r => setTimeout(r, hoverDuration));
+
+        await this.page.mouse.down();
+        // Hold duration varies: 50-150ms (randomized)
+        await this.microDelay(50, 150);
+        await this.page.mouse.up();
+
+        // Post-click pause: 200-500ms (randomized)
+        await this.microDelay(200, 500);
+    }
+
+    /**
+     * Click an element with gaze-aware role-specific timing.
+     *
+     * @param boundingBox - Element's bounding box
+     * @param role - Accessibility role for timing adjustment
+     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
+     */
+    async clickElementWithRole(
+        boundingBox: BoundingBox,
+        role: string = 'button',
+        centerBias?: number
+    ): Promise<void> {
+        // Generate random offset with randomized center bias
+        const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
+        const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
+        const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
+
+        let clickPoint: Point = {
+            x: boundingBox.x + offsetX,
+            y: boundingBox.y + offsetY
+        };
+
+        // Safety clamp with 5px margin
+        clickPoint.x = Math.max(
+            boundingBox.x + 5,
+            Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
+        );
+        clickPoint.y = Math.max(
+            boundingBox.y + 5,
+            Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
+        );
+
+        await this.clickWithRole(clickPoint, role);
+    }
+
+    /**
+     * Investigate and click: Human-like "Look, then Move" sequence.
+     *
+     * This implements the Hybrid Gaze-Physics System:
+     * - Phase 0: Saccadic latency (280-420ms wait before movement)
+     * - Phase 1: Scanning (move to gaze anchors, pause at each)
+     * - Phase 2: Ballistic (fast movement covering 75-85% of distance)
+     * - Phase 3: Corrective (slow, jittery final approach with Fitts's Law)
+     *
+     * @param target - The final click target
+     * @param gazeAnchors - 1-2 "distractor" points to look at first
+     * @param role - Accessibility role for timing adjustment
+     * @param config - Optional gaze configuration overrides
+     */
+    async investigateAndClick(
+        target: Point,
+        gazeAnchors: Point[],
+        role: string = 'button',
+        config?: Partial<GazeConfig>
+    ): Promise<void> {
+        const cfg = { ...this.getDefaultGazeConfig(), ...config };
+
+        if (!cfg.enabled || gazeAnchors.length === 0) {
+            // Fallback to normal click with role-specific timing
+            await this.clickWithRole(target, role);
+            return;
+        }
+
+        // =====================================================================
+        // PHASE 0: Saccadic Latency
+        // Human eye-to-hand reaction time before any movement begins
+        // =====================================================================
+        const saccadicDelay = this.randomInRange(cfg.saccadicLatency[0], cfg.saccadicLatency[1]);
+        await new Promise(r => setTimeout(r, saccadicDelay * this.sessionTimingMultiplier));
+
+        // =====================================================================
+        // PHASE 1: Scanning
+        // Move to gaze anchors at moderate speed, pause at each
+        // =====================================================================
+        for (const anchor of gazeAnchors.slice(0, 2)) {  // Max 2 anchors
+            await this.moveToWithPhaseConfig(
+                anchor,
+                cfg.scanningSpeed,
+                cfg.scanningJitter
+            );
+
+            // Visual fixation pause (randomized per anchor)
+            const fixationTime = this.randomInRange(cfg.fixationPause[0], cfg.fixationPause[1]);
+            await new Promise(r => setTimeout(r, fixationTime * this.sessionTimingMultiplier));
+        }
+
+        // =====================================================================
+        // PHASE 2 & 3: Ballistic + Corrective
+        // Fast approach covering 75-85%, then slow corrective for remainder
+        // =====================================================================
+        const lastPosition = gazeAnchors.length > 0
+            ? gazeAnchors[gazeAnchors.length - 1]
+            : this.currentPosition;
+
+        // Calculate split point (randomized 75-85%)
+        const ballisticRatio = this.randomInRange(cfg.ballisticSplit[0], cfg.ballisticSplit[1]);
+
+        // Calculate intermediate point for ballistic phase
+        const ballisticTarget: Point = {
+            x: lastPosition.x + (target.x - lastPosition.x) * ballisticRatio,
+            y: lastPosition.y + (target.y - lastPosition.y) * ballisticRatio
+        };
+
+        // Phase 2: Ballistic movement (fast, minimal jitter)
+        await this.moveToWithPhaseConfig(
+            ballisticTarget,
+            cfg.ballisticSpeed,
+            cfg.ballisticJitter
+        );
+
+        // Phase 3: Corrective movement (slow, high jitter)
+        await this.moveToWithPhaseConfig(
+            target,
+            cfg.correctiveSpeed,
+            cfg.correctiveJitter
+        );
+
+        // =====================================================================
+        // Click with role-specific timing
+        // =====================================================================
+        const hoverDuration = this.getHoverDurationForRole(role);
+        await new Promise(r => setTimeout(r, hoverDuration));
+
+        await this.page.mouse.down();
+        await this.microDelay(50, 150);
+        await this.page.mouse.up();
+        await this.microDelay(200, 500);
+
+        this.currentPosition = target;
+    }
+
+    /**
+     * Move to target with specific speed and jitter configuration.
+     * Used internally by investigateAndClick for phase-specific movement.
+     */
+    private async moveToWithPhaseConfig(
+        target: Point,
+        speedRange: [number, number],
+        jitterRange: [number, number]
+    ): Promise<void> {
+        // Randomize speed within range for this movement
+        const minSpeed = this.randomInRange(speedRange[0], speedRange[1] * 0.6);
+        const maxSpeed = this.randomInRange(speedRange[0] * 1.4, speedRange[1]);
+
+        // Randomize jitter amount for this movement
+        const jitterAmount = this.randomInRange(jitterRange[0], jitterRange[1]);
+
+        // Generate Bezier curve
+        const controlPoints = this.generateBezierControlPoints(this.currentPosition, target);
+        const curve = new Bezier(
+            controlPoints.start.x, controlPoints.start.y,
+            controlPoints.cp1.x, controlPoints.cp1.y,
+            controlPoints.cp2.x, controlPoints.cp2.y,
+            controlPoints.end.x, controlPoints.end.y
+        );
+
+        // Generate points with velocity profile
+        const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
+
+        // Execute movement with phase-specific jitter
+        const effectiveJitter = jitterAmount * this.sessionJitterMultiplier;
+
+        for (let i = 0; i < points.length; i++) {
+            const jitteredPoint = this.addJitter(points[i], effectiveJitter);
+            await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
+            await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
+            await this.microDelay(12, 45);
+        }
+
+        this.currentPosition = target;
+    }
+
+    /**
+     * Investigate and click an element using gaze targets.
+     * Convenience method that calculates click point from bounding box.
+     *
+     * @param boundingBox - Element's bounding box
+     * @param gazeTargets - Array of GazeTarget objects from A11yNavigator
+     * @param role - Accessibility role for timing adjustment
+     * @param centerBias - How much to favor center for click point. Randomized 0.2-0.4 if not specified.
+     * @param config - Optional gaze configuration overrides
+     */
+    async investigateAndClickElement(
+        boundingBox: BoundingBox,
+        gazeTargets: GazeTarget[],
+        role: string = 'button',
+        centerBias?: number,
+        config?: Partial<GazeConfig>
+    ): Promise<void> {
+        // Calculate click point with randomized offset
+        const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
+        const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
+        const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
+
+        let clickPoint: Point = {
+            x: boundingBox.x + offsetX,
+            y: boundingBox.y + offsetY
+        };
+
+        // Safety clamp
+        clickPoint.x = Math.max(
+            boundingBox.x + 5,
+            Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
+        );
+        clickPoint.y = Math.max(
+            boundingBox.y + 5,
+            Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
+        );
+
+        // Extract points from gaze targets
+        const gazeAnchors = gazeTargets.map(t => t.point);
+
+        await this.investigateAndClick(clickPoint, gazeAnchors, role, config);
+    }
+
+    /**
+     * Get the session timing multiplier (for external coordination).
+     */
+    getSessionTimingMultiplier(): number {
+        return this.sessionTimingMultiplier;
     }
 }

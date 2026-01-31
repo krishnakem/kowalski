@@ -20,7 +20,52 @@ import { HumanScroll } from './HumanScroll.js';
 import { A11yNavigator } from './A11yNavigator.js';
 import { ContentVision } from './ContentVision.js';
 import { UsageService } from './UsageService.js';
-import { ExtractedPost, ScrapedSession } from '../../types/instagram.js';
+import { StrategicGaze } from './StrategicGaze.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+    ExtractedPost,
+    ScrapedSession,
+    BoundingBox,
+    ContentState,
+    GazeTarget
+} from '../../types/instagram.js';
+
+// ============================================================================
+// DEBUGGING & AUDIT TRAIL TYPES
+// ============================================================================
+
+/**
+ * Decision Block for audit trail logging.
+ * Each action is logged with its objective, state, rationale, and verification.
+ */
+interface DecisionBlock {
+    timestamp: string;
+    phase: 'SEARCH' | 'STORY' | 'FEED' | 'PROFILE' | 'CAROUSEL';
+    action: string;
+    objective: string;
+    currentState: {
+        view: string;
+        scrollPosition?: number;
+        visibleElements?: string[];
+        contentType?: string;
+    };
+    rationale: string;
+    verificationMarker: string;
+}
+
+/**
+ * Loop detection state for identifying stuck navigation.
+ */
+interface LoopDetectionState {
+    lastActions: Array<{
+        action: string;
+        coordinate?: { x: number; y: number };
+        scrollPosition?: number;
+        timestamp: number;
+    }>;
+    repeatCount: number;
+}
 
 /**
  * Search result captured during Active Search phase.
@@ -43,11 +88,25 @@ export class InstagramScraper {
     private scroll!: HumanScroll;
     private navigator!: A11yNavigator;
     private vision!: ContentVision;
+    private strategicGaze!: StrategicGaze;
     private page!: Page;
+
+    // Track current view for gaze planning
+    private lastKnownView: ContentState['currentView'] = 'unknown';
 
     // Metrics
     private visionApiCalls = 0;
     private skippedViewports = 0;
+
+    // =========================================================================
+    // DEBUGGING & LOOP DETECTION STATE
+    // =========================================================================
+    private loopDetection: LoopDetectionState = {
+        lastActions: [],
+        repeatCount: 0
+    };
+    private decisionLog: DecisionBlock[] = [];
+    private diagnosticsDir: string = '';
 
     constructor(context: BrowserContext, apiKey: string, usageCap: number, debugMode: boolean = false) {
         this.context = context;
@@ -97,6 +156,7 @@ export class InstagramScraper {
         this.scroll = new HumanScroll(this.page);
         this.navigator = new A11yNavigator(this.page);
         this.vision = new ContentVision(this.apiKey);
+        this.strategicGaze = new StrategicGaze(this.apiKey);
 
         // Enable visible cursor in debug mode
         if (this.debugMode) {
@@ -241,14 +301,26 @@ export class InstagramScraper {
             console.log(`🔍 Searching for: "${interest}"`);
 
             try {
-                // 1. Find and click Search button
+                // === DECISION LOGGING: Search Intent ===
+                const stateSummary = await this.getCurrentStateSummary();
+                this.logDecision({
+                    phase: 'SEARCH',
+                    action: `Search for "${interest}"`,
+                    objective: `Find content related to user interest: ${interest}`,
+                    currentState: stateSummary,
+                    rationale: `User specified "${interest}" as an interest. Searching to find relevant accounts and posts.`,
+                    verificationMarker: `Search results panel opens AND results for "${interest}" are visible`
+                });
+
+                // 1. Find and click Search button (with gaze simulation)
                 const searchButton = await this.navigator.findSearchButton();
                 if (!searchButton?.boundingBox) {
                     console.log('  ⚠️ Search button not found, skipping');
                     continue;
                 }
 
-                await this.ghost.clickElement(searchButton.boundingBox, 0.3);
+                // Use gaze-aware clicking for major UI interactions
+                await this.clickWithGaze(searchButton.boundingBox, 'link', 'search');
                 await this.humanDelay(1000, 2000);
 
                 // 2. Find search input and type interest
@@ -260,8 +332,8 @@ export class InstagramScraper {
                     continue;
                 }
 
-                // Click input to focus
-                await this.ghost.clickElement(searchInput.boundingBox, 0.5);
+                // Click input to focus (with gaze-aware timing for text input)
+                await this.ghost.clickElementWithRole(searchInput.boundingBox, 'searchbox', 0.5);
                 await this.humanDelay(300, 600);
 
                 // Human-like search: Type, wait for dropdown, click result
@@ -389,10 +461,10 @@ export class InstagramScraper {
             return stories;
         }
 
-        // Click first story using Ghost Mouse (with randomized offset)
+        // Click first story using gaze-aware clicking
         const firstStory = storyCircles[0];
         if (firstStory.boundingBox) {
-            await this.ghost.clickElement(firstStory.boundingBox, 0.3);
+            await this.clickWithGaze(firstStory.boundingBox, 'button', 'watch_story');
             await this.humanDelay(2000, 3000);  // Wait for story to load
         } else {
             console.log('  Could not click first story (no bounding box)');
@@ -471,8 +543,8 @@ export class InstagramScraper {
             await this.humanDelay(1000, 2000);
         }
 
-        // Exit stories (press Escape or click X)
-        await this.page.keyboard.press('Escape');
+        // Exit stories using CDP-based key press (undetectable)
+        await this.navigator.pressEscape();
         await this.humanDelay(1000, 2000);
 
         console.log(`✅ Stories complete. Watched ${stories.length} stories`);
@@ -532,15 +604,38 @@ export class InstagramScraper {
                 break;
             }
 
-            // MOVE: Human-like scroll (FREE) - extended pauses for 8-minute target
-            await this.scroll.scroll({
-                baseDistance: 300 + Math.random() * 200,
+            // === DECISION LOGGING: Feed Scroll ===
+            if (scrollCount % 3 === 0 || scrollCount === 0) {
+                const stateSummary = await this.getCurrentStateSummary();
+                this.logDecision({
+                    phase: 'FEED',
+                    action: `Scroll #${scrollCount + 1}`,
+                    objective: 'Discover new content by scrolling feed',
+                    currentState: stateSummary,
+                    rationale: `Content type is ${stateSummary.contentType || 'unknown'}. Adapting scroll distance and pause accordingly.`,
+                    verificationMarker: `ScrollY increases AND new posts become visible (not same posts as before)`
+                });
+            }
+
+            // Track for loop detection
+            const scrollPosBefore = await this.scroll.getScrollPosition();
+
+            // MOVE: Content-aware scroll (FREE) - adapts to text vs image content
+            const scrollResult = await this.scroll.scrollWithIntent(this.navigator, {
                 variability: 0.25,
-                microAdjustProb: 0.2,
-                readingPauseMs: [4000, 8000]
+                microAdjustProb: 0.2
+                // baseDistance and readingPauseMs determined by content density
             });
 
+            // Track action for loop detection
+            await this.trackActionForLoopDetection('scroll', undefined, scrollPosBefore);
+
             scrollCount++;
+
+            // Log content type occasionally
+            if (scrollCount % 5 === 1) {
+                console.log(`  📊 Content type: ${scrollResult.contentType} (scrolled ${scrollResult.scrollDistance}px)`);
+            }
 
             // CHECK: Is there content? (FREE - A11y check)
             const state = await this.navigator.getContentState();
@@ -673,11 +768,11 @@ export class InstagramScraper {
                 break;
             }
 
-            // === CLICK with retry logic ===
+            // === CLICK with retry logic (using role-specific timing) ===
             let navigationSucceeded = false;
             for (let attempt = 0; attempt < maxRetries; attempt++) {
-                // Click Next
-                await this.ghost.clickElement(nextButtonAfterHover.boundingBox, 0.3);
+                // Click Next with button-specific timing
+                await this.ghost.clickElementWithRole(nextButtonAfterHover.boundingBox, 'button', 0.3);
 
                 // === ANIMATION BUFFER: Wait for slide transition ===
                 // 1.5-3 second buffer for CSS transitions to complete (randomized)
@@ -824,9 +919,9 @@ export class InstagramScraper {
             const highlight = highlights[i];
             if (!highlight.boundingBox) continue;
 
-            // Click highlight
+            // Click highlight (with gaze-aware interaction for profile exploration)
             console.log(`    ✨ Opening highlight: "${highlight.name}"`);
-            await this.ghost.clickElement(highlight.boundingBox, 0.3);
+            await this.clickWithGaze(highlight.boundingBox, 'button');
             await this.humanDelay(2000, 3000);
 
             // Watch highlight for 30 seconds, capturing periodically
@@ -864,13 +959,176 @@ export class InstagramScraper {
                 await this.humanDelay(5000, 8000);
             }
 
-            // Exit highlight (Escape)
-            await this.page.keyboard.press('Escape');
+            // Exit highlight using CDP-based key press (undetectable)
+            await this.navigator.pressEscape();
             await this.humanDelay(1000, 1500);
         }
 
         console.log(`    👤 Profile deep-dive complete. Captured ${content.length} items`);
         return content;
+    }
+
+    // =========================================================================
+    // DEBUGGING & AUDIT TRAIL SYSTEM
+    // =========================================================================
+
+    /**
+     * Log a Decision Block to terminal and internal log.
+     * Provides conversational audit trail explaining the "Why" behind every "How".
+     */
+    private logDecision(decision: Omit<DecisionBlock, 'timestamp'>): void {
+        const block: DecisionBlock = {
+            ...decision,
+            timestamp: new Date().toISOString()
+        };
+
+        this.decisionLog.push(block);
+
+        // Terminal output with clear formatting
+        console.log('\n┌───────────────────────────────────────────────────────────────────');
+        console.log(`│ 📋 DECISION BLOCK [${block.phase}]`);
+        console.log('├───────────────────────────────────────────────────────────────────');
+        console.log(`│ 🎯 OBJECTIVE: ${block.objective}`);
+        console.log(`│ 📍 ACTION: ${block.action}`);
+        console.log(`│ 📊 STATE: View=${block.currentState.view}` +
+            (block.currentState.scrollPosition !== undefined ? `, ScrollY=${block.currentState.scrollPosition}px` : '') +
+            (block.currentState.contentType ? `, Content=${block.currentState.contentType}` : ''));
+        if (block.currentState.visibleElements && block.currentState.visibleElements.length > 0) {
+            console.log(`│ 👁️ VISIBLE: ${block.currentState.visibleElements.slice(0, 5).join(', ')}${block.currentState.visibleElements.length > 5 ? '...' : ''}`);
+        }
+        console.log(`│ 💭 RATIONALE: ${block.rationale}`);
+        console.log(`│ ✓ VERIFY: ${block.verificationMarker}`);
+        console.log('└───────────────────────────────────────────────────────────────────\n');
+    }
+
+    /**
+     * Track action for loop detection.
+     * If the same action is repeated 3 times without state change, trigger diagnostic.
+     */
+    private async trackActionForLoopDetection(
+        action: string,
+        coordinate?: { x: number; y: number },
+        scrollPosition?: number
+    ): Promise<void> {
+        const now = Date.now();
+
+        // Add to action history (keep last 10)
+        this.loopDetection.lastActions.push({
+            action,
+            coordinate,
+            scrollPosition,
+            timestamp: now
+        });
+
+        if (this.loopDetection.lastActions.length > 10) {
+            this.loopDetection.lastActions.shift();
+        }
+
+        // Check for repeated actions (last 3 actions identical)
+        const last3 = this.loopDetection.lastActions.slice(-3);
+        if (last3.length === 3) {
+            const allSame = last3.every(a => {
+                const first = last3[0];
+                const actionMatch = a.action === first.action;
+                const coordMatch = (!a.coordinate && !first.coordinate) ||
+                    (a.coordinate && first.coordinate &&
+                     Math.abs(a.coordinate.x - first.coordinate.x) < 50 &&
+                     Math.abs(a.coordinate.y - first.coordinate.y) < 50);
+                const scrollMatch = a.scrollPosition === undefined ||
+                    first.scrollPosition === undefined ||
+                    Math.abs((a.scrollPosition || 0) - (first.scrollPosition || 0)) < 50;
+
+                return actionMatch && coordMatch && scrollMatch;
+            });
+
+            if (allSame) {
+                this.loopDetection.repeatCount++;
+
+                if (this.loopDetection.repeatCount >= 3) {
+                    await this.triggerDiagnosticSnapshot(action, coordinate);
+                }
+            } else {
+                this.loopDetection.repeatCount = 0;
+            }
+        }
+    }
+
+    /**
+     * Trigger a diagnostic snapshot when a navigation loop is detected.
+     * Saves screenshot and A11y tree dump for debugging.
+     */
+    private async triggerDiagnosticSnapshot(
+        action: string,
+        coordinate?: { x: number; y: number }
+    ): Promise<void> {
+        console.log('\n⚠️ ═══════════════════════════════════════════════════════════════');
+        console.log('⚠️ NAVIGATION LOOP DETECTED');
+        console.log('⚠️ ═══════════════════════════════════════════════════════════════\n');
+
+        // Ensure diagnostics directory exists
+        if (!this.diagnosticsDir) {
+            this.diagnosticsDir = path.join(process.cwd(), 'diagnostics');
+            if (!fs.existsSync(this.diagnosticsDir)) {
+                fs.mkdirSync(this.diagnosticsDir, { recursive: true });
+            }
+        }
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+        try {
+            // Save screenshot
+            const screenshotPath = path.join(this.diagnosticsDir, `loop_detected_screen_${timestamp}.png`);
+            await this.page.screenshot({ path: screenshotPath, fullPage: false });
+            console.log(`📸 Screenshot saved: ${screenshotPath}`);
+
+            // Dump A11y tree
+            const a11yTree = await this.navigator.getFullAccessibilityTree();
+            const treePath = path.join(this.diagnosticsDir, `loop_diagnostic_tree_${timestamp}.json`);
+            fs.writeFileSync(treePath, JSON.stringify({
+                timestamp,
+                action,
+                coordinate,
+                repeatCount: this.loopDetection.repeatCount,
+                lastActions: this.loopDetection.lastActions,
+                decisionLog: this.decisionLog.slice(-10),
+                accessibilityTree: a11yTree.slice(0, 100)  // Limit to first 100 nodes
+            }, null, 2));
+            console.log(`📋 A11y tree dump saved: ${treePath}`);
+
+            // Throw descriptive error
+            const coordStr = coordinate ? `(${coordinate.x}, ${coordinate.y})` : 'N/A';
+            throw new Error(`Navigation Loop Detected: LLM repeated [${action}] at [${coordStr}] without page progress. Diagnostics saved to ${this.diagnosticsDir}`);
+
+        } catch (error: any) {
+            if (error.message.includes('Navigation Loop Detected')) {
+                throw error;  // Re-throw loop detection error
+            }
+            console.error('❌ Failed to save diagnostic snapshot:', error.message);
+        }
+    }
+
+    /**
+     * Get current state summary for decision logging.
+     */
+    private async getCurrentStateSummary(): Promise<DecisionBlock['currentState']> {
+        try {
+            const contentState = await this.navigator.getContentState();
+            const scrollPos = await this.scroll.getScrollPosition();
+            const contentDensity = await this.navigator.analyzeContentDensity();
+
+            // Get visible elements (limited for performance)
+            const gazeTargets = await this.navigator.findGazeTargets(5);
+            const visibleElements = gazeTargets.map(t => `${t.role}:${t.label.slice(0, 20)}`);
+
+            return {
+                view: contentState.currentView,
+                scrollPosition: scrollPos,
+                contentType: contentDensity.type,
+                visibleElements
+            };
+        } catch {
+            return { view: 'unknown' };
+        }
     }
 
     // =========================================================================
@@ -887,6 +1145,9 @@ export class InstagramScraper {
                 waitUntil: 'domcontentloaded'
             });
             await this.humanDelay(2000, 3000);
+            // Reset gaze planning for new view
+            this.strategicGaze.reset();
+            this.lastKnownView = 'feed';
         }
     }
 
@@ -896,5 +1157,128 @@ export class InstagramScraper {
     private humanDelay(min: number, max: number): Promise<void> {
         const delay = min + Math.random() * (max - min);
         return new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    // =========================================================================
+    // GAZE-AWARE INTERACTION METHODS
+    // =========================================================================
+
+    /**
+     * Click an element with human-like gaze simulation.
+     *
+     * This implements the "Look, then Move" pattern:
+     * 1. Check if view changed (triggers LLM gaze planning)
+     * 2. Find nearby visually interesting elements (gaze anchors)
+     * 3. Execute gaze-lag movement: scan anchors → ballistic → corrective → click
+     *
+     * Falls back to normal clicking if gaze planning fails.
+     *
+     * @param boundingBox - Element to click
+     * @param role - Accessibility role for timing adjustment
+     * @param action - Optional action description for intent inference
+     */
+    private async clickWithGaze(
+        boundingBox: BoundingBox,
+        role: string = 'button',
+        action?: string
+    ): Promise<void> {
+        try {
+            // Check current view for potential gaze strategy update
+            const currentState = await this.navigator.getContentState();
+            const currentView = currentState.currentView;
+
+            // Get gaze targets - either from LLM or deterministic fallback
+            let gazeTargets: GazeTarget[] = [];
+
+            // Only plan gaze on view transitions
+            if (currentView !== this.lastKnownView) {
+                this.lastKnownView = currentView;
+
+                // Try LLM-based gaze planning (only on major view changes)
+                const intent = StrategicGaze.inferIntent(currentView, action);
+                const spatialMap = await this.navigator.getSpatialMap(15);
+
+                if (spatialMap.length > 0) {
+                    const strategy = await this.strategicGaze.planGazeStrategy(
+                        currentView,
+                        spatialMap,
+                        intent
+                    );
+
+                    if (strategy && strategy.gazeAnchors.length > 0) {
+                        // Convert normalized coordinates to screen pixels
+                        const viewport = await this.navigator.getViewportInfo();
+                        const denormalized = this.strategicGaze.denormalizeStrategy(
+                            strategy,
+                            viewport.width,
+                            viewport.height
+                        );
+
+                        // Convert to GazeTarget format (we only have points from LLM)
+                        gazeTargets = denormalized.gazeAnchors.map(point => ({
+                            point,
+                            role: 'unknown',
+                            label: 'LLM anchor',
+                            salience: strategy.confidence,
+                            boundingBox: { x: point.x - 10, y: point.y - 10, width: 20, height: 20 }
+                        }));
+
+                        console.log(`  👁️ Gaze strategy: ${gazeTargets.length} anchors (LLM confidence: ${strategy.confidence.toFixed(2)})`);
+                    }
+                }
+            }
+
+            // If no LLM strategy, use deterministic gaze target detection
+            if (gazeTargets.length === 0) {
+                gazeTargets = await this.navigator.findGazeTargets(2);
+                if (gazeTargets.length > 0) {
+                    console.log(`  👁️ Gaze targets: ${gazeTargets.length} (deterministic)`);
+                }
+            }
+
+            // Calculate primary target point (center of bounding box with slight offset)
+            const primaryTarget = {
+                x: boundingBox.x + boundingBox.width / 2,
+                y: boundingBox.y + boundingBox.height / 2
+            };
+
+            // === DEBUG: Draw Gaze Overlay in headed mode ===
+            if (this.debugMode && gazeTargets.length > 0) {
+                await this.navigator.drawGazeOverlay(gazeTargets, primaryTarget, true);
+            }
+
+            // Execute gaze-aware click
+            if (gazeTargets.length > 0) {
+                await this.ghost.investigateAndClickElement(
+                    boundingBox,
+                    gazeTargets,
+                    role,
+                    0.3  // centerBias
+                );
+            } else {
+                // Fallback to normal click with role-specific timing
+                await this.ghost.clickElementWithRole(boundingBox, role, 0.3);
+            }
+
+        } catch (error) {
+            // On any error, fall back to simple click
+            console.warn('  ⚠️ Gaze-aware click failed, using fallback:', error);
+            await this.ghost.clickElement(boundingBox, 0.3);
+        }
+    }
+
+    /**
+     * Scroll with content-aware timing.
+     * Uses the HumanScroll.scrollWithIntent for intelligent scroll behavior.
+     *
+     * @param config - Optional scroll configuration overrides
+     */
+    private async scrollWithIntent(config?: {
+        baseDistance?: number;
+        variability?: number;
+        microAdjustProb?: number;
+        readingPauseMs?: [number, number];
+    }): Promise<{ contentType: string; scrollDistance: number }> {
+        return this.scroll.scrollWithIntent(this.navigator, config);
     }
 }

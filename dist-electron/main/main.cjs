@@ -2132,7 +2132,7 @@ var Bezier = class _Bezier {
       }
       return s;
     }).reverse();
-    const fs5 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils.makeline(bs, fs5), le = utils.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
+    const fs6 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils.makeline(bs, fs6), le = utils.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
     return new PolyBezier(segments);
   }
   outlineshapes(d1, d2, curveIntersectionThreshold) {
@@ -2274,10 +2274,13 @@ var GhostMouse = class {
   // This ensures timing patterns vary across sessions, defeating pattern analysis
   sessionTimingMultiplier;
   sessionJitterMultiplier;
+  // Session-level hesitation probability (3-7% per session, not fixed 5%)
+  sessionHesitationProb;
   constructor(page) {
     this.page = page;
     this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
     this.sessionJitterMultiplier = 0.6 + Math.random() * 0.8;
+    this.sessionHesitationProb = 0.03 + Math.random() * 0.04;
   }
   /**
    * Enable visible cursor for debugging.
@@ -2345,9 +2348,11 @@ var GhostMouse = class {
       const jitteredPoint = this.addJitter(points[i], effectiveJitter);
       await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
       await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
-      await this.microDelay(12, 45);
-      if (i > 0 && i < points.length - 1 && Math.random() < 0.05) {
-        await this.microDelay(80, 200);
+      const baseMin = 12 * this.sessionTimingMultiplier;
+      const baseMax = 45 * this.sessionTimingMultiplier;
+      await this.microDelay(baseMin, baseMax);
+      if (i > 0 && i < points.length - 1 && Math.random() < this.sessionHesitationProb) {
+        await this.microDelay(80 * this.sessionTimingMultiplier, 200 * this.sessionTimingMultiplier);
       }
     }
     if (Math.random() < overshootProbability) {
@@ -2506,11 +2511,12 @@ var GhostMouse = class {
    *
    * @param boundingBox - Element's bounding box
    * @param durationMs - How long to hover
-   * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center)
+   * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
    */
-  async hoverElement(boundingBox, durationMs = 1e3, centerBias = 0.3) {
-    const offsetX = this.gaussianRandom(centerBias) * boundingBox.width;
-    const offsetY = this.gaussianRandom(centerBias) * boundingBox.height;
+  async hoverElement(boundingBox, durationMs = 1e3, centerBias) {
+    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
+    const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
+    const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
     let hoverPoint = {
       x: boundingBox.x + offsetX,
       y: boundingBox.y + offsetY
@@ -2530,11 +2536,12 @@ var GhostMouse = class {
    * Humans NEVER click exactly in the center of buttons.
    *
    * @param boundingBox - Element's bounding box
-   * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center)
+   * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
    */
-  async clickElement(boundingBox, centerBias = 0.3) {
-    const offsetX = this.gaussianRandom(centerBias) * boundingBox.width;
-    const offsetY = this.gaussianRandom(centerBias) * boundingBox.height;
+  async clickElement(boundingBox, centerBias) {
+    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
+    const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
+    const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
     let clickPoint = {
       x: boundingBox.x + offsetX,
       y: boundingBox.y + offsetY
@@ -2550,19 +2557,27 @@ var GhostMouse = class {
     await this.click(clickPoint);
   }
   /**
+   * Get a randomized center bias value (0.2-0.4 range).
+   * Avoids using fixed 0.3 which creates detectable patterns.
+   */
+  getRandomizedCenterBias() {
+    return 0.2 + Math.random() * 0.2;
+  }
+  /**
    * Generate a random number between 0 and 1 with gaussian-like distribution.
    * centerBias: 0.0 = uniform distribution, 1.0 = always 0.5 (center)
    *
    * This mimics human click patterns: usually near center, but with natural variation.
    */
-  gaussianRandom(centerBias = 0.3) {
+  gaussianRandom(centerBias) {
+    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
     const u1 = Math.random();
     const u2 = Math.random();
     const gaussian = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
     const normalized = gaussian / 6 + 0.5;
     const clamped = Math.max(0.1, Math.min(0.9, normalized));
     const uniform = 0.1 + Math.random() * 0.8;
-    return clamped * centerBias + uniform * (1 - centerBias);
+    return clamped * effectiveBias + uniform * (1 - effectiveBias);
   }
   /**
    * Small random delay for human-like timing variation.
@@ -2586,13 +2601,253 @@ var GhostMouse = class {
   setPosition(position) {
     this.currentPosition = { ...position };
   }
+  // =========================================================================
+  // Gaze-Lag Execution System (Human-like "Look, then Move")
+  // =========================================================================
+  /**
+   * Randomized value within a range - NO fixed values allowed.
+   */
+  randomInRange(min2, max2) {
+    return min2 + Math.random() * (max2 - min2);
+  }
+  /**
+   * Default gaze configuration with all randomized ranges.
+   */
+  getDefaultGazeConfig() {
+    return {
+      enabled: true,
+      saccadicLatency: [280, 420],
+      // Human eye-to-hand reaction time
+      fixationPause: [200, 500],
+      // Visual fixation at gaze points
+      ballisticSplit: [0.75, 0.85],
+      // 75-85% of distance is ballistic
+      scanningSpeed: [2, 4],
+      // Slow, deliberate scanning
+      ballisticSpeed: [8, 12],
+      // Fast, committed movement
+      correctiveSpeed: [1, 3],
+      // Slow, precise final approach
+      scanningJitter: [1.5, 2.5],
+      // Relaxed hand
+      ballisticJitter: [0.5, 1.5],
+      // Minimal - focused movement
+      correctiveJitter: [2.5, 4.5]
+      // Increased - fine motor tension
+    };
+  }
+  /**
+   * Get element-specific hover duration based on role.
+   * Different element types require different amounts of visual processing.
+   *
+   * @param role - The accessibility role of the element
+   * @returns Randomized hover duration in milliseconds
+   */
+  getHoverDurationForRole(role) {
+    const roleLower = role.toLowerCase();
+    const ranges = {
+      button: [50, 150],
+      // Large, easy targets
+      link: [150, 300],
+      // Precision required
+      textbox: [200, 400],
+      // Cognitive preparation for typing
+      searchbox: [200, 400],
+      // Same as textbox
+      combobox: [180, 350],
+      // Dropdown interaction
+      image: [100, 250],
+      // Visual inspection
+      img: [100, 250],
+      // Same as image
+      menuitem: [120, 280],
+      // Menu navigation
+      tab: [100, 220],
+      // Tab switching
+      checkbox: [80, 180],
+      // Quick toggle
+      radio: [80, 180]
+      // Quick selection
+    };
+    const [min2, max2] = ranges[roleLower] || [100, 300];
+    return this.randomInRange(min2, max2) * this.sessionTimingMultiplier;
+  }
+  /**
+   * Human-like click with element-specific timing.
+   * Varies pre-click hover based on element role.
+   *
+   * @param target - Point to click
+   * @param role - Accessibility role for timing adjustment
+   */
+  async clickWithRole(target, role = "button") {
+    await this.moveTo(target);
+    const hoverDuration = this.getHoverDurationForRole(role);
+    await new Promise((r) => setTimeout(r, hoverDuration));
+    await this.page.mouse.down();
+    await this.microDelay(50, 150);
+    await this.page.mouse.up();
+    await this.microDelay(200, 500);
+  }
+  /**
+   * Click an element with gaze-aware role-specific timing.
+   *
+   * @param boundingBox - Element's bounding box
+   * @param role - Accessibility role for timing adjustment
+   * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
+   */
+  async clickElementWithRole(boundingBox, role = "button", centerBias) {
+    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
+    const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
+    const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
+    let clickPoint = {
+      x: boundingBox.x + offsetX,
+      y: boundingBox.y + offsetY
+    };
+    clickPoint.x = Math.max(
+      boundingBox.x + 5,
+      Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
+    );
+    clickPoint.y = Math.max(
+      boundingBox.y + 5,
+      Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
+    );
+    await this.clickWithRole(clickPoint, role);
+  }
+  /**
+   * Investigate and click: Human-like "Look, then Move" sequence.
+   *
+   * This implements the Hybrid Gaze-Physics System:
+   * - Phase 0: Saccadic latency (280-420ms wait before movement)
+   * - Phase 1: Scanning (move to gaze anchors, pause at each)
+   * - Phase 2: Ballistic (fast movement covering 75-85% of distance)
+   * - Phase 3: Corrective (slow, jittery final approach with Fitts's Law)
+   *
+   * @param target - The final click target
+   * @param gazeAnchors - 1-2 "distractor" points to look at first
+   * @param role - Accessibility role for timing adjustment
+   * @param config - Optional gaze configuration overrides
+   */
+  async investigateAndClick(target, gazeAnchors, role = "button", config) {
+    const cfg = { ...this.getDefaultGazeConfig(), ...config };
+    if (!cfg.enabled || gazeAnchors.length === 0) {
+      await this.clickWithRole(target, role);
+      return;
+    }
+    const saccadicDelay = this.randomInRange(cfg.saccadicLatency[0], cfg.saccadicLatency[1]);
+    await new Promise((r) => setTimeout(r, saccadicDelay * this.sessionTimingMultiplier));
+    for (const anchor of gazeAnchors.slice(0, 2)) {
+      await this.moveToWithPhaseConfig(
+        anchor,
+        cfg.scanningSpeed,
+        cfg.scanningJitter
+      );
+      const fixationTime = this.randomInRange(cfg.fixationPause[0], cfg.fixationPause[1]);
+      await new Promise((r) => setTimeout(r, fixationTime * this.sessionTimingMultiplier));
+    }
+    const lastPosition = gazeAnchors.length > 0 ? gazeAnchors[gazeAnchors.length - 1] : this.currentPosition;
+    const ballisticRatio = this.randomInRange(cfg.ballisticSplit[0], cfg.ballisticSplit[1]);
+    const ballisticTarget = {
+      x: lastPosition.x + (target.x - lastPosition.x) * ballisticRatio,
+      y: lastPosition.y + (target.y - lastPosition.y) * ballisticRatio
+    };
+    await this.moveToWithPhaseConfig(
+      ballisticTarget,
+      cfg.ballisticSpeed,
+      cfg.ballisticJitter
+    );
+    await this.moveToWithPhaseConfig(
+      target,
+      cfg.correctiveSpeed,
+      cfg.correctiveJitter
+    );
+    const hoverDuration = this.getHoverDurationForRole(role);
+    await new Promise((r) => setTimeout(r, hoverDuration));
+    await this.page.mouse.down();
+    await this.microDelay(50, 150);
+    await this.page.mouse.up();
+    await this.microDelay(200, 500);
+    this.currentPosition = target;
+  }
+  /**
+   * Move to target with specific speed and jitter configuration.
+   * Used internally by investigateAndClick for phase-specific movement.
+   */
+  async moveToWithPhaseConfig(target, speedRange, jitterRange) {
+    const minSpeed = this.randomInRange(speedRange[0], speedRange[1] * 0.6);
+    const maxSpeed = this.randomInRange(speedRange[0] * 1.4, speedRange[1]);
+    const jitterAmount = this.randomInRange(jitterRange[0], jitterRange[1]);
+    const controlPoints = this.generateBezierControlPoints(this.currentPosition, target);
+    const curve = new Bezier(
+      controlPoints.start.x,
+      controlPoints.start.y,
+      controlPoints.cp1.x,
+      controlPoints.cp1.y,
+      controlPoints.cp2.x,
+      controlPoints.cp2.y,
+      controlPoints.end.x,
+      controlPoints.end.y
+    );
+    const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
+    const effectiveJitter = jitterAmount * this.sessionJitterMultiplier;
+    for (let i = 0; i < points.length; i++) {
+      const jitteredPoint = this.addJitter(points[i], effectiveJitter);
+      await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
+      await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
+      await this.microDelay(12, 45);
+    }
+    this.currentPosition = target;
+  }
+  /**
+   * Investigate and click an element using gaze targets.
+   * Convenience method that calculates click point from bounding box.
+   *
+   * @param boundingBox - Element's bounding box
+   * @param gazeTargets - Array of GazeTarget objects from A11yNavigator
+   * @param role - Accessibility role for timing adjustment
+   * @param centerBias - How much to favor center for click point. Randomized 0.2-0.4 if not specified.
+   * @param config - Optional gaze configuration overrides
+   */
+  async investigateAndClickElement(boundingBox, gazeTargets, role = "button", centerBias, config) {
+    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
+    const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
+    const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
+    let clickPoint = {
+      x: boundingBox.x + offsetX,
+      y: boundingBox.y + offsetY
+    };
+    clickPoint.x = Math.max(
+      boundingBox.x + 5,
+      Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
+    );
+    clickPoint.y = Math.max(
+      boundingBox.y + 5,
+      Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
+    );
+    const gazeAnchors = gazeTargets.map((t2) => t2.point);
+    await this.investigateAndClick(clickPoint, gazeAnchors, role, config);
+  }
+  /**
+   * Get the session timing multiplier (for external coordination).
+   */
+  getSessionTimingMultiplier() {
+    return this.sessionTimingMultiplier;
+  }
 };
 
 // src/main/services/HumanScroll.ts
 var HumanScroll = class {
   page;
+  // Session-level timing multiplier for cross-session variance
+  sessionTimingMultiplier;
   constructor(page) {
     this.page = page;
+    this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
+  }
+  /**
+   * Randomized value within a range - NO fixed values allowed.
+   */
+  randomInRange(min2, max2) {
+    return min2 + Math.random() * (max2 - min2);
   }
   // =========================================================================
   // CDP Helper Methods (Undetectable)
@@ -2789,13 +3044,136 @@ var HumanScroll = class {
         }))`);
     return result ?? { width: 0, height: 0, scrollHeight: 0 };
   }
+  // =========================================================================
+  // Intent-Driven Scrolling (Content-Aware)
+  // =========================================================================
+  /**
+   * Get scroll parameters based on content type.
+   * Text-heavy content = smaller scrolls, longer pauses
+   * Image-heavy content = larger scrolls, shorter pauses
+   *
+   * All values are randomized within ranges - NO fixed values.
+   */
+  getScrollParamsForContent(contentType) {
+    const params = {
+      "text-heavy": {
+        distance: [200, 300],
+        // Smaller scrolls for reading
+        pause: [3e3, 6e3]
+        // Longer pauses to read
+      },
+      "image-heavy": {
+        distance: [500, 700],
+        // Larger scrolls for visual scanning
+        pause: [1500, 3e3]
+        // Shorter pauses (quick visual scan)
+      },
+      "mixed": {
+        distance: [350, 450],
+        // Balanced scrolls
+        pause: [2e3, 5e3]
+        // Moderate pauses
+      }
+    };
+    const { distance, pause } = params[contentType];
+    return {
+      distance: this.randomInRange(distance[0], distance[1]) * this.sessionTimingMultiplier,
+      pauseMs: [
+        pause[0] * this.sessionTimingMultiplier,
+        pause[1] * this.sessionTimingMultiplier
+      ]
+    };
+  }
+  /**
+   * Intent-driven scroll that adapts to content density.
+   *
+   * This is the "smart" scroll that:
+   * 1. Analyzes the current viewport content via A11y tree
+   * 2. Adjusts scroll distance based on content type
+   * 3. Adjusts reading pause based on content density
+   * 4. AUDIT: Logs scroll delta and verifies scroll actually occurred
+   *
+   * @param navigator - A11yNavigator instance for content analysis
+   * @param config - Optional scroll configuration overrides
+   */
+  async scrollWithIntent(navigator, config = {}) {
+    const contentDensity = await navigator.analyzeContentDensity();
+    const contentType = contentDensity.type;
+    const adaptiveParams = this.getScrollParamsForContent(contentType);
+    const {
+      baseDistance = adaptiveParams.distance,
+      variability = 0.3,
+      microAdjustProb = 0.25,
+      readingPauseMs = adaptiveParams.pauseMs
+    } = config;
+    const variation = 1 + (Math.random() - 0.5) * 2 * variability;
+    const targetDistance = Math.round(baseDistance * variation);
+    const scrollYBefore = await this.getScrollPosition();
+    await this.smoothScrollWithEasing(targetDistance);
+    const scrollYAfter = await this.getScrollPosition();
+    const actualDelta = scrollYAfter - scrollYBefore;
+    console.log(`  \u{1F4DC} SCROLL AUDIT: Target=${targetDistance}px, Actual Delta=${actualDelta}px, ContentType=${contentType}`);
+    console.log(`  \u{1F4CA} Session Multiplier: ${this.sessionTimingMultiplier.toFixed(2)}x, Pause Range: [${Math.round(readingPauseMs[0])}-${Math.round(readingPauseMs[1])}]ms`);
+    let scrollFailed = false;
+    if (actualDelta === 0 && targetDistance > 50) {
+      console.log("  \u26A0\uFE0F CRITICAL WARNING: Scroll Failed - Page may be stuck or reached bottom!");
+      console.log(`  \u26A0\uFE0F ScrollY unchanged at ${scrollYBefore}px after attempting ${targetDistance}px scroll`);
+      scrollFailed = true;
+    } else if (Math.abs(actualDelta) < targetDistance * 0.3) {
+      console.log(`  \u26A0\uFE0F WARNING: Scroll undershot significantly (${Math.round(actualDelta / targetDistance * 100)}% of target)`);
+    }
+    const adjustedMicroProb = contentType === "text-heavy" ? microAdjustProb * 1.3 : contentType === "image-heavy" ? microAdjustProb * 0.7 : microAdjustProb;
+    if (Math.random() < adjustedMicroProb) {
+      await this.microAdjust();
+    }
+    const pauseDuration = this.randomInRange(readingPauseMs[0], readingPauseMs[1]);
+    console.log(`  \u23F1\uFE0F Reading pause: ${Math.round(pauseDuration)}ms`);
+    await new Promise((resolve) => setTimeout(resolve, pauseDuration));
+    return {
+      contentType,
+      scrollDistance: targetDistance,
+      actualDelta,
+      scrollFailed
+    };
+  }
+  /**
+   * Multiple intent-driven scrolls with cumulative content analysis.
+   * Useful for browsing sessions where content type may change.
+   *
+   * @param navigator - A11yNavigator instance for content analysis
+   * @param count - Number of scrolls to perform
+   * @param config - Optional scroll configuration overrides
+   */
+  async scrollMultipleWithIntent(navigator, count, config = {}) {
+    const contentTypes = [];
+    let totalDistance = 0;
+    for (let i = 0; i < count; i++) {
+      const result = await this.scrollWithIntent(navigator, config);
+      contentTypes.push(result.contentType);
+      totalDistance += result.scrollDistance;
+    }
+    return {
+      scrollCount: count,
+      contentTypes,
+      totalDistance
+    };
+  }
+  /**
+   * Get the session timing multiplier (for external coordination).
+   */
+  getSessionTimingMultiplier() {
+    return this.sessionTimingMultiplier;
+  }
 };
 
 // src/main/services/A11yNavigator.ts
 var A11yNavigator = class {
   page;
+  // Session-level timing multiplier for cross-session variance in typing delays
+  sessionTimingMultiplier;
   constructor(page) {
     this.page = page;
+    this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
   }
   /**
    * Get content state by analyzing URL only.
@@ -3532,9 +3910,19 @@ var A11yNavigator = class {
     try {
       cdpSession = await this.page.context().newCDPSession(this.page);
       if (humanLike) {
+        const vowels = "aeiouAEIOU";
+        const punctuation = `.,!?;:'"()[]{}`;
         for (const char of text) {
           await cdpSession.send("Input.insertText", { text: char });
-          await new Promise((r) => setTimeout(r, 50 + Math.random() * 100));
+          let baseDelay = (50 + Math.random() * 100) * this.sessionTimingMultiplier;
+          if (vowels.includes(char)) {
+            baseDelay *= 0.8 + Math.random() * 0.2;
+          } else if (punctuation.includes(char)) {
+            baseDelay *= 1.2 + Math.random() * 0.3;
+          } else if (char === " ") {
+            baseDelay *= 0.6 + Math.random() * 0.2;
+          }
+          await new Promise((r) => setTimeout(r, baseDelay));
         }
       } else {
         await cdpSession.send("Input.insertText", { text });
@@ -3748,6 +4136,403 @@ var A11yNavigator = class {
         await cdpSession.detach().catch(() => {
         });
       }
+    }
+  }
+  // =========================================================================
+  // Gaze Simulation Methods (Human-like Visual Attention)
+  // =========================================================================
+  /**
+   * Randomized value within a range - NO fixed values allowed.
+   */
+  randomInRange(min2, max2) {
+    return min2 + Math.random() * (max2 - min2);
+  }
+  /**
+   * Score an element's visual salience (how likely a human would look at it).
+   * Higher scores = more visually interesting.
+   *
+   * Scoring factors:
+   * - Role priority: image > button > link > heading > text
+   * - Position: Center-weighted (elements near viewport center score higher)
+   * - Size: Larger elements = more visually prominent
+   * - Uniqueness: Common labels ("Like", "Share") score lower
+   */
+  scoreElementSalience(node, box, viewportWidth, viewportHeight) {
+    let score = 0;
+    const role = node.role?.value?.toLowerCase() || "";
+    const name = (node.name?.value || "").toLowerCase();
+    const roleScores = {
+      "image": [0.7, 0.9],
+      "img": [0.7, 0.9],
+      "figure": [0.65, 0.85],
+      "button": [0.5, 0.7],
+      "link": [0.4, 0.6],
+      "heading": [0.35, 0.55],
+      "text": [0.2, 0.4],
+      "statictext": [0.15, 0.35]
+    };
+    const [minRole, maxRole] = roleScores[role] || [0.1, 0.3];
+    score += this.randomInRange(minRole, maxRole);
+    const centerX = viewportWidth / 2;
+    const centerY = viewportHeight / 2;
+    const elementCenterX = box.x + box.width / 2;
+    const elementCenterY = box.y + box.height / 2;
+    const distX = Math.abs(elementCenterX - centerX) / centerX;
+    const distY = Math.abs(elementCenterY - centerY) / centerY;
+    const centerDistance = Math.sqrt(distX * distX + distY * distY) / Math.sqrt(2);
+    score += this.randomInRange(0.1, 0.3) * (1 - centerDistance);
+    const area = box.width * box.height;
+    const viewportArea = viewportWidth * viewportHeight;
+    const sizeRatio = Math.min(area / viewportArea, 0.3);
+    score += this.randomInRange(0.05, 0.15) * (sizeRatio / 0.3);
+    const commonLabels = ["like", "comment", "share", "save", "more", "follow", "following"];
+    if (commonLabels.some((label) => name.includes(label))) {
+      score *= this.randomInRange(0.4, 0.6);
+    }
+    if (name.includes("#") || name.includes("@")) {
+      score *= this.randomInRange(1.1, 1.3);
+    }
+    return Math.min(score, 1);
+  }
+  /**
+   * Find visually interesting elements for gaze simulation.
+   * Returns elements sorted by visual salience (most interesting first).
+   *
+   * @param maxTargets - Maximum number of gaze targets to return (1-5)
+   * @returns Array of GazeTarget objects with coordinates and salience scores
+   */
+  async findGazeTargets(maxTargets = 3) {
+    const targets = [];
+    const nodes = await this.getAccessibilityTree();
+    const viewport = await this.getViewportInfo();
+    const visualNodes = nodes.filter((node) => {
+      if (node.ignored) return false;
+      const role = node.role?.value?.toLowerCase() || "";
+      const visualRoles = ["image", "img", "figure", "button", "link", "heading"];
+      return visualRoles.includes(role) && node.backendDOMNodeId;
+    });
+    if (visualNodes.length === 0) {
+      return targets;
+    }
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      const scoredNodes = [];
+      for (const node of visualNodes.slice(0, 30)) {
+        if (!node.backendDOMNodeId) continue;
+        const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+        if (!box || box.width <= 0 || box.height <= 0) continue;
+        if (box.y + box.height < 0 || box.y > viewport.height) continue;
+        if (box.x + box.width < 0 || box.x > viewport.width) continue;
+        const salience = this.scoreElementSalience(
+          node,
+          box,
+          viewport.width,
+          viewport.height
+        );
+        scoredNodes.push({ node, box, salience });
+      }
+      scoredNodes.sort((a, b) => b.salience - a.salience);
+      const usedPositions = [];
+      const minDistance = 100;
+      for (const scored of scoredNodes) {
+        if (targets.length >= maxTargets) break;
+        const centerX = scored.box.x + scored.box.width / 2;
+        const centerY = scored.box.y + scored.box.height / 2;
+        const tooClose = usedPositions.some((pos) => {
+          const dist = Math.hypot(pos.x - centerX, pos.y - centerY);
+          return dist < minDistance;
+        });
+        if (!tooClose) {
+          const jitterX = this.randomInRange(-10, 10);
+          const jitterY = this.randomInRange(-10, 10);
+          targets.push({
+            point: {
+              x: Math.round(centerX + jitterX),
+              y: Math.round(centerY + jitterY)
+            },
+            role: scored.node.role?.value || "unknown",
+            label: (scored.node.name?.value || "").slice(0, 50),
+            salience: scored.salience,
+            boundingBox: scored.box
+          });
+          usedPositions.push({ x: centerX, y: centerY });
+        }
+      }
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+    return targets;
+  }
+  /**
+   * Analyze content density for intent-driven scrolling.
+   * Determines if viewport is text-heavy, image-heavy, or mixed.
+   *
+   * @returns ContentDensity with type classification and counts
+   */
+  async analyzeContentDensity() {
+    const nodes = await this.getAccessibilityTree();
+    const textRoles = ["paragraph", "text", "heading", "statictext", "label"];
+    const textNodes = nodes.filter((node) => {
+      if (node.ignored) return false;
+      const role = node.role?.value?.toLowerCase() || "";
+      return textRoles.includes(role);
+    });
+    const imageRoles = ["image", "img", "figure", "graphics-symbol"];
+    const imageNodes = nodes.filter((node) => {
+      if (node.ignored) return false;
+      const role = node.role?.value?.toLowerCase() || "";
+      return imageRoles.includes(role);
+    });
+    const textCount = textNodes.length;
+    const imageCount = imageNodes.length;
+    const total = textCount + imageCount;
+    const textRatio = total > 0 ? textCount / total : 0.5;
+    const textHeavyThreshold = this.randomInRange(0.65, 0.75);
+    const imageHeavyThreshold = this.randomInRange(0.25, 0.35);
+    let type;
+    if (textRatio > textHeavyThreshold) {
+      type = "text-heavy";
+    } else if (textRatio < imageHeavyThreshold) {
+      type = "image-heavy";
+    } else {
+      type = "mixed";
+    }
+    return {
+      type,
+      textCount,
+      imageCount,
+      textRatio
+    };
+  }
+  /**
+   * Get spatial map of elements for LLM gaze planning.
+   * Returns a token-efficient representation with normalized coordinates.
+   *
+   * Coordinates are normalized to 0-1000 range for token efficiency.
+   *
+   * @param maxNodes - Maximum number of nodes to include
+   * @returns Array of SpatialNode objects
+   */
+  async getSpatialMap(maxNodes = 20) {
+    const spatialNodes = [];
+    const nodes = await this.getAccessibilityTree();
+    const viewport = await this.getViewportInfo();
+    const relevantNodes = nodes.filter((node) => {
+      if (node.ignored) return false;
+      const role = node.role?.value?.toLowerCase() || "";
+      const relevantRoles = [
+        "button",
+        "link",
+        "image",
+        "img",
+        "figure",
+        "heading",
+        "textbox",
+        "searchbox",
+        "menuitem"
+      ];
+      return relevantRoles.includes(role) && node.backendDOMNodeId;
+    });
+    if (relevantNodes.length === 0) {
+      return spatialNodes;
+    }
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      for (const node of relevantNodes.slice(0, maxNodes)) {
+        if (!node.backendDOMNodeId) continue;
+        const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+        if (!box || box.width <= 0 || box.height <= 0) continue;
+        if (box.y + box.height < 0 || box.y > viewport.height) continue;
+        const normalizeX = (x) => Math.round(x / viewport.width * 1e3);
+        const normalizeY = (y) => Math.round(y / viewport.height * 1e3);
+        spatialNodes.push({
+          role: node.role?.value || "unknown",
+          label: (node.name?.value || "").slice(0, 20),
+          // Truncate for token efficiency
+          x: normalizeX(box.x),
+          y: normalizeY(box.y),
+          w: normalizeX(box.width),
+          h: normalizeY(box.height)
+        });
+      }
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+    return spatialNodes;
+  }
+  /**
+   * Expose getAccessibilityTree for external use (e.g., by HumanScroll).
+   * Returns the raw CDP accessibility tree.
+   */
+  async getFullAccessibilityTree() {
+    return this.getAccessibilityTree();
+  }
+  // =========================================================================
+  // DEBUG: GAZE OVERLAY VISUALIZATION
+  // =========================================================================
+  /**
+   * Draw temporary visual overlay showing gaze targets and primary target.
+   * Only works in headed mode. Uses page.evaluate (detectable) - DEBUG ONLY.
+   *
+   * Draws:
+   * - Red circles for gaze anchor points
+   * - Green circle for primary click target
+   * - Labels with role/salience info
+   *
+   * Overlays auto-remove after 2 seconds.
+   *
+   * @param gazeTargets - Gaze anchor points (red circles)
+   * @param primaryTarget - Primary click target (green circle)
+   * @param showLabels - Whether to show role/salience labels
+   */
+  async drawGazeOverlay(gazeTargets, primaryTarget, showLabels = true) {
+    try {
+      await this.page.evaluate(({ targets, primary, labels }) => {
+        const existingOverlay = document.getElementById("kowalski-gaze-overlay");
+        if (existingOverlay) {
+          existingOverlay.remove();
+        }
+        const overlay = document.createElement("div");
+        overlay.id = "kowalski-gaze-overlay";
+        overlay.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    pointer-events: none;
+                    z-index: 999999;
+                `;
+        targets.forEach((target, index) => {
+          const circle = document.createElement("div");
+          circle.style.cssText = `
+                        position: absolute;
+                        left: ${target.point.x - 15}px;
+                        top: ${target.point.y - 15}px;
+                        width: 30px;
+                        height: 30px;
+                        border: 3px solid red;
+                        border-radius: 50%;
+                        background: rgba(255, 0, 0, 0.2);
+                    `;
+          overlay.appendChild(circle);
+          if (labels) {
+            const label = document.createElement("div");
+            label.style.cssText = `
+                            position: absolute;
+                            left: ${target.point.x + 20}px;
+                            top: ${target.point.y - 10}px;
+                            background: rgba(0, 0, 0, 0.8);
+                            color: red;
+                            padding: 2px 6px;
+                            border-radius: 3px;
+                            font-size: 11px;
+                            font-family: monospace;
+                            white-space: nowrap;
+                        `;
+            label.textContent = `\u{1F441}\uFE0F ${index + 1}: ${target.role} (${(target.salience * 100).toFixed(0)}%)`;
+            overlay.appendChild(label);
+          }
+        });
+        if (primary) {
+          const primaryCircle = document.createElement("div");
+          primaryCircle.style.cssText = `
+                        position: absolute;
+                        left: ${primary.x - 20}px;
+                        top: ${primary.y - 20}px;
+                        width: 40px;
+                        height: 40px;
+                        border: 4px solid lime;
+                        border-radius: 50%;
+                        background: rgba(0, 255, 0, 0.2);
+                    `;
+          overlay.appendChild(primaryCircle);
+          if (labels) {
+            const primaryLabel = document.createElement("div");
+            primaryLabel.style.cssText = `
+                            position: absolute;
+                            left: ${primary.x + 25}px;
+                            top: ${primary.y - 10}px;
+                            background: rgba(0, 0, 0, 0.8);
+                            color: lime;
+                            padding: 2px 6px;
+                            border-radius: 3px;
+                            font-size: 11px;
+                            font-family: monospace;
+                            white-space: nowrap;
+                        `;
+            primaryLabel.textContent = "\u{1F3AF} PRIMARY TARGET";
+            overlay.appendChild(primaryLabel);
+          }
+        }
+        document.body.appendChild(overlay);
+        setTimeout(() => {
+          overlay.remove();
+        }, 2e3);
+      }, {
+        targets: gazeTargets,
+        primary: primaryTarget,
+        labels: showLabels
+      });
+      console.log(`  \u{1F441}\uFE0F GAZE OVERLAY: Drew ${gazeTargets.length} anchor(s)${primaryTarget ? " + primary target" : ""}`);
+    } catch (error) {
+      console.log("  \u26A0\uFE0F Gaze overlay failed (headed mode required)");
+    }
+  }
+  /**
+   * Draw a simple marker at a specific point (for debugging click locations).
+   *
+   * @param point - Point to mark
+   * @param color - CSS color for the marker
+   * @param label - Optional label text
+   */
+  async drawPointMarker(point, color = "yellow", label) {
+    try {
+      await this.page.evaluate(({ x, y, markerColor, markerLabel }) => {
+        const marker = document.createElement("div");
+        marker.style.cssText = `
+                    position: fixed;
+                    left: ${x - 8}px;
+                    top: ${y - 8}px;
+                    width: 16px;
+                    height: 16px;
+                    border: 2px solid ${markerColor};
+                    border-radius: 50%;
+                    background: rgba(255, 255, 0, 0.3);
+                    pointer-events: none;
+                    z-index: 999998;
+                `;
+        if (markerLabel) {
+          const labelEl = document.createElement("div");
+          labelEl.style.cssText = `
+                        position: fixed;
+                        left: ${x + 12}px;
+                        top: ${y - 8}px;
+                        background: rgba(0, 0, 0, 0.8);
+                        color: ${markerColor};
+                        padding: 2px 4px;
+                        border-radius: 2px;
+                        font-size: 10px;
+                        font-family: monospace;
+                        pointer-events: none;
+                        z-index: 999998;
+                    `;
+          labelEl.textContent = markerLabel;
+          document.body.appendChild(labelEl);
+          setTimeout(() => labelEl.remove(), 1500);
+        }
+        document.body.appendChild(marker);
+        setTimeout(() => marker.remove(), 1500);
+      }, { x: point.x, y: point.y, markerColor: color, markerLabel: label });
+    } catch {
     }
   }
 };
@@ -4042,7 +4827,239 @@ Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}
   }
 };
 
+// src/main/services/StrategicGaze.ts
+var StrategicGaze = class {
+  apiKey;
+  // Track last view to avoid redundant LLM calls
+  lastView = null;
+  lastIntent = null;
+  // Session-level randomization
+  sessionVariance;
+  // Track gaze planning calls for logging
+  gazePlanningCalls = 0;
+  constructor(apiKey) {
+    this.apiKey = apiKey;
+    this.sessionVariance = 0.8 + Math.random() * 0.4;
+  }
+  /**
+   * Randomized value within a range - NO fixed values allowed.
+   */
+  randomInRange(min2, max2) {
+    return min2 + Math.random() * (max2 - min2);
+  }
+  /**
+   * Check if we should plan a new gaze strategy.
+   * Only plan on view changes to minimize LLM calls.
+   */
+  shouldPlanGaze(currentView, intent) {
+    if (currentView === this.lastView && intent === this.lastIntent) {
+      return false;
+    }
+    if (currentView === "unknown" || currentView === "login") {
+      return false;
+    }
+    return true;
+  }
+  /**
+   * Plan gaze strategy using LLM.
+   *
+   * @param currentView - Current page view type
+   * @param spatialMap - Token-efficient representation of visible elements
+   * @param intent - What the user is trying to accomplish
+   * @returns GazeStrategy with gaze anchors and primary target, or null if skipped
+   */
+  async planGazeStrategy(currentView, spatialMap, intent) {
+    if (!this.shouldPlanGaze(currentView, intent)) {
+      return null;
+    }
+    this.lastView = currentView;
+    this.lastIntent = intent;
+    if (spatialMap.length === 0) {
+      return null;
+    }
+    try {
+      const strategy = await this.callGazePlanningLLM(currentView, spatialMap, intent);
+      this.gazePlanningCalls++;
+      console.log(`  \u{1F441}\uFE0F StrategicGaze call #${this.gazePlanningCalls} (est. cost: $${(this.gazePlanningCalls * 1e-3).toFixed(4)})`);
+      return strategy;
+    } catch (error) {
+      console.warn("StrategicGaze LLM call failed, using fallback:", error);
+      return this.fallbackGazeStrategy(spatialMap);
+    }
+  }
+  /**
+   * Call the LLM to generate gaze strategy.
+   */
+  async callGazePlanningLLM(currentView, spatialMap, intent) {
+    const systemPrompt = `You are a human attention simulator. Given a spatial map of UI elements, identify 1-2 "gaze anchors" (visually interesting elements a human would glance at) before looking at the primary target.
+
+Rules:
+1. Gaze anchors should be visually prominent elements (images, buttons, headings)
+2. Anchors should be on the path toward or near the target (not opposite corners)
+3. Return 1-2 anchors maximum
+4. Coordinates are normalized 0-1000 (will be converted to screen pixels)
+5. Prefer elements with meaningful labels over generic ones
+
+Return JSON only:
+{
+  "gazeAnchors": [{"x": number, "y": number}],
+  "primaryTarget": {"x": number, "y": number},
+  "confidence": number (0-1)
+}`;
+    const userPrompt = `View: ${currentView}
+Intent: ${intent}
+Elements (${spatialMap.length} total):
+${JSON.stringify(spatialMap.slice(0, 15), null, 0)}`;
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        // Fast, cheap model for this task
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 200,
+        temperature: 0.3
+        // Low temperature for consistent behavior
+      })
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`LLM API error: ${response.status} - ${errorText}`);
+    }
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error("Empty LLM response");
+    }
+    const parsed = JSON.parse(content);
+    const jitterAmount = this.randomInRange(20, 40);
+    return {
+      gazeAnchors: parsed.gazeAnchors.map((anchor) => ({
+        x: anchor.x + this.randomInRange(-jitterAmount, jitterAmount),
+        y: anchor.y + this.randomInRange(-jitterAmount, jitterAmount)
+      })),
+      primaryTarget: {
+        x: parsed.primaryTarget.x + this.randomInRange(-jitterAmount / 2, jitterAmount / 2),
+        y: parsed.primaryTarget.y + this.randomInRange(-jitterAmount / 2, jitterAmount / 2)
+      },
+      confidence: parsed.confidence
+    };
+  }
+  /**
+   * Fallback gaze strategy when LLM is unavailable.
+   * Uses deterministic selection based on element salience.
+   */
+  fallbackGazeStrategy(spatialMap) {
+    if (spatialMap.length === 0) {
+      return {
+        gazeAnchors: [],
+        primaryTarget: { x: 500, y: 500 },
+        // Center fallback
+        confidence: 0.1
+      };
+    }
+    const scored = spatialMap.map((node) => {
+      let score = 0;
+      const roleScores = {
+        image: 0.8,
+        img: 0.8,
+        figure: 0.75,
+        button: 0.6,
+        link: 0.5,
+        heading: 0.4
+      };
+      score += roleScores[node.role] || 0.2;
+      const distFromCenter = Math.hypot(node.x - 500, node.y - 500) / 707;
+      score += (1 - distFromCenter) * 0.3;
+      const size = node.w * node.h;
+      score += Math.min(size / 1e5, 0.2);
+      return { node, score };
+    });
+    scored.sort((a, b) => b.score - a.score);
+    const anchorCount = Math.random() > 0.5 ? 2 : 1;
+    const anchors = scored.slice(0, anchorCount).map((s) => ({
+      x: s.node.x + s.node.w / 2 + this.randomInRange(-30, 30),
+      y: s.node.y + s.node.h / 2 + this.randomInRange(-30, 30)
+    }));
+    const targetNode = scored[Math.min(anchorCount, scored.length - 1)]?.node || scored[0].node;
+    const primaryTarget = {
+      x: targetNode.x + targetNode.w / 2 + this.randomInRange(-20, 20),
+      y: targetNode.y + targetNode.h / 2 + this.randomInRange(-20, 20)
+    };
+    return {
+      gazeAnchors: anchors,
+      primaryTarget,
+      confidence: 0.5
+      // Lower confidence for fallback
+    };
+  }
+  /**
+   * Convert normalized coordinates (0-1000) to screen pixels.
+   *
+   * @param normalized - Point in 0-1000 coordinate space
+   * @param viewportWidth - Actual viewport width in pixels
+   * @param viewportHeight - Actual viewport height in pixels
+   */
+  denormalizePoint(normalized, viewportWidth, viewportHeight) {
+    return {
+      x: Math.round(normalized.x / 1e3 * viewportWidth * this.sessionVariance),
+      y: Math.round(normalized.y / 1e3 * viewportHeight * this.sessionVariance)
+    };
+  }
+  /**
+   * Convert entire gaze strategy to screen coordinates.
+   */
+  denormalizeStrategy(strategy, viewportWidth, viewportHeight) {
+    return {
+      gazeAnchors: strategy.gazeAnchors.map(
+        (p) => this.denormalizePoint(p, viewportWidth, viewportHeight)
+      ),
+      primaryTarget: this.denormalizePoint(
+        strategy.primaryTarget,
+        viewportWidth,
+        viewportHeight
+      ),
+      confidence: strategy.confidence
+    };
+  }
+  /**
+   * Map view and action to intent for gaze planning.
+   */
+  static inferIntent(view, action) {
+    if (action === "search") return "find_search";
+    if (action === "click_result") return "view_search_results";
+    switch (view) {
+      case "feed":
+        return "explore_feed";
+      case "profile":
+        return "browse_profile";
+      case "story":
+        return "watch_story";
+      case "explore":
+        return "general_browse";
+      default:
+        return "general_browse";
+    }
+  }
+  /**
+   * Reset view tracking (call when starting new session).
+   */
+  reset() {
+    this.lastView = null;
+    this.lastIntent = null;
+  }
+};
+
 // src/main/services/InstagramScraper.ts
+var fs3 = __toESM(require("fs"), 1);
+var path3 = __toESM(require("path"), 1);
 var InstagramScraper = class {
   context;
   apiKey;
@@ -4054,10 +5071,22 @@ var InstagramScraper = class {
   scroll;
   navigator;
   vision;
+  strategicGaze;
   page;
+  // Track current view for gaze planning
+  lastKnownView = "unknown";
   // Metrics
   visionApiCalls = 0;
   skippedViewports = 0;
+  // =========================================================================
+  // DEBUGGING & LOOP DETECTION STATE
+  // =========================================================================
+  loopDetection = {
+    lastActions: [],
+    repeatCount: 0
+  };
+  decisionLog = [];
+  diagnosticsDir = "";
   constructor(context, apiKey, usageCap, debugMode = false) {
     this.context = context;
     this.apiKey = apiKey;
@@ -4093,6 +5122,7 @@ var InstagramScraper = class {
     this.scroll = new HumanScroll(this.page);
     this.navigator = new A11yNavigator(this.page);
     this.vision = new ContentVision(this.apiKey);
+    this.strategicGaze = new StrategicGaze(this.apiKey);
     if (this.debugMode) {
       await this.ghost.enableVisibleCursor();
     }
@@ -4185,12 +5215,21 @@ var InstagramScraper = class {
       }
       console.log(`\u{1F50D} Searching for: "${interest}"`);
       try {
+        const stateSummary = await this.getCurrentStateSummary();
+        this.logDecision({
+          phase: "SEARCH",
+          action: `Search for "${interest}"`,
+          objective: `Find content related to user interest: ${interest}`,
+          currentState: stateSummary,
+          rationale: `User specified "${interest}" as an interest. Searching to find relevant accounts and posts.`,
+          verificationMarker: `Search results panel opens AND results for "${interest}" are visible`
+        });
         const searchButton = await this.navigator.findSearchButton();
         if (!searchButton?.boundingBox) {
           console.log("  \u26A0\uFE0F Search button not found, skipping");
           continue;
         }
-        await this.ghost.clickElement(searchButton.boundingBox, 0.3);
+        await this.clickWithGaze(searchButton.boundingBox, "link", "search");
         await this.humanDelay(1e3, 2e3);
         const searchInput = await this.navigator.findSearchInput();
         if (!searchInput?.boundingBox) {
@@ -4199,7 +5238,7 @@ var InstagramScraper = class {
           await this.humanDelay(500, 1e3);
           continue;
         }
-        await this.ghost.clickElement(searchInput.boundingBox, 0.5);
+        await this.ghost.clickElementWithRole(searchInput.boundingBox, "searchbox", 0.5);
         await this.humanDelay(300, 600);
         console.log(`  \u2328\uFE0F Typing "${interest}" and selecting from dropdown...`);
         const searchResult = await this.navigator.enterSearchTerm(interest, this.ghost);
@@ -4295,7 +5334,7 @@ var InstagramScraper = class {
     }
     const firstStory = storyCircles[0];
     if (firstStory.boundingBox) {
-      await this.ghost.clickElement(firstStory.boundingBox, 0.3);
+      await this.clickWithGaze(firstStory.boundingBox, "button", "watch_story");
       await this.humanDelay(2e3, 3e3);
     } else {
       console.log("  Could not click first story (no bounding box)");
@@ -4348,7 +5387,7 @@ var InstagramScraper = class {
       }
       await this.humanDelay(1e3, 2e3);
     }
-    await this.page.keyboard.press("Escape");
+    await this.navigator.pressEscape();
     await this.humanDelay(1e3, 2e3);
     console.log(`\u2705 Stories complete. Watched ${stories.length} stories`);
     return stories;
@@ -4392,13 +5431,28 @@ var InstagramScraper = class {
         console.log(`\u{1F4B0} Feed budget limit reached (${feedVisionCalls}/${maxCalls} calls). Stopping extraction.`);
         break;
       }
-      await this.scroll.scroll({
-        baseDistance: 300 + Math.random() * 200,
+      if (scrollCount % 3 === 0 || scrollCount === 0) {
+        const stateSummary = await this.getCurrentStateSummary();
+        this.logDecision({
+          phase: "FEED",
+          action: `Scroll #${scrollCount + 1}`,
+          objective: "Discover new content by scrolling feed",
+          currentState: stateSummary,
+          rationale: `Content type is ${stateSummary.contentType || "unknown"}. Adapting scroll distance and pause accordingly.`,
+          verificationMarker: `ScrollY increases AND new posts become visible (not same posts as before)`
+        });
+      }
+      const scrollPosBefore = await this.scroll.getScrollPosition();
+      const scrollResult = await this.scroll.scrollWithIntent(this.navigator, {
         variability: 0.25,
-        microAdjustProb: 0.2,
-        readingPauseMs: [4e3, 8e3]
+        microAdjustProb: 0.2
+        // baseDistance and readingPauseMs determined by content density
       });
+      await this.trackActionForLoopDetection("scroll", void 0, scrollPosBefore);
       scrollCount++;
+      if (scrollCount % 5 === 1) {
+        console.log(`  \u{1F4CA} Content type: ${scrollResult.contentType} (scrolled ${scrollResult.scrollDistance}px)`);
+      }
       const state = await this.navigator.getContentState();
       if (!state.hasPosts) {
         console.log("\u26A0\uFE0F No posts detected, waiting...");
@@ -4497,7 +5551,7 @@ var InstagramScraper = class {
       }
       let navigationSucceeded = false;
       for (let attempt = 0; attempt < maxRetries; attempt++) {
-        await this.ghost.clickElement(nextButtonAfterHover.boundingBox, 0.3);
+        await this.ghost.clickElementWithRole(nextButtonAfterHover.boundingBox, "button", 0.3);
         await this.humanDelay(1500, 3e3);
         const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
         if (currentSlideIndicator) {
@@ -4601,7 +5655,7 @@ var InstagramScraper = class {
       const highlight = highlights[i];
       if (!highlight.boundingBox) continue;
       console.log(`    \u2728 Opening highlight: "${highlight.name}"`);
-      await this.ghost.clickElement(highlight.boundingBox, 0.3);
+      await this.clickWithGaze(highlight.boundingBox, "button");
       await this.humanDelay(2e3, 3e3);
       const highlightStart = Date.now();
       let captureCount = 0;
@@ -4631,11 +5685,132 @@ var InstagramScraper = class {
         }
         await this.humanDelay(5e3, 8e3);
       }
-      await this.page.keyboard.press("Escape");
+      await this.navigator.pressEscape();
       await this.humanDelay(1e3, 1500);
     }
     console.log(`    \u{1F464} Profile deep-dive complete. Captured ${content.length} items`);
     return content;
+  }
+  // =========================================================================
+  // DEBUGGING & AUDIT TRAIL SYSTEM
+  // =========================================================================
+  /**
+   * Log a Decision Block to terminal and internal log.
+   * Provides conversational audit trail explaining the "Why" behind every "How".
+   */
+  logDecision(decision) {
+    const block = {
+      ...decision,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    this.decisionLog.push(block);
+    console.log("\n\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+    console.log(`\u2502 \u{1F4CB} DECISION BLOCK [${block.phase}]`);
+    console.log("\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+    console.log(`\u2502 \u{1F3AF} OBJECTIVE: ${block.objective}`);
+    console.log(`\u2502 \u{1F4CD} ACTION: ${block.action}`);
+    console.log(`\u2502 \u{1F4CA} STATE: View=${block.currentState.view}` + (block.currentState.scrollPosition !== void 0 ? `, ScrollY=${block.currentState.scrollPosition}px` : "") + (block.currentState.contentType ? `, Content=${block.currentState.contentType}` : ""));
+    if (block.currentState.visibleElements && block.currentState.visibleElements.length > 0) {
+      console.log(`\u2502 \u{1F441}\uFE0F VISIBLE: ${block.currentState.visibleElements.slice(0, 5).join(", ")}${block.currentState.visibleElements.length > 5 ? "..." : ""}`);
+    }
+    console.log(`\u2502 \u{1F4AD} RATIONALE: ${block.rationale}`);
+    console.log(`\u2502 \u2713 VERIFY: ${block.verificationMarker}`);
+    console.log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
+  }
+  /**
+   * Track action for loop detection.
+   * If the same action is repeated 3 times without state change, trigger diagnostic.
+   */
+  async trackActionForLoopDetection(action, coordinate, scrollPosition) {
+    const now = Date.now();
+    this.loopDetection.lastActions.push({
+      action,
+      coordinate,
+      scrollPosition,
+      timestamp: now
+    });
+    if (this.loopDetection.lastActions.length > 10) {
+      this.loopDetection.lastActions.shift();
+    }
+    const last3 = this.loopDetection.lastActions.slice(-3);
+    if (last3.length === 3) {
+      const allSame = last3.every((a) => {
+        const first = last3[0];
+        const actionMatch = a.action === first.action;
+        const coordMatch = !a.coordinate && !first.coordinate || a.coordinate && first.coordinate && Math.abs(a.coordinate.x - first.coordinate.x) < 50 && Math.abs(a.coordinate.y - first.coordinate.y) < 50;
+        const scrollMatch = a.scrollPosition === void 0 || first.scrollPosition === void 0 || Math.abs((a.scrollPosition || 0) - (first.scrollPosition || 0)) < 50;
+        return actionMatch && coordMatch && scrollMatch;
+      });
+      if (allSame) {
+        this.loopDetection.repeatCount++;
+        if (this.loopDetection.repeatCount >= 3) {
+          await this.triggerDiagnosticSnapshot(action, coordinate);
+        }
+      } else {
+        this.loopDetection.repeatCount = 0;
+      }
+    }
+  }
+  /**
+   * Trigger a diagnostic snapshot when a navigation loop is detected.
+   * Saves screenshot and A11y tree dump for debugging.
+   */
+  async triggerDiagnosticSnapshot(action, coordinate) {
+    console.log("\n\u26A0\uFE0F \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+    console.log("\u26A0\uFE0F NAVIGATION LOOP DETECTED");
+    console.log("\u26A0\uFE0F \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
+    if (!this.diagnosticsDir) {
+      this.diagnosticsDir = path3.join(process.cwd(), "diagnostics");
+      if (!fs3.existsSync(this.diagnosticsDir)) {
+        fs3.mkdirSync(this.diagnosticsDir, { recursive: true });
+      }
+    }
+    const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+    try {
+      const screenshotPath = path3.join(this.diagnosticsDir, `loop_detected_screen_${timestamp}.png`);
+      await this.page.screenshot({ path: screenshotPath, fullPage: false });
+      console.log(`\u{1F4F8} Screenshot saved: ${screenshotPath}`);
+      const a11yTree = await this.navigator.getFullAccessibilityTree();
+      const treePath = path3.join(this.diagnosticsDir, `loop_diagnostic_tree_${timestamp}.json`);
+      fs3.writeFileSync(treePath, JSON.stringify({
+        timestamp,
+        action,
+        coordinate,
+        repeatCount: this.loopDetection.repeatCount,
+        lastActions: this.loopDetection.lastActions,
+        decisionLog: this.decisionLog.slice(-10),
+        accessibilityTree: a11yTree.slice(0, 100)
+        // Limit to first 100 nodes
+      }, null, 2));
+      console.log(`\u{1F4CB} A11y tree dump saved: ${treePath}`);
+      const coordStr = coordinate ? `(${coordinate.x}, ${coordinate.y})` : "N/A";
+      throw new Error(`Navigation Loop Detected: LLM repeated [${action}] at [${coordStr}] without page progress. Diagnostics saved to ${this.diagnosticsDir}`);
+    } catch (error) {
+      if (error.message.includes("Navigation Loop Detected")) {
+        throw error;
+      }
+      console.error("\u274C Failed to save diagnostic snapshot:", error.message);
+    }
+  }
+  /**
+   * Get current state summary for decision logging.
+   */
+  async getCurrentStateSummary() {
+    try {
+      const contentState = await this.navigator.getContentState();
+      const scrollPos = await this.scroll.getScrollPosition();
+      const contentDensity = await this.navigator.analyzeContentDensity();
+      const gazeTargets = await this.navigator.findGazeTargets(5);
+      const visibleElements = gazeTargets.map((t2) => `${t2.role}:${t2.label.slice(0, 20)}`);
+      return {
+        view: contentState.currentView,
+        scrollPosition: scrollPos,
+        contentType: contentDensity.type,
+        visibleElements
+      };
+    } catch {
+      return { view: "unknown" };
+    }
   }
   // =========================================================================
   // UTILITY METHODS
@@ -4650,6 +5825,8 @@ var InstagramScraper = class {
         waitUntil: "domcontentloaded"
       });
       await this.humanDelay(2e3, 3e3);
+      this.strategicGaze.reset();
+      this.lastKnownView = "feed";
     }
   }
   /**
@@ -4658,6 +5835,94 @@ var InstagramScraper = class {
   humanDelay(min2, max2) {
     const delay = min2 + Math.random() * (max2 - min2);
     return new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  // =========================================================================
+  // GAZE-AWARE INTERACTION METHODS
+  // =========================================================================
+  /**
+   * Click an element with human-like gaze simulation.
+   *
+   * This implements the "Look, then Move" pattern:
+   * 1. Check if view changed (triggers LLM gaze planning)
+   * 2. Find nearby visually interesting elements (gaze anchors)
+   * 3. Execute gaze-lag movement: scan anchors → ballistic → corrective → click
+   *
+   * Falls back to normal clicking if gaze planning fails.
+   *
+   * @param boundingBox - Element to click
+   * @param role - Accessibility role for timing adjustment
+   * @param action - Optional action description for intent inference
+   */
+  async clickWithGaze(boundingBox, role = "button", action) {
+    try {
+      const currentState = await this.navigator.getContentState();
+      const currentView = currentState.currentView;
+      let gazeTargets = [];
+      if (currentView !== this.lastKnownView) {
+        this.lastKnownView = currentView;
+        const intent = StrategicGaze.inferIntent(currentView, action);
+        const spatialMap = await this.navigator.getSpatialMap(15);
+        if (spatialMap.length > 0) {
+          const strategy = await this.strategicGaze.planGazeStrategy(
+            currentView,
+            spatialMap,
+            intent
+          );
+          if (strategy && strategy.gazeAnchors.length > 0) {
+            const viewport = await this.navigator.getViewportInfo();
+            const denormalized = this.strategicGaze.denormalizeStrategy(
+              strategy,
+              viewport.width,
+              viewport.height
+            );
+            gazeTargets = denormalized.gazeAnchors.map((point) => ({
+              point,
+              role: "unknown",
+              label: "LLM anchor",
+              salience: strategy.confidence,
+              boundingBox: { x: point.x - 10, y: point.y - 10, width: 20, height: 20 }
+            }));
+            console.log(`  \u{1F441}\uFE0F Gaze strategy: ${gazeTargets.length} anchors (LLM confidence: ${strategy.confidence.toFixed(2)})`);
+          }
+        }
+      }
+      if (gazeTargets.length === 0) {
+        gazeTargets = await this.navigator.findGazeTargets(2);
+        if (gazeTargets.length > 0) {
+          console.log(`  \u{1F441}\uFE0F Gaze targets: ${gazeTargets.length} (deterministic)`);
+        }
+      }
+      const primaryTarget = {
+        x: boundingBox.x + boundingBox.width / 2,
+        y: boundingBox.y + boundingBox.height / 2
+      };
+      if (this.debugMode && gazeTargets.length > 0) {
+        await this.navigator.drawGazeOverlay(gazeTargets, primaryTarget, true);
+      }
+      if (gazeTargets.length > 0) {
+        await this.ghost.investigateAndClickElement(
+          boundingBox,
+          gazeTargets,
+          role,
+          0.3
+          // centerBias
+        );
+      } else {
+        await this.ghost.clickElementWithRole(boundingBox, role, 0.3);
+      }
+    } catch (error) {
+      console.warn("  \u26A0\uFE0F Gaze-aware click failed, using fallback:", error);
+      await this.ghost.clickElement(boundingBox, 0.3);
+    }
+  }
+  /**
+   * Scroll with content-aware timing.
+   * Uses the HumanScroll.scrollWithIntent for intelligent scroll behavior.
+   *
+   * @param config - Optional scroll configuration overrides
+   */
+  async scrollWithIntent(config) {
+    return this.scroll.scrollWithIntent(this.navigator, config);
   }
 };
 
@@ -4687,15 +5952,16 @@ var AnalysisGenerator = class {
     };
   }
   /**
-   * Prepare content as a structured JSON array for strict data attribution.
-   * Each item is an atomic unit that cannot be cross-pollinated.
+   * Prepare content using explicit POST delimiters for strict atomic pairing.
+   * Each post is wrapped in --- POST START --- / --- POST END --- tags
+   * to prevent the LLM from mixing captions between posts.
    *
-   * This format prevents the LLM from mixing up accounts or inventing narratives
-   * by treating each post as an isolated, numbered object with explicit fields.
+   * EXTRACTION RULE: The LLM is FORBIDDEN from borrowing data across POST boundaries.
    */
   prepareContentSummary(session2) {
-    const items = [];
+    const posts = [];
     let itemId = 1;
+    let skippedCount = 0;
     for (const post of session2.feedContent) {
       const caption = post.caption || "";
       let source = "feed";
@@ -4719,40 +5985,100 @@ var AnalysisGenerator = class {
         source = "highlight";
         cleanCaption = caption.replace(/\[HIGHLIGHT: [^\]]+\]\s*/, "");
       }
-      const item = {
-        id: itemId++,
-        handle: `@${post.username}`,
-        caption: this.truncateCaption(cleanCaption),
-        image_description: this.truncateCaption(post.visualDescription || ""),
-        content_type: post.isVideoContent ? "video" : "image",
-        source
-      };
-      if (interest) {
-        item.interest = interest;
+      if (this.isLowSaliencyContent(cleanCaption, post.visualDescription || "", post.username)) {
+        skippedCount++;
+        continue;
       }
-      items.push(item);
+      const truncatedCaption = this.truncateCaption(cleanCaption);
+      const truncatedImage = this.truncateCaption(post.visualDescription || "");
+      let postBlock = `--- POST START ---
+ID: ${itemId++}
+Handle: @${post.username}
+Caption: ${truncatedCaption || "[No caption]"}
+Image: ${truncatedImage || "[No description]"}
+Content Type: ${post.isVideoContent ? "video" : "image"}
+Source: ${source}`;
+      if (interest) {
+        postBlock += `
+Interest: ${interest}`;
+      }
+      postBlock += "\n--- POST END ---";
+      posts.push(postBlock);
     }
     for (const story of session2.storiesContent) {
-      items.push({
-        id: itemId++,
-        handle: `@${story.username}`,
-        caption: this.truncateCaption(story.caption || ""),
-        image_description: this.truncateCaption(story.visualDescription || ""),
-        content_type: story.isVideoContent ? "video" : "image",
-        source: "story"
-      });
+      if (this.isLowSaliencyContent(story.caption || "", story.visualDescription || "", story.username)) {
+        skippedCount++;
+        continue;
+      }
+      const truncatedCaption = this.truncateCaption(story.caption || "");
+      const truncatedImage = this.truncateCaption(story.visualDescription || "");
+      posts.push(`--- POST START ---
+ID: ${itemId++}
+Handle: @${story.username}
+Caption: ${truncatedCaption || "[No caption]"}
+Image: ${truncatedImage || "[No description]"}
+Content Type: ${story.isVideoContent ? "video" : "image"}
+Source: story
+--- POST END ---`);
     }
-    const searchCount = items.filter((i) => i.source === "search").length;
-    const feedCount = items.filter((i) => i.source === "feed").length;
-    const storyCount = items.filter((i) => i.source === "story").length;
-    const otherCount = items.length - searchCount - feedCount - storyCount;
-    return `CONTENT ITEMS (${items.length} total):
+    const searchCount = posts.filter((p) => p.includes("Source: search")).length;
+    const feedCount = posts.filter((p) => p.includes("Source: feed")).length;
+    const storyCount = posts.filter((p) => p.includes("Source: story")).length;
+    const otherCount = posts.length - searchCount - feedCount - storyCount;
+    if (skippedCount > 0) {
+      console.log(`\u{1F4CB} Skipped ${skippedCount} low-saliency posts (ads, generic intros)`);
+    }
+    return `CONTENT DATA (${posts.length} posts total, ${skippedCount} skipped):
 - Search results: ${searchCount}
 - Feed posts: ${feedCount}
 - Stories: ${storyCount}
 - Other (carousel/profile/highlight): ${otherCount}
 
-${JSON.stringify(items, null, 2)}`;
+${posts.join("\n\n")}`;
+  }
+  /**
+   * Filter out low-saliency content that adds noise to the analysis.
+   * Returns true if the content should be SKIPPED.
+   */
+  isLowSaliencyContent(caption, imageDesc, username) {
+    const captionLower = caption.toLowerCase();
+    const imageLower = imageDesc.toLowerCase();
+    const combined = `${captionLower} ${imageLower}`;
+    const introPatterns = [
+      "meet the class",
+      "welcome to the class",
+      "introducing the class",
+      "class of 20",
+      "meet our new",
+      "welcome our new",
+      "join us in welcoming",
+      "excited to introduce"
+    ];
+    if (introPatterns.some((p) => combined.includes(p))) {
+      return true;
+    }
+    const adPatterns = [
+      "shop now",
+      "limited time",
+      "use code",
+      "link in bio",
+      "swipe up",
+      "click the link",
+      "free shipping",
+      "order now",
+      "get yours",
+      "don't miss out",
+      "sale ends",
+      "% off"
+    ];
+    const adMatchCount = adPatterns.filter((p) => combined.includes(p)).length;
+    if (adMatchCount >= 2 && caption.length < 150) {
+      return true;
+    }
+    if (!caption.trim() && (!imageDesc.trim() || imageLower.includes("generic") || imageLower.includes("stock photo"))) {
+      return true;
+    }
+    return false;
   }
   /**
    * Truncate caption to reasonable length, preserving meaning.
@@ -4776,99 +6102,126 @@ ${JSON.stringify(items, null, 2)}`;
     const dayName = now.toLocaleDateString("en-US", { weekday: "long" });
     const dateStr = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     const interestsList = config.interests.length > 0 ? config.interests.map((i) => `"${i}"`).join(", ") : "General news and trends";
-    const prompt = `You are a FACTUAL REPORTER creating a news briefing for ${config.userName}.
+    const prompt = `You are a HIGH-DENSITY RESEARCH JOURNALIST and STRATEGIC INTELLIGENCE ANALYST creating a personalized briefing for ${config.userName}.
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-CRITICAL DATA INTEGRITY RULES (VIOLATIONS = FAILURE)
+I. GROUNDING & FIDELITY RULES (VIOLATIONS = FAILURE)
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-1. ATOMIC UNITS: You will receive an array of content objects. Each object is ISOLATED.
-   - NEVER combine data from different objects into the same bullet point
-   - NEVER attribute @account_A's content to @account_B
-   - If object #5 has a sunset photo and object #8 has a football game, they are SEPARATE items
+EXTRACTION RULE (CRITICAL):
+You are an extraction engine. You are FORBIDDEN from mixing data across POST boundaries.
+Each post is wrapped in --- POST START --- / --- POST END --- delimiters.
+If Post A has no caption, do NOT borrow the caption from Post B.
+Use ONLY the data within the specific POST tags.
 
-2. HANDLE ACCOUNTABILITY: Every bullet MUST start with the exact handle from the data.
-   - Format: "\u2022 @handle: [Specific fact from THIS object only]"
-   - The handle anchors the bullet to its source - no exceptions
+ATOMIC PAIRING:
+- Each {Handle, Image, Caption} is an ISOLATED unit
+- NEVER combine data from different POST blocks into the same bullet
+- If Post #5 has a sunset and Post #8 has a football game, they are SEPARATE bullets
 
-3. AD FILTERING: Skip these items entirely (do NOT report on them):
-   - Generic advertisements (e.g., "Shop now", "Limited time offer", brand promotions)
-   - Sponsored content unrelated to user interests
-   - Empty or meaningless captions with stock photos
-   - Exception: Ads that directly relate to user's interests (${interestsList})
+HANDLE-FIRST ATTRIBUTION:
+- Every bullet MUST begin with **@handle** in bold
+- Format: "\u2022 **@handle**: [Fact from THIS post only]. [Contextual Analysis if warranted]"
+- The handle anchors the bullet to its source - no exceptions
 
-4. JUST THE FACTS: Only report what is EXPLICITLY in the data.
-   - If caption says "Great day" and image shows a lake, say "@handle: Posted a lake scene"
-   - Do NOT invent meaning like "fostering lifelong connections" or "celebrating team spirit"
-   - If you add context, it must be verifiable external knowledge (scores, dates, known events)
+NO HALLUCINATIONS:
+- If a post has [No caption], describe only what's visible in the Image field
+- If you add contextual analysis (trends, implications), label it as [Contextual Analysis: ...]
+- NEVER invent meaning like "fostering lifelong connections" or "celebrating innovation"
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-USER PROFILE
+II. ANALYSIS DEPTH (THE "SO WHAT?" PROTOCOL)
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+For HIGH-VALUE posts (search results, breaking news, user interests), apply 3-level analysis:
+
+Level 1 - THE EVENT: What's literally in the pixels/caption
+Level 2 - THE TREND: What 2026 theme does this connect to?
+Level 3 - THE IMPLICATION: Why should the reader care?
+
+Example of proper depth:
+\u2022 **@applebees**: Launching the 'O-M-Cheese' burger for $11.99. [Contextual Analysis: This reflects casual dining's 2026 "Premium Value" pivot as chains fight fast-casual competition on price while maintaining perceived quality.]
+
+For LOW-VALUE posts (generic updates, ephemeral stories), use Level 1 only:
+\u2022 **@friend_account**: Shared a sunset photo from the beach.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+III. NEGATIVE CONSTRAINTS (DO NOT)
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+\u274C Do NOT use filler phrases: "The photo shows," "The caption says," "Interestingly,"
+\u274C Do NOT summarize 5 posts into 1 bland bullet
+\u274C Do NOT generate market analysis for student intro posts
+\u274C Do NOT report on generic ads (unless directly relevant to ${interestsList})
+\u274C Do NOT invent emotional narrative ("celebrating team spirit," "embracing the journey")
+\u274C Do NOT mix handles across bullet points
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+IV. USER PROFILE
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
 Name: ${config.userName}
 Location: ${config.location || "Not specified"}
 Priority Interests: ${interestsList}
+Date: ${dayName}, ${dateStr}
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-CONTENT DATA (ATOMIC OBJECTS)
+V. CONTENT DATA (ATOMIC POST BLOCKS)
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
 ${contentSummary}
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-OUTPUT FORMAT
+VI. OUTPUT STRUCTURE
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
 BULLET FORMAT (MANDATORY):
-\u2022 @handle: [Specific event/fact from this object]. [Brief external context if relevant].
-
-EXAMPLES OF CORRECT ATTRIBUTION:
-
-\u2705 CORRECT:
-\u2022 @CalFootball: Posted "Class is in session" with a photo of the football facility. This aligns with the early signing period.
-\u2022 @Warriors: Shared a locker room celebration video after tonight's win over the Lakers.
-\u2022 @nytimes: Breaking news headline about the Fed's rate decision.
-
-\u274C WRONG (mixing objects):
-\u2022 @CalFootball celebrated the Warriors' victory... (NEVER mix handles)
-\u2022 @Warriors posted about football recruitment... (WRONG - mixing sources)
-
-\u274C WRONG (inventing narrative):
-\u2022 @UniversityAccount: "Fostering lifelong connections through education" (if caption just said "Beautiful day on campus")
-\u2022 @BrandAccount: "Celebrating innovation and pushing boundaries" (if it was just a product photo)
-
-\u274C WRONG (reporting ads):
-\u2022 @BrandAccount: Promoting their new product line... (SKIP unless directly relevant to user interests)
+\u2022 **@handle**: [Level 1 event]. [Level 2/3 contextual analysis if high-value].
 
 SECTION STRUCTURE:
 
-# [Title based on top story]
-### [Key insight] \u2014 ${dayName}, ${dateStr}${config.location ? `, ${config.location}` : ""}
+# [Compelling Title Based on Top Story]
+### [Key Strategic Insight] \u2014 ${dayName}, ${dateStr}${config.location ? `, ${config.location}` : ""}
 
-## \u{1F3AF} [Section for User Interests: ${interestsList}]
-[4-6 bullets from items matching user interests, each starting with @handle]
+## \u{1F3AF} Strategic Interests: ${interestsList}
+[4-6 bullets from search results and interest-matching posts]
+[Apply full "So What?" Protocol - Levels 1-3]
 
-## \u{1F30D} [Section for General News]
-[3-4 bullets from other newsworthy items, each starting with @handle]
+## \u{1F30D} Global Intelligence
+[3-4 bullets from general newsworthy content]
+[Cross-reference with current events where verifiable]
 
-## \u26A1 Quick Hits
-[2-3 single-line items for remaining notable content]
+## \u26A1 Lightning Round
+[2-3 single-sentence quick hits for remaining notable content]
+[Level 1 only - just the facts]
 
-CROSS-REFERENCE RULES:
-- Use the "caption" field for QUOTES and exact wording
-- Use the "image_description" field for visual context
-- Items with source="search" are HIGH PRIORITY (match user interests)
-- Items with source="story" are ephemeral updates
+PRIORITY RULES:
+- Posts with Source: search are HIGH PRIORITY (match user interests)
+- Posts with Source: story are ephemeral (lower priority unless newsworthy)
+- Posts with Interest: field should be featured prominently
+
+EXAMPLES:
+
+\u2705 CORRECT (with depth):
+\u2022 **@CalFootball**: Posted "Class is in session" with a facility photo. [Contextual Analysis: This aligns with December's early signing period - Cal's 2026 class is ranked #18 nationally.]
+
+\u2705 CORRECT (Level 1 only for low-value):
+\u2022 **@personal_friend**: Shared a coffee shop photo in San Francisco.
+
+\u274C WRONG (mixing posts):
+\u2022 **@CalFootball** celebrated the Warriors' victory... (NEVER mix handles across posts)
+
+\u274C WRONG (hallucinating):
+\u2022 **@UniversityAccount**: "Fostering lifelong connections through education" (if caption just said "Beautiful day")
 
 Return valid JSON:
 {
     "title": "string",
     "subtitle": "string",
     "sections": [
-        {"heading": "string", "content": ["\u2022 @handle: Fact from object. Context.", "\u2022 @handle: Fact from object. Context."]},
-        {"heading": "string", "content": ["\u2022 @handle: Fact from object. Context."]},
-        {"heading": "string", "content": ["\u2022 @handle: Quick fact."]}
+        {"heading": "string", "content": ["\u2022 **@handle**: Fact. [Contextual Analysis: Trend and implication].", "\u2022 **@handle**: Fact."]},
+        {"heading": "string", "content": ["\u2022 **@handle**: Fact with context."]},
+        {"heading": "string", "content": ["\u2022 **@handle**: Quick fact."]}
     ]
 }`;
     console.log("\u{1F916} Generating analysis with GPT-4...");

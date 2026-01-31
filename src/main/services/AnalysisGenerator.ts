@@ -54,24 +54,16 @@ export class AnalysisGenerator {
     }
 
     /**
-     * Prepare content as a structured JSON array for strict data attribution.
-     * Each item is an atomic unit that cannot be cross-pollinated.
+     * Prepare content using explicit POST delimiters for strict atomic pairing.
+     * Each post is wrapped in --- POST START --- / --- POST END --- tags
+     * to prevent the LLM from mixing captions between posts.
      *
-     * This format prevents the LLM from mixing up accounts or inventing narratives
-     * by treating each post as an isolated, numbered object with explicit fields.
+     * EXTRACTION RULE: The LLM is FORBIDDEN from borrowing data across POST boundaries.
      */
     private prepareContentSummary(session: ScrapedSession): string {
-        const items: Array<{
-            id: number;
-            handle: string;
-            caption: string;
-            image_description: string;
-            content_type: string;
-            source: string;  // 'search', 'feed', 'story', 'carousel', 'profile', 'highlight'
-            interest?: string;  // Only for search results
-        }> = [];
-
+        const posts: string[] = [];
         let itemId = 1;
+        let skippedCount = 0;
 
         // Process all feed content (includes search results, carousels, profiles, etc.)
         for (const post of session.feedContent) {
@@ -103,56 +95,125 @@ export class AnalysisGenerator {
                 cleanCaption = caption.replace(/\[HIGHLIGHT: [^\]]+\]\s*/, '');
             }
 
-            const item: {
-                id: number;
-                handle: string;
-                caption: string;
-                image_description: string;
-                content_type: string;
-                source: string;
-                interest?: string;
-            } = {
-                id: itemId++,
-                handle: `@${post.username}`,
-                caption: this.truncateCaption(cleanCaption),
-                image_description: this.truncateCaption(post.visualDescription || ''),
-                content_type: post.isVideoContent ? 'video' : 'image',
-                source
-            };
-
-            if (interest) {
-                item.interest = interest;
+            // Saliency filter: Skip low-value content
+            if (this.isLowSaliencyContent(cleanCaption, post.visualDescription || '', post.username)) {
+                skippedCount++;
+                continue;
             }
 
-            items.push(item);
+            const truncatedCaption = this.truncateCaption(cleanCaption);
+            const truncatedImage = this.truncateCaption(post.visualDescription || '');
+
+            // Build atomic POST block with explicit delimiters
+            let postBlock = `--- POST START ---
+ID: ${itemId++}
+Handle: @${post.username}
+Caption: ${truncatedCaption || '[No caption]'}
+Image: ${truncatedImage || '[No description]'}
+Content Type: ${post.isVideoContent ? 'video' : 'image'}
+Source: ${source}`;
+
+            if (interest) {
+                postBlock += `\nInterest: ${interest}`;
+            }
+
+            postBlock += '\n--- POST END ---';
+            posts.push(postBlock);
         }
 
         // Process stories separately
         for (const story of session.storiesContent) {
-            items.push({
-                id: itemId++,
-                handle: `@${story.username}`,
-                caption: this.truncateCaption(story.caption || ''),
-                image_description: this.truncateCaption(story.visualDescription || ''),
-                content_type: story.isVideoContent ? 'video' : 'image',
-                source: 'story'
-            });
+            // Saliency filter for stories
+            if (this.isLowSaliencyContent(story.caption || '', story.visualDescription || '', story.username)) {
+                skippedCount++;
+                continue;
+            }
+
+            const truncatedCaption = this.truncateCaption(story.caption || '');
+            const truncatedImage = this.truncateCaption(story.visualDescription || '');
+
+            posts.push(`--- POST START ---
+ID: ${itemId++}
+Handle: @${story.username}
+Caption: ${truncatedCaption || '[No caption]'}
+Image: ${truncatedImage || '[No description]'}
+Content Type: ${story.isVideoContent ? 'video' : 'image'}
+Source: story
+--- POST END ---`);
         }
 
         // Count sources for summary
-        const searchCount = items.filter(i => i.source === 'search').length;
-        const feedCount = items.filter(i => i.source === 'feed').length;
-        const storyCount = items.filter(i => i.source === 'story').length;
-        const otherCount = items.length - searchCount - feedCount - storyCount;
+        const searchCount = posts.filter(p => p.includes('Source: search')).length;
+        const feedCount = posts.filter(p => p.includes('Source: feed')).length;
+        const storyCount = posts.filter(p => p.includes('Source: story')).length;
+        const otherCount = posts.length - searchCount - feedCount - storyCount;
 
-        // Format as structured data block with summary
-        return `CONTENT ITEMS (${items.length} total):
+        // Log if we skipped any low-value content
+        if (skippedCount > 0) {
+            console.log(`📋 Skipped ${skippedCount} low-saliency posts (ads, generic intros)`);
+        }
+
+        // Format with summary header
+        return `CONTENT DATA (${posts.length} posts total, ${skippedCount} skipped):
 - Search results: ${searchCount}
 - Feed posts: ${feedCount}
 - Stories: ${storyCount}
 - Other (carousel/profile/highlight): ${otherCount}
 
-${JSON.stringify(items, null, 2)}`;
+${posts.join('\n\n')}`;
+    }
+
+    /**
+     * Filter out low-saliency content that adds noise to the analysis.
+     * Returns true if the content should be SKIPPED.
+     */
+    private isLowSaliencyContent(caption: string, imageDesc: string, username: string): boolean {
+        const captionLower = caption.toLowerCase();
+        const imageLower = imageDesc.toLowerCase();
+        const combined = `${captionLower} ${imageLower}`;
+
+        // Skip "Meet the Class" style intro posts (low signal)
+        const introPatterns = [
+            'meet the class',
+            'welcome to the class',
+            'introducing the class',
+            'class of 20',
+            'meet our new',
+            'welcome our new',
+            'join us in welcoming',
+            'excited to introduce'
+        ];
+        if (introPatterns.some(p => combined.includes(p))) {
+            return true;
+        }
+
+        // Skip generic commercial noise
+        const adPatterns = [
+            'shop now',
+            'limited time',
+            'use code',
+            'link in bio',
+            'swipe up',
+            'click the link',
+            'free shipping',
+            'order now',
+            'get yours',
+            'don\'t miss out',
+            'sale ends',
+            '% off'
+        ];
+        // Only skip if it's mostly ad content (not mixed with real content)
+        const adMatchCount = adPatterns.filter(p => combined.includes(p)).length;
+        if (adMatchCount >= 2 && caption.length < 150) {
+            return true;
+        }
+
+        // Skip empty content (no caption AND no meaningful image description)
+        if (!caption.trim() && (!imageDesc.trim() || imageLower.includes('generic') || imageLower.includes('stock photo'))) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -192,99 +253,126 @@ ${JSON.stringify(items, null, 2)}`;
             ? config.interests.map(i => `"${i}"`).join(', ')
             : 'General news and trends';
 
-        const prompt = `You are a FACTUAL REPORTER creating a news briefing for ${config.userName}.
+        const prompt = `You are a HIGH-DENSITY RESEARCH JOURNALIST and STRATEGIC INTELLIGENCE ANALYST creating a personalized briefing for ${config.userName}.
 
 ═══════════════════════════════════════════════════════════════════════════════
-CRITICAL DATA INTEGRITY RULES (VIOLATIONS = FAILURE)
+I. GROUNDING & FIDELITY RULES (VIOLATIONS = FAILURE)
 ═══════════════════════════════════════════════════════════════════════════════
 
-1. ATOMIC UNITS: You will receive an array of content objects. Each object is ISOLATED.
-   - NEVER combine data from different objects into the same bullet point
-   - NEVER attribute @account_A's content to @account_B
-   - If object #5 has a sunset photo and object #8 has a football game, they are SEPARATE items
+EXTRACTION RULE (CRITICAL):
+You are an extraction engine. You are FORBIDDEN from mixing data across POST boundaries.
+Each post is wrapped in --- POST START --- / --- POST END --- delimiters.
+If Post A has no caption, do NOT borrow the caption from Post B.
+Use ONLY the data within the specific POST tags.
 
-2. HANDLE ACCOUNTABILITY: Every bullet MUST start with the exact handle from the data.
-   - Format: "• @handle: [Specific fact from THIS object only]"
-   - The handle anchors the bullet to its source - no exceptions
+ATOMIC PAIRING:
+- Each {Handle, Image, Caption} is an ISOLATED unit
+- NEVER combine data from different POST blocks into the same bullet
+- If Post #5 has a sunset and Post #8 has a football game, they are SEPARATE bullets
 
-3. AD FILTERING: Skip these items entirely (do NOT report on them):
-   - Generic advertisements (e.g., "Shop now", "Limited time offer", brand promotions)
-   - Sponsored content unrelated to user interests
-   - Empty or meaningless captions with stock photos
-   - Exception: Ads that directly relate to user's interests (${interestsList})
+HANDLE-FIRST ATTRIBUTION:
+- Every bullet MUST begin with **@handle** in bold
+- Format: "• **@handle**: [Fact from THIS post only]. [Contextual Analysis if warranted]"
+- The handle anchors the bullet to its source - no exceptions
 
-4. JUST THE FACTS: Only report what is EXPLICITLY in the data.
-   - If caption says "Great day" and image shows a lake, say "@handle: Posted a lake scene"
-   - Do NOT invent meaning like "fostering lifelong connections" or "celebrating team spirit"
-   - If you add context, it must be verifiable external knowledge (scores, dates, known events)
+NO HALLUCINATIONS:
+- If a post has [No caption], describe only what's visible in the Image field
+- If you add contextual analysis (trends, implications), label it as [Contextual Analysis: ...]
+- NEVER invent meaning like "fostering lifelong connections" or "celebrating innovation"
 
 ═══════════════════════════════════════════════════════════════════════════════
-USER PROFILE
+II. ANALYSIS DEPTH (THE "SO WHAT?" PROTOCOL)
+═══════════════════════════════════════════════════════════════════════════════
+
+For HIGH-VALUE posts (search results, breaking news, user interests), apply 3-level analysis:
+
+Level 1 - THE EVENT: What's literally in the pixels/caption
+Level 2 - THE TREND: What 2026 theme does this connect to?
+Level 3 - THE IMPLICATION: Why should the reader care?
+
+Example of proper depth:
+• **@applebees**: Launching the 'O-M-Cheese' burger for $11.99. [Contextual Analysis: This reflects casual dining's 2026 "Premium Value" pivot as chains fight fast-casual competition on price while maintaining perceived quality.]
+
+For LOW-VALUE posts (generic updates, ephemeral stories), use Level 1 only:
+• **@friend_account**: Shared a sunset photo from the beach.
+
+═══════════════════════════════════════════════════════════════════════════════
+III. NEGATIVE CONSTRAINTS (DO NOT)
+═══════════════════════════════════════════════════════════════════════════════
+
+❌ Do NOT use filler phrases: "The photo shows," "The caption says," "Interestingly,"
+❌ Do NOT summarize 5 posts into 1 bland bullet
+❌ Do NOT generate market analysis for student intro posts
+❌ Do NOT report on generic ads (unless directly relevant to ${interestsList})
+❌ Do NOT invent emotional narrative ("celebrating team spirit," "embracing the journey")
+❌ Do NOT mix handles across bullet points
+
+═══════════════════════════════════════════════════════════════════════════════
+IV. USER PROFILE
 ═══════════════════════════════════════════════════════════════════════════════
 
 Name: ${config.userName}
 Location: ${config.location || 'Not specified'}
 Priority Interests: ${interestsList}
+Date: ${dayName}, ${dateStr}
 
 ═══════════════════════════════════════════════════════════════════════════════
-CONTENT DATA (ATOMIC OBJECTS)
+V. CONTENT DATA (ATOMIC POST BLOCKS)
 ═══════════════════════════════════════════════════════════════════════════════
 
 ${contentSummary}
 
 ═══════════════════════════════════════════════════════════════════════════════
-OUTPUT FORMAT
+VI. OUTPUT STRUCTURE
 ═══════════════════════════════════════════════════════════════════════════════
 
 BULLET FORMAT (MANDATORY):
-• @handle: [Specific event/fact from this object]. [Brief external context if relevant].
-
-EXAMPLES OF CORRECT ATTRIBUTION:
-
-✅ CORRECT:
-• @CalFootball: Posted "Class is in session" with a photo of the football facility. This aligns with the early signing period.
-• @Warriors: Shared a locker room celebration video after tonight's win over the Lakers.
-• @nytimes: Breaking news headline about the Fed's rate decision.
-
-❌ WRONG (mixing objects):
-• @CalFootball celebrated the Warriors' victory... (NEVER mix handles)
-• @Warriors posted about football recruitment... (WRONG - mixing sources)
-
-❌ WRONG (inventing narrative):
-• @UniversityAccount: "Fostering lifelong connections through education" (if caption just said "Beautiful day on campus")
-• @BrandAccount: "Celebrating innovation and pushing boundaries" (if it was just a product photo)
-
-❌ WRONG (reporting ads):
-• @BrandAccount: Promoting their new product line... (SKIP unless directly relevant to user interests)
+• **@handle**: [Level 1 event]. [Level 2/3 contextual analysis if high-value].
 
 SECTION STRUCTURE:
 
-# [Title based on top story]
-### [Key insight] — ${dayName}, ${dateStr}${config.location ? `, ${config.location}` : ''}
+# [Compelling Title Based on Top Story]
+### [Key Strategic Insight] — ${dayName}, ${dateStr}${config.location ? `, ${config.location}` : ''}
 
-## 🎯 [Section for User Interests: ${interestsList}]
-[4-6 bullets from items matching user interests, each starting with @handle]
+## 🎯 Strategic Interests: ${interestsList}
+[4-6 bullets from search results and interest-matching posts]
+[Apply full "So What?" Protocol - Levels 1-3]
 
-## 🌍 [Section for General News]
-[3-4 bullets from other newsworthy items, each starting with @handle]
+## 🌍 Global Intelligence
+[3-4 bullets from general newsworthy content]
+[Cross-reference with current events where verifiable]
 
-## ⚡ Quick Hits
-[2-3 single-line items for remaining notable content]
+## ⚡ Lightning Round
+[2-3 single-sentence quick hits for remaining notable content]
+[Level 1 only - just the facts]
 
-CROSS-REFERENCE RULES:
-- Use the "caption" field for QUOTES and exact wording
-- Use the "image_description" field for visual context
-- Items with source="search" are HIGH PRIORITY (match user interests)
-- Items with source="story" are ephemeral updates
+PRIORITY RULES:
+- Posts with Source: search are HIGH PRIORITY (match user interests)
+- Posts with Source: story are ephemeral (lower priority unless newsworthy)
+- Posts with Interest: field should be featured prominently
+
+EXAMPLES:
+
+✅ CORRECT (with depth):
+• **@CalFootball**: Posted "Class is in session" with a facility photo. [Contextual Analysis: This aligns with December's early signing period - Cal's 2026 class is ranked #18 nationally.]
+
+✅ CORRECT (Level 1 only for low-value):
+• **@personal_friend**: Shared a coffee shop photo in San Francisco.
+
+❌ WRONG (mixing posts):
+• **@CalFootball** celebrated the Warriors' victory... (NEVER mix handles across posts)
+
+❌ WRONG (hallucinating):
+• **@UniversityAccount**: "Fostering lifelong connections through education" (if caption just said "Beautiful day")
 
 Return valid JSON:
 {
     "title": "string",
     "subtitle": "string",
     "sections": [
-        {"heading": "string", "content": ["• @handle: Fact from object. Context.", "• @handle: Fact from object. Context."]},
-        {"heading": "string", "content": ["• @handle: Fact from object. Context."]},
-        {"heading": "string", "content": ["• @handle: Quick fact."]}
+        {"heading": "string", "content": ["• **@handle**: Fact. [Contextual Analysis: Trend and implication].", "• **@handle**: Fact."]},
+        {"heading": "string", "content": ["• **@handle**: Fact with context."]},
+        {"heading": "string", "content": ["• **@handle**: Quick fact."]}
     ]
 }`;
 
