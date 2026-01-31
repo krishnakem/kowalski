@@ -21,11 +21,13 @@ import { A11yNavigator } from './A11yNavigator.js';
 import { ContentVision } from './ContentVision.js';
 import { UsageService } from './UsageService.js';
 import { StrategicGaze } from './StrategicGaze.js';
+import { ScreenshotCollector } from './ScreenshotCollector.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
     ExtractedPost,
     ScrapedSession,
+    BrowsingSession,
     BoundingBox,
     ContentState,
     GazeTarget
@@ -89,6 +91,7 @@ export class InstagramScraper {
     private navigator!: A11yNavigator;
     private vision!: ContentVision;
     private strategicGaze!: StrategicGaze;
+    private screenshotCollector!: ScreenshotCollector;
     private page!: Page;
 
     // Track current view for gaze planning
@@ -268,7 +271,297 @@ export class InstagramScraper {
     }
 
     // =========================================================================
-    // PHASE A: ACTIVE SEARCH
+    // SCREENSHOT-FIRST BROWSING (NEW ARCHITECTURE)
+    // =========================================================================
+
+    /**
+     * Screenshot-First Browsing Session.
+     *
+     * This is the new architecture that:
+     * 1. Browses Instagram naturally (like a human would)
+     * 2. Screenshots each post/story as encountered
+     * 3. Returns all screenshots for batch LLM processing
+     *
+     * NO Vision API calls during browsing - all analysis happens at the end.
+     *
+     * @param targetMinutes - Total browsing time
+     * @param userInterests - Topics to search for
+     * @returns BrowsingSession with all captured screenshots
+     */
+    async browseAndCapture(
+        targetMinutes: number,
+        userInterests: string[]
+    ): Promise<BrowsingSession> {
+        const startTime = Date.now();
+        this.page = await this.context.newPage();
+
+        // Initialize layer instances
+        this.ghost = new GhostMouse(this.page);
+        this.scroll = new HumanScroll(this.page);
+        this.navigator = new A11yNavigator(this.page);
+        this.vision = new ContentVision(this.apiKey);  // Keep for potential fallback
+        this.strategicGaze = new StrategicGaze(this.apiKey);
+        this.screenshotCollector = new ScreenshotCollector(this.page, {
+            maxCaptures: 50,
+            jpegQuality: 85,
+            minScrollDelta: 200
+        });
+
+        // Enable visible cursor in debug mode
+        if (this.debugMode) {
+            await this.ghost.enableVisibleCursor();
+        }
+
+        try {
+            // 1. Navigate to Instagram
+            console.log('🌐 Navigating to Instagram...');
+            await this.page.goto('https://www.instagram.com/', {
+                waitUntil: 'domcontentloaded'
+            });
+            await this.humanDelay(2000, 4000);
+
+            // 2. Check page state (FREE - no API call)
+            const state = await this.navigator.getContentState();
+            console.log('📊 Content State:', state);
+
+            if (state.currentView === 'login') {
+                throw new Error('SESSION_EXPIRED');
+            }
+
+            // === PHASE A: INTEREST SEARCH (capture results) ===
+            if (userInterests.length > 0) {
+                console.log('\n🔍 ═══════════════════════════════════════');
+                console.log('🔍 PHASE A: INTEREST SEARCH (Screenshot-First)');
+                console.log('🔍 ═══════════════════════════════════════\n');
+
+                for (const interest of userInterests.slice(0, 3)) {
+                    await this.searchAndCaptureScreenshot(interest);
+                }
+            }
+
+            // === PHASE B: STORY WATCH (capture each story) ===
+            if (state.hasStories) {
+                console.log('\n🎬 ═══════════════════════════════════════');
+                console.log('🎬 PHASE B: STORY WATCH (Screenshot-First)');
+                console.log('🎬 ═══════════════════════════════════════\n');
+
+                await this.returnToHome();
+                await this.watchAndCaptureStories();
+            }
+
+            // === PHASE C: FEED BROWSE (capture posts) ===
+            console.log('\n📜 ═══════════════════════════════════════');
+            console.log('📜 PHASE C: FEED BROWSE (Screenshot-First)');
+            console.log('📜 ═══════════════════════════════════════\n');
+
+            await this.returnToHome();
+            const elapsedMinutes = (Date.now() - startTime) / 60000;
+            const remainingMinutes = Math.max(2, targetMinutes - elapsedMinutes);
+            await this.browseFeedWithCapture(remainingMinutes);
+
+        } catch (error: any) {
+            console.error('❌ Browsing error:', error.message);
+            if (['SESSION_EXPIRED', 'RATE_LIMITED'].includes(error.message)) {
+                throw error;
+            }
+        } finally {
+            // Log summary before closing
+            this.screenshotCollector.logSummary();
+            await this.page.close();
+        }
+
+        return {
+            captures: this.screenshotCollector.getCaptures(),
+            sessionDuration: Date.now() - startTime,
+            captureCount: this.screenshotCollector.getCaptureCount(),
+            scrapedAt: new Date().toISOString()
+        };
+    }
+
+    /**
+     * Search for an interest and capture screenshot (no Vision API).
+     */
+    private async searchAndCaptureScreenshot(interest: string): Promise<void> {
+        console.log(`🔍 Searching for: "${interest}"`);
+
+        try {
+            // 1. Find and click Search button
+            const searchButton = await this.navigator.findSearchButton();
+            if (!searchButton?.boundingBox) {
+                console.log('  ⚠️ Search button not found, skipping');
+                return;
+            }
+
+            await this.clickWithGaze(searchButton.boundingBox, 'link', 'search');
+            await this.humanDelay(1000, 2000);
+
+            // 2. Find search input and type interest
+            const searchInput = await this.navigator.findSearchInput();
+            if (!searchInput?.boundingBox) {
+                console.log('  ⚠️ Search input not found, skipping');
+                await this.navigator.pressEscape();
+                return;
+            }
+
+            await this.ghost.clickElementWithRole(searchInput.boundingBox, 'searchbox', 0.5);
+            await this.humanDelay(300, 600);
+
+            // Type and select from dropdown
+            const searchResult = await this.navigator.enterSearchTerm(interest, this.ghost);
+            if (searchResult.matchedResult) {
+                console.log(`  ✅ Clicked dropdown result: "${searchResult.matchedResult}"`);
+            }
+
+            // 3. Wait for results to load
+            await this.humanDelay(3000, 5000);
+
+            // 4. Check if we're on a profile page
+            const currentView = await this.navigator.getContentState();
+            if (currentView.currentView === 'profile') {
+                console.log(`  📍 On profile page, capturing...`);
+                await this.screenshotCollector.captureCurrentPost('profile', interest);
+
+                // Scroll down the profile a bit
+                for (let i = 0; i < 2; i++) {
+                    await this.scroll.scrollWithIntent(this.navigator);
+                    await this.humanDelay(1500, 3000);
+                    await this.screenshotCollector.captureCurrentPost('profile', interest);
+                }
+            } else {
+                // On search results page
+                await this.screenshotCollector.captureCurrentPost('search', interest);
+
+                // Scroll and capture more search results
+                await this.scroll.scrollWithIntent(this.navigator);
+                await this.humanDelay(1500, 2500);
+                await this.screenshotCollector.captureCurrentPost('search', interest);
+            }
+
+            // 5. Close search/return home
+            await this.navigator.pressEscape();
+            await this.humanDelay(1000, 2000);
+
+        } catch (error: any) {
+            console.error(`  ❌ Search error for "${interest}":`, error.message);
+            await this.navigator.pressEscape().catch(() => {});
+            await this.humanDelay(500, 1000);
+        }
+    }
+
+    /**
+     * Watch stories and capture each one (no Vision API).
+     */
+    private async watchAndCaptureStories(): Promise<void> {
+        console.log('🎬 Watching stories...');
+
+        const storyCircles = await this.navigator.findStoryCircles();
+        if (storyCircles.length === 0) {
+            console.log('  No stories found');
+            return;
+        }
+
+        // Click first story
+        const firstStory = storyCircles[0];
+        if (firstStory.boundingBox) {
+            await this.clickWithGaze(firstStory.boundingBox, 'button', 'watch_story');
+            await this.humanDelay(2000, 3000);
+        } else {
+            return;
+        }
+
+        // Watch up to 8 stories
+        const maxStories = Math.min(8, storyCircles.length);
+        let storiesWatched = 0;
+
+        for (let i = 0; i < maxStories; i++) {
+            if (!this.navigator.isInStoryViewer()) {
+                console.log('  Exited story viewer');
+                break;
+            }
+
+            // Capture this story
+            await this.screenshotCollector.captureCurrentPost('story');
+            storiesWatched++;
+
+            // Human-like viewing time (randomized)
+            const viewTime = 2000 + Math.random() * 4000;  // 2-6 seconds
+            await this.humanDelay(viewTime, viewTime + 1000);
+
+            // Advance to next story
+            const viewportSize = this.page.viewportSize();
+            if (viewportSize) {
+                const rightZone = {
+                    x: viewportSize.width * 0.6,
+                    y: viewportSize.height * 0.2,
+                    width: viewportSize.width * 0.35,
+                    height: viewportSize.height * 0.6
+                };
+                await this.ghost.clickElement(rightZone, 0.2);
+            }
+
+            await this.humanDelay(1000, 2000);
+        }
+
+        // Exit stories
+        await this.navigator.pressEscape();
+        await this.humanDelay(1000, 2000);
+
+        console.log(`✅ Stories complete. Captured ${storiesWatched} stories`);
+    }
+
+    /**
+     * Browse feed naturally and capture each post (no Vision API).
+     */
+    private async browseFeedWithCapture(targetMinutes: number): Promise<void> {
+        const startTime = Date.now();
+        const endTime = startTime + (targetMinutes * 60 * 1000);
+        let scrollCount = 0;
+
+        console.log(`🔄 Browsing feed for ${targetMinutes.toFixed(1)} minutes...`);
+
+        // Scroll to top to start fresh
+        await this.scroll.scrollToTop();
+        await this.humanDelay(1000, 2000);
+
+        while (Date.now() < endTime) {
+            // Check capture limit
+            if (this.screenshotCollector.getCaptureCount() >= 50) {
+                console.log('📸 Max captures reached, stopping browse');
+                break;
+            }
+
+            // Scroll to next content
+            const scrollResult = await this.scroll.scrollWithIntent(this.navigator, {
+                variability: 0.25,
+                microAdjustProb: 0.2
+            });
+
+            scrollCount++;
+
+            // Human-like reading pause
+            await this.humanDelay(1500, 3500);
+
+            // Capture current viewport
+            await this.screenshotCollector.captureCurrentPost('feed');
+
+            // Log occasionally
+            if (scrollCount % 5 === 0) {
+                console.log(`  📊 Scroll #${scrollCount}, Content: ${scrollResult.contentType}, Captures: ${this.screenshotCollector.getCaptureCount()}`);
+            }
+
+            // Random longer pause (human behavior)
+            if (Math.random() < 0.15) {
+                const pauseTime = 3000 + Math.random() * 5000;
+                console.log(`  ☕ Reading pause (${(pauseTime / 1000).toFixed(1)}s)...`);
+                await this.humanDelay(pauseTime, pauseTime + 1000);
+            }
+        }
+
+        console.log(`✅ Feed browse complete. ${scrollCount} scrolls, ${this.screenshotCollector.getCaptureCount()} captures`);
+    }
+
+    // =========================================================================
+    // PHASE A: ACTIVE SEARCH (LEGACY - for backward compatibility)
     // =========================================================================
 
     /**

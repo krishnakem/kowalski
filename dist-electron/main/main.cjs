@@ -5057,6 +5057,146 @@ ${JSON.stringify(spatialMap.slice(0, 15), null, 0)}`;
   }
 };
 
+// src/main/services/ScreenshotCollector.ts
+var DEFAULT_CONFIG = {
+  maxCaptures: 50,
+  // ~7.5MB memory at 150KB/screenshot
+  jpegQuality: 85,
+  // Good balance of quality and size
+  minScrollDelta: 200
+  // Must scroll at least 200px for new capture
+};
+var ScreenshotCollector = class {
+  page;
+  captures = [];
+  config;
+  lastScrollPosition = 0;
+  constructor(page, config = {}) {
+    this.page = page;
+    this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+  /**
+   * Capture the current viewport as a post screenshot.
+   * Called after each scroll/story view when content is visible.
+   *
+   * @param source - Where this content came from (feed, story, search, etc.)
+   * @param interest - For search results, which interest triggered this capture
+   * @returns true if captured, false if skipped (max reached or duplicate position)
+   */
+  async captureCurrentPost(source, interest) {
+    if (this.captures.length >= this.config.maxCaptures) {
+      console.log(`\u{1F4F8} Max captures (${this.config.maxCaptures}) reached, skipping`);
+      return false;
+    }
+    const scrollPosition = await this.getScrollPosition();
+    if (source === "feed" && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
+      console.log(`\u{1F4F8} Scroll delta too small (${Math.abs(scrollPosition - this.lastScrollPosition)}px), skipping duplicate`);
+      return false;
+    }
+    try {
+      const screenshot = await this.page.screenshot({
+        type: "jpeg",
+        quality: this.config.jpegQuality,
+        fullPage: false
+        // Viewport only
+      });
+      this.captures.push({
+        id: this.captures.length + 1,
+        screenshot,
+        source,
+        interest,
+        timestamp: Date.now(),
+        scrollPosition
+      });
+      if (source === "feed") {
+        this.lastScrollPosition = scrollPosition;
+      }
+      console.log(`\u{1F4F8} Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ""})`);
+      return true;
+    } catch (error) {
+      console.error("\u{1F4F8} Screenshot capture failed:", error);
+      return false;
+    }
+  }
+  /**
+   * Get all captured screenshots for batch processing.
+   */
+  getCaptures() {
+    return this.captures;
+  }
+  /**
+   * Get capture count.
+   */
+  getCaptureCount() {
+    return this.captures.length;
+  }
+  /**
+   * Get source breakdown for logging.
+   */
+  getSourceBreakdown() {
+    const breakdown = {
+      feed: 0,
+      story: 0,
+      search: 0,
+      profile: 0,
+      carousel: 0
+    };
+    for (const capture of this.captures) {
+      breakdown[capture.source]++;
+    }
+    return breakdown;
+  }
+  /**
+   * Get approximate memory usage in bytes.
+   */
+  getMemoryUsage() {
+    return this.captures.reduce((total, c) => total + c.screenshot.length, 0);
+  }
+  /**
+   * Clear all captures (call after processing to free memory).
+   */
+  clear() {
+    this.captures = [];
+    this.lastScrollPosition = 0;
+    console.log("\u{1F4F8} Collector cleared");
+  }
+  /**
+   * Reset scroll tracking (useful when navigating to new context).
+   */
+  resetScrollTracking() {
+    this.lastScrollPosition = 0;
+  }
+  /**
+   * Get current scroll Y position via CDP (no page.evaluate needed).
+   */
+  async getScrollPosition() {
+    try {
+      const client = await this.page.context().newCDPSession(this.page);
+      const result = await client.send("Runtime.evaluate", {
+        expression: "window.scrollY",
+        returnByValue: true
+      });
+      await client.detach();
+      return result.result.value;
+    } catch {
+      return await this.page.evaluate(() => window.scrollY);
+    }
+  }
+  /**
+   * Log summary of captured content.
+   */
+  logSummary() {
+    const breakdown = this.getSourceBreakdown();
+    const memoryMB = (this.getMemoryUsage() / (1024 * 1024)).toFixed(2);
+    console.log(`
+\u{1F4F8} Screenshot Collection Summary:`);
+    console.log(`   Total: ${this.captures.length} captures`);
+    console.log(`   Feed: ${breakdown.feed}, Stories: ${breakdown.story}, Search: ${breakdown.search}`);
+    console.log(`   Memory: ${memoryMB}MB`);
+    console.log("");
+  }
+};
+
 // src/main/services/InstagramScraper.ts
 var fs3 = __toESM(require("fs"), 1);
 var path3 = __toESM(require("path"), 1);
@@ -5072,6 +5212,7 @@ var InstagramScraper = class {
   navigator;
   vision;
   strategicGaze;
+  screenshotCollector;
   page;
   // Track current view for gaze planning
   lastKnownView = "unknown";
@@ -5190,7 +5331,216 @@ var InstagramScraper = class {
     };
   }
   // =========================================================================
-  // PHASE A: ACTIVE SEARCH
+  // SCREENSHOT-FIRST BROWSING (NEW ARCHITECTURE)
+  // =========================================================================
+  /**
+   * Screenshot-First Browsing Session.
+   *
+   * This is the new architecture that:
+   * 1. Browses Instagram naturally (like a human would)
+   * 2. Screenshots each post/story as encountered
+   * 3. Returns all screenshots for batch LLM processing
+   *
+   * NO Vision API calls during browsing - all analysis happens at the end.
+   *
+   * @param targetMinutes - Total browsing time
+   * @param userInterests - Topics to search for
+   * @returns BrowsingSession with all captured screenshots
+   */
+  async browseAndCapture(targetMinutes, userInterests) {
+    const startTime = Date.now();
+    this.page = await this.context.newPage();
+    this.ghost = new GhostMouse(this.page);
+    this.scroll = new HumanScroll(this.page);
+    this.navigator = new A11yNavigator(this.page);
+    this.vision = new ContentVision(this.apiKey);
+    this.strategicGaze = new StrategicGaze(this.apiKey);
+    this.screenshotCollector = new ScreenshotCollector(this.page, {
+      maxCaptures: 50,
+      jpegQuality: 85,
+      minScrollDelta: 200
+    });
+    if (this.debugMode) {
+      await this.ghost.enableVisibleCursor();
+    }
+    try {
+      console.log("\u{1F310} Navigating to Instagram...");
+      await this.page.goto("https://www.instagram.com/", {
+        waitUntil: "domcontentloaded"
+      });
+      await this.humanDelay(2e3, 4e3);
+      const state = await this.navigator.getContentState();
+      console.log("\u{1F4CA} Content State:", state);
+      if (state.currentView === "login") {
+        throw new Error("SESSION_EXPIRED");
+      }
+      if (userInterests.length > 0) {
+        console.log("\n\u{1F50D} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+        console.log("\u{1F50D} PHASE A: INTEREST SEARCH (Screenshot-First)");
+        console.log("\u{1F50D} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
+        for (const interest of userInterests.slice(0, 3)) {
+          await this.searchAndCaptureScreenshot(interest);
+        }
+      }
+      if (state.hasStories) {
+        console.log("\n\u{1F3AC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+        console.log("\u{1F3AC} PHASE B: STORY WATCH (Screenshot-First)");
+        console.log("\u{1F3AC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
+        await this.returnToHome();
+        await this.watchAndCaptureStories();
+      }
+      console.log("\n\u{1F4DC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+      console.log("\u{1F4DC} PHASE C: FEED BROWSE (Screenshot-First)");
+      console.log("\u{1F4DC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
+      await this.returnToHome();
+      const elapsedMinutes = (Date.now() - startTime) / 6e4;
+      const remainingMinutes = Math.max(2, targetMinutes - elapsedMinutes);
+      await this.browseFeedWithCapture(remainingMinutes);
+    } catch (error) {
+      console.error("\u274C Browsing error:", error.message);
+      if (["SESSION_EXPIRED", "RATE_LIMITED"].includes(error.message)) {
+        throw error;
+      }
+    } finally {
+      this.screenshotCollector.logSummary();
+      await this.page.close();
+    }
+    return {
+      captures: this.screenshotCollector.getCaptures(),
+      sessionDuration: Date.now() - startTime,
+      captureCount: this.screenshotCollector.getCaptureCount(),
+      scrapedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  /**
+   * Search for an interest and capture screenshot (no Vision API).
+   */
+  async searchAndCaptureScreenshot(interest) {
+    console.log(`\u{1F50D} Searching for: "${interest}"`);
+    try {
+      const searchButton = await this.navigator.findSearchButton();
+      if (!searchButton?.boundingBox) {
+        console.log("  \u26A0\uFE0F Search button not found, skipping");
+        return;
+      }
+      await this.clickWithGaze(searchButton.boundingBox, "link", "search");
+      await this.humanDelay(1e3, 2e3);
+      const searchInput = await this.navigator.findSearchInput();
+      if (!searchInput?.boundingBox) {
+        console.log("  \u26A0\uFE0F Search input not found, skipping");
+        await this.navigator.pressEscape();
+        return;
+      }
+      await this.ghost.clickElementWithRole(searchInput.boundingBox, "searchbox", 0.5);
+      await this.humanDelay(300, 600);
+      const searchResult = await this.navigator.enterSearchTerm(interest, this.ghost);
+      if (searchResult.matchedResult) {
+        console.log(`  \u2705 Clicked dropdown result: "${searchResult.matchedResult}"`);
+      }
+      await this.humanDelay(3e3, 5e3);
+      const currentView = await this.navigator.getContentState();
+      if (currentView.currentView === "profile") {
+        console.log(`  \u{1F4CD} On profile page, capturing...`);
+        await this.screenshotCollector.captureCurrentPost("profile", interest);
+        for (let i = 0; i < 2; i++) {
+          await this.scroll.scrollWithIntent(this.navigator);
+          await this.humanDelay(1500, 3e3);
+          await this.screenshotCollector.captureCurrentPost("profile", interest);
+        }
+      } else {
+        await this.screenshotCollector.captureCurrentPost("search", interest);
+        await this.scroll.scrollWithIntent(this.navigator);
+        await this.humanDelay(1500, 2500);
+        await this.screenshotCollector.captureCurrentPost("search", interest);
+      }
+      await this.navigator.pressEscape();
+      await this.humanDelay(1e3, 2e3);
+    } catch (error) {
+      console.error(`  \u274C Search error for "${interest}":`, error.message);
+      await this.navigator.pressEscape().catch(() => {
+      });
+      await this.humanDelay(500, 1e3);
+    }
+  }
+  /**
+   * Watch stories and capture each one (no Vision API).
+   */
+  async watchAndCaptureStories() {
+    console.log("\u{1F3AC} Watching stories...");
+    const storyCircles = await this.navigator.findStoryCircles();
+    if (storyCircles.length === 0) {
+      console.log("  No stories found");
+      return;
+    }
+    const firstStory = storyCircles[0];
+    if (firstStory.boundingBox) {
+      await this.clickWithGaze(firstStory.boundingBox, "button", "watch_story");
+      await this.humanDelay(2e3, 3e3);
+    } else {
+      return;
+    }
+    const maxStories = Math.min(8, storyCircles.length);
+    let storiesWatched = 0;
+    for (let i = 0; i < maxStories; i++) {
+      if (!this.navigator.isInStoryViewer()) {
+        console.log("  Exited story viewer");
+        break;
+      }
+      await this.screenshotCollector.captureCurrentPost("story");
+      storiesWatched++;
+      const viewTime = 2e3 + Math.random() * 4e3;
+      await this.humanDelay(viewTime, viewTime + 1e3);
+      const viewportSize = this.page.viewportSize();
+      if (viewportSize) {
+        const rightZone = {
+          x: viewportSize.width * 0.6,
+          y: viewportSize.height * 0.2,
+          width: viewportSize.width * 0.35,
+          height: viewportSize.height * 0.6
+        };
+        await this.ghost.clickElement(rightZone, 0.2);
+      }
+      await this.humanDelay(1e3, 2e3);
+    }
+    await this.navigator.pressEscape();
+    await this.humanDelay(1e3, 2e3);
+    console.log(`\u2705 Stories complete. Captured ${storiesWatched} stories`);
+  }
+  /**
+   * Browse feed naturally and capture each post (no Vision API).
+   */
+  async browseFeedWithCapture(targetMinutes) {
+    const startTime = Date.now();
+    const endTime = startTime + targetMinutes * 60 * 1e3;
+    let scrollCount = 0;
+    console.log(`\u{1F504} Browsing feed for ${targetMinutes.toFixed(1)} minutes...`);
+    await this.scroll.scrollToTop();
+    await this.humanDelay(1e3, 2e3);
+    while (Date.now() < endTime) {
+      if (this.screenshotCollector.getCaptureCount() >= 50) {
+        console.log("\u{1F4F8} Max captures reached, stopping browse");
+        break;
+      }
+      const scrollResult = await this.scroll.scrollWithIntent(this.navigator, {
+        variability: 0.25,
+        microAdjustProb: 0.2
+      });
+      scrollCount++;
+      await this.humanDelay(1500, 3500);
+      await this.screenshotCollector.captureCurrentPost("feed");
+      if (scrollCount % 5 === 0) {
+        console.log(`  \u{1F4CA} Scroll #${scrollCount}, Content: ${scrollResult.contentType}, Captures: ${this.screenshotCollector.getCaptureCount()}`);
+      }
+      if (Math.random() < 0.15) {
+        const pauseTime = 3e3 + Math.random() * 5e3;
+        console.log(`  \u2615 Reading pause (${(pauseTime / 1e3).toFixed(1)}s)...`);
+        await this.humanDelay(pauseTime, pauseTime + 1e3);
+      }
+    }
+    console.log(`\u2705 Feed browse complete. ${scrollCount} scrolls, ${this.screenshotCollector.getCaptureCount()} captures`);
+  }
+  // =========================================================================
+  // PHASE A: ACTIVE SEARCH (LEGACY - for backward compatibility)
   // =========================================================================
   /**
    * Execute Active Search phase.
@@ -6278,6 +6628,240 @@ Return valid JSON:
   // If generation fails, we notify the user and schedule a retry.
 };
 
+// src/main/services/BatchDigestGenerator.ts
+var BatchDigestGenerator = class {
+  apiKey;
+  usageService;
+  constructor(apiKey) {
+    this.apiKey = apiKey;
+    this.usageService = UsageService.getInstance();
+  }
+  /**
+   * Generate a digest from all captured screenshots in one API call.
+   * Uses GPT-4o Vision with multiple images.
+   *
+   * @param captures - Array of captured screenshots from browsing session
+   * @param config - User configuration (name, interests, location)
+   * @returns Complete analysis object ready for display
+   */
+  async generateDigest(captures, config) {
+    if (captures.length === 0) {
+      throw new Error("INSUFFICIENT_CONTENT: No screenshots captured");
+    }
+    const now = /* @__PURE__ */ new Date();
+    const dayName = now.toLocaleDateString("en-US", { weekday: "long" });
+    const dateStr = now.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric"
+    });
+    const imageContents = captures.map((capture) => ({
+      type: "image_url",
+      image_url: {
+        url: `data:image/jpeg;base64,${capture.screenshot.toString("base64")}`,
+        detail: "low"
+        // Cost optimization: low detail for social media content
+      }
+    }));
+    const prompt = this.buildDigestPrompt(config, dayName, dateStr, captures);
+    console.log(`\u{1F916} Generating digest from ${captures.length} screenshots...`);
+    const messageContent = [
+      { type: "text", text: prompt },
+      ...imageContents
+    ];
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [{
+          role: "user",
+          content: messageContent
+        }],
+        max_tokens: 3e3,
+        temperature: 0.3,
+        // Low for factual accuracy
+        response_format: { type: "json_object" }
+      })
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error("\u274C Digest generation API error:", errorData);
+      throw new Error("DIGEST_GENERATION_FAILED");
+    }
+    const data = await response.json();
+    if (data.usage) {
+      await this.usageService.incrementUsage(data.usage);
+      console.log(`\u{1F4B0} Digest cost tracked: ${data.usage.total_tokens} tokens`);
+    }
+    const content = data.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("DIGEST_GENERATION_FAILED: No content in response");
+    }
+    try {
+      return this.parseDigestResponse(content, config, dayName, dateStr);
+    } catch (parseError) {
+      console.error("\u274C Failed to parse digest response:", parseError);
+      throw new Error("DIGEST_GENERATION_FAILED");
+    }
+  }
+  /**
+   * Build the system prompt for digest generation.
+   */
+  buildDigestPrompt(config, dayName, dateStr, captures) {
+    const interestsList = config.interests.length > 0 ? config.interests.map((i) => `"${i}"`).join(", ") : "General news and trends";
+    const feedCount = captures.filter((c) => c.source === "feed").length;
+    const storyCount = captures.filter((c) => c.source === "story").length;
+    const searchCount = captures.filter((c) => c.source === "search").length;
+    const profileCount = captures.filter((c) => c.source === "profile").length;
+    const carouselCount = captures.filter((c) => c.source === "carousel").length;
+    const searchInterests = [...new Set(
+      captures.filter((c) => c.source === "search" && c.interest).map((c) => c.interest)
+    )];
+    return `You are a STRATEGIC INTELLIGENCE ANALYST creating a personalized morning briefing for ${config.userName}.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+I. YOUR TASK
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+You are viewing ${captures.length} Instagram screenshots captured during a browsing session.
+- Feed posts: ${feedCount}
+- Stories: ${storyCount}
+- Search results: ${searchCount}${searchInterests.length > 0 ? ` (searched: ${searchInterests.join(", ")})` : ""}
+- Profile views: ${profileCount}
+- Carousel slides: ${carouselCount}
+
+Analyze ALL images and synthesize them into ONE comprehensive digest.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+II. USER PROFILE
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+Name: ${config.userName}
+Priority Interests: ${interestsList}
+Location: ${config.location || "Not specified"}
+Date: ${dayName}, ${dateStr}
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+III. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+1. **ATTRIBUTION (MANDATORY)**:
+   - Every bullet MUST start with **@handle** in bold (extract username from screenshot)
+   - If you cannot read the handle clearly, use **@[unclear]** but still include the content
+   - Format: "\u2022 **@handle**: [Fact]. [Contextual Analysis if warranted]."
+
+2. **DEPTH - THE "SO WHAT?" PROTOCOL**:
+   For HIGH-VALUE content (news, user interests, breaking updates):
+   - Level 1: What's literally in the image
+   - Level 2: What trend does this connect to?
+   - Level 3: Why should the reader care?
+
+   For LOW-VALUE content (generic updates, lifestyle posts):
+   - Level 1 only: Just the facts, one sentence
+
+3. **PRIORITIZATION**:
+   - Search results matching "${interestsList}" = HIGH PRIORITY (feature prominently)
+   - Breaking news / time-sensitive content = HIGH PRIORITY
+   - Stories = MEDIUM (ephemeral, context-dependent)
+   - Generic lifestyle posts = LOW (brief mention or skip)
+
+4. **NO HALLUCINATIONS**:
+   - Only report what you can SEE in the screenshots
+   - If you can't read text clearly, say "[text unclear]"
+   - Label any inference as [Contextual Analysis: ...]
+   - NEVER invent emotional narrative ("celebrating team spirit," "fostering connections")
+
+5. **NEGATIVE CONSTRAINTS**:
+   \u274C Do NOT use filler phrases: "The photo shows," "The caption says," "Interestingly"
+   \u274C Do NOT summarize 5 posts into 1 bland bullet
+   \u274C Do NOT mix handles across bullet points
+   \u274C Do NOT generate deep analysis for ads or sponsored content
+   \u274C Do NOT report on duplicate/similar screenshots multiple times
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+IV. OUTPUT STRUCTURE
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+Return valid JSON with this exact structure:
+{
+    "title": "[Compelling headline based on top story - be specific and engaging]",
+    "subtitle": "[Key strategic insight in one sentence] \u2014 ${dayName}, ${dateStr}",
+    "sections": [
+        {
+            "heading": "\u{1F3AF} Strategic Interests: ${config.interests[0] || "Your Feed"}",
+            "content": [
+                "\u2022 **@handle**: [Fact from screenshot]. [Contextual Analysis: trend/implication].",
+                "\u2022 **@handle**: [Another fact with depth]."
+            ]
+        },
+        {
+            "heading": "\u{1F30D} Global Intelligence",
+            "content": [
+                "\u2022 **@handle**: [Newsworthy item with context].",
+                "\u2022 **@handle**: [Another newsworthy item]."
+            ]
+        },
+        {
+            "heading": "\u26A1 Lightning Round",
+            "content": [
+                "\u2022 **@handle**: [Quick hit - one sentence].",
+                "\u2022 **@handle**: [Quick hit - one sentence]."
+            ]
+        }
+    ]
+}
+
+TARGET: 15-25 high-quality bullets total across all sections.
+SKIP: Ads, sponsored content, empty/unclear screenshots, duplicate content.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+V. EXAMPLES
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+\u2705 CORRECT (with depth):
+\u2022 **@CalFootball**: Posted recruiting update showing new 5-star commit. [Contextual Analysis: This brings Cal's 2026 class to #18 nationally during early signing period.]
+
+\u2705 CORRECT (quick hit):
+\u2022 **@friend_account**: Shared a sunset photo from Malibu.
+
+\u274C WRONG (missing handle):
+\u2022 Someone posted about a new restaurant opening...
+
+\u274C WRONG (hallucinating):
+\u2022 **@UniversityAccount**: "Fostering lifelong connections through education" (if you can't read this in the screenshot, don't invent it)`;
+  }
+  /**
+   * Parse the LLM response into a structured AnalysisObject.
+   */
+  parseDigestResponse(content, config, dayName, dateStr) {
+    const parsed = JSON.parse(content);
+    if (!parsed.title || !parsed.sections || !Array.isArray(parsed.sections)) {
+      throw new Error("Invalid response structure: missing title or sections");
+    }
+    const sections = parsed.sections.map((s) => ({
+      heading: s.heading || "Untitled Section",
+      content: Array.isArray(s.content) ? s.content : [s.content || ""]
+    }));
+    console.log("\u2705 Digest generated successfully");
+    return {
+      title: parsed.title,
+      subtitle: parsed.subtitle || `Your Instagram Digest \u2014 ${dayName}, ${dateStr}`,
+      sections,
+      date: (/* @__PURE__ */ new Date()).toISOString(),
+      location: config.location || "",
+      scheduledTime: (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true
+      })
+    };
+  }
+};
+
 // src/main/services/SchedulerService.ts
 var BAKER_LEAD_TIME_MS = 2 * 60 * 1e3;
 var PREP_BUFFER_MS = 15 * 1e3;
@@ -6300,8 +6884,8 @@ var SchedulerService = class _SchedulerService {
   getLastWakeTime() {
     return this.lastWakeTime;
   }
-  setMainWindow(window) {
-    this.mainWindow = window;
+  setMainWindow(window2) {
+    this.mainWindow = window2;
   }
   // Helper to dynamically load electron-store (ESM)
   async getStore() {
@@ -6830,7 +7414,11 @@ var SchedulerService = class _SchedulerService {
     await this.archivePendingAnalysis(store);
     const settings = store.get("settings") || {};
     if (_SchedulerService.USE_REAL_ANALYSIS) {
-      await this.triggerBakerReal(now, store, scheduledTime);
+      if (_SchedulerService.USE_SCREENSHOT_FIRST) {
+        await this.triggerBakerScreenshotFirst(now, store, scheduledTime);
+      } else {
+        await this.triggerBakerReal(now, store, scheduledTime);
+      }
     } else {
       await this.triggerBakerSimulation(now, store, scheduledTime);
     }
@@ -7008,7 +7596,113 @@ var SchedulerService = class _SchedulerService {
    * - Notifies UI immediately after completion (no pending_delivery state)
    */
   async triggerDebugRun() {
-    console.log("\u{1F9EA} Debug Run: Starting Visible Analysis Pipeline");
+    if (_SchedulerService.USE_SCREENSHOT_FIRST) {
+      await this.triggerDebugRunScreenshotFirst();
+    } else {
+      await this.triggerDebugRunLegacy();
+    }
+  }
+  /**
+   * DEBUG RUN (Screenshot-First): Uses the new screenshot-based architecture.
+   */
+  async triggerDebugRunScreenshotFirst() {
+    console.log("\u{1F9EA} Debug Run (Screenshot-First): Starting Visible Browsing Pipeline");
+    const store = await this.getStore();
+    const settings = store.get("settings") || {};
+    const now = /* @__PURE__ */ new Date();
+    const scheduledTime = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const MINIMUM_CAPTURES = 10;
+    const browserManager = BrowserManager.getInstance();
+    let context = null;
+    try {
+      const apiKey = await SecureKeyManager.getInstance().getKey();
+      if (!apiKey) {
+        console.error("\u{1F9EA} Debug Run: NO API KEY");
+        this.mainWindow?.webContents.send("analysis-error", { message: "API key not found." });
+        return;
+      }
+      console.log("\u{1F9EA} Launching browser (VISIBLE mode)...");
+      context = await browserManager.launch({ headless: false });
+      console.log("\u{1F9EA} Validating Instagram session...");
+      const sessionCheck = await browserManager.validateSession();
+      if (!sessionCheck.valid) {
+        throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
+      }
+      console.log("\u{1F9EA} Browsing Instagram (Screenshot-First mode)...");
+      const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);
+      const session2 = await scraper.browseAndCapture(
+        5,
+        // 5 minutes of human-paced browsing
+        settings.interests || []
+      );
+      console.log(`\u{1F9EA} Browsing complete: ${session2.captureCount} screenshots captured`);
+      await browserManager.close();
+      context = null;
+      if (session2.captureCount < MINIMUM_CAPTURES) {
+        console.warn(`\u{1F9EA} Insufficient captures: ${session2.captureCount} (need ${MINIMUM_CAPTURES})`);
+        throw new Error("INSUFFICIENT_CONTENT");
+      }
+      console.log("\u{1F9EA} Generating digest from screenshots...");
+      const digestGenerator = new BatchDigestGenerator(apiKey);
+      const analysis = await digestGenerator.generateDigest(session2.captures, {
+        userName: settings.userName || "User",
+        interests: settings.interests || [],
+        location: settings.location || ""
+      });
+      const recordId = (0, import_uuid.v4)();
+      const newRecord = {
+        id: recordId,
+        data: analysis,
+        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+      };
+      const userDataPath = import_electron4.app.getPath("userData");
+      const recordDir = import_path3.default.join(userDataPath, "analysis_records");
+      const recordPath = import_path3.default.join(recordDir, `${recordId}.json`);
+      const tempPath = import_path3.default.join(recordDir, `${recordId}.tmp`);
+      await import_fs3.default.promises.mkdir(recordDir, { recursive: true });
+      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs3.default.promises.rename(tempPath, recordPath);
+      console.log(`\u{1F9EA} Saved digest to disk: ${recordPath}`);
+      const metadataRecord = {
+        id: newRecord.id,
+        data: {
+          date: newRecord.data.date,
+          title: newRecord.data.title,
+          scheduledTime: newRecord.data.scheduledTime,
+          location: newRecord.data.location
+        },
+        leadStoryPreview: newRecord.leadStoryPreview
+      };
+      const currentAnalyses = store.get("analyses") || [];
+      store.set("analyses", [metadataRecord, ...currentAnalyses]);
+      store.set("settings", {
+        ...store.get("settings"),
+        lastAnalysisDate: now.toISOString(),
+        analysisStatus: "ready"
+      });
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        console.log("\u{1F9EA} Notifying UI: analysis-ready");
+        this.mainWindow.webContents.send("analysis-ready", metadataRecord);
+      }
+      console.log(`\u{1F9EA} Debug Run (Screenshot-First) Complete! Captures: ${session2.captureCount}`);
+    } catch (error) {
+      console.error("\u{1F9EA} Debug Run Failed:", error.message);
+      if (context) {
+        await browserManager.close();
+      }
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send("analysis-error", {
+          message: `Debug run failed: ${error.message}`,
+          canRetry: true
+        });
+      }
+    }
+  }
+  /**
+   * DEBUG RUN (Legacy): Uses the extraction-based architecture.
+   */
+  async triggerDebugRunLegacy() {
+    console.log("\u{1F9EA} Debug Run (Legacy): Starting Visible Analysis Pipeline");
     const store = await this.getStore();
     const settings = store.get("settings") || {};
     const now = /* @__PURE__ */ new Date();
@@ -7110,6 +7804,101 @@ var SchedulerService = class _SchedulerService {
    */
   static USE_REAL_ANALYSIS = true;
   // LIVE FLIGHT TEST: Real pipeline enabled
+  /**
+   * Switch between extraction-based and screenshot-first approaches.
+   * Set USE_SCREENSHOT_FIRST to true for the new Screenshot-First Digest architecture.
+   */
+  static USE_SCREENSHOT_FIRST = true;
+  // NEW: Screenshot-First Digest enabled
+  /**
+   * BAKER (Screenshot-First Mode): Browse Instagram naturally, capture screenshots,
+   * then batch-send to LLM for comprehensive digest generation.
+   *
+   * This is the new architecture that:
+   * - Takes screenshots of each post/story during browsing
+   * - No Vision API calls during browsing (all analysis at the end)
+   * - LLM sees actual visual content instead of extracted descriptions
+   */
+  async triggerBakerScreenshotFirst(now, store, scheduledTime) {
+    const settings = store.get("settings") || {};
+    const MINIMUM_CAPTURES_FOR_DIGEST = 10;
+    console.log(`\u{1F950} Baker (Screenshot-First) - Starting Instagram browsing at ${(/* @__PURE__ */ new Date()).toLocaleString()}`);
+    const browserManager = BrowserManager.getInstance();
+    let context = null;
+    try {
+      const apiKey = await SecureKeyManager.getInstance().getKey();
+      if (!apiKey) {
+        throw new Error("NO_API_KEY");
+      }
+      console.log("\u{1F310} Baker launching browser (headless)...");
+      context = await browserManager.launch({ headless: true });
+      console.log("\u{1F510} Baker validating Instagram session...");
+      const sessionCheck = await browserManager.validateSession();
+      if (!sessionCheck.valid) {
+        throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
+      }
+      console.log("\u{1F4F1} Baker browsing Instagram (Screenshot-First mode)...");
+      const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
+      const session2 = await scraper.browseAndCapture(
+        5,
+        // 5 minutes of human-paced browsing
+        settings.interests || []
+      );
+      console.log(`\u{1F4F8} Baker browsing complete: ${session2.captureCount} screenshots captured`);
+      await browserManager.close();
+      context = null;
+      if (session2.captureCount < MINIMUM_CAPTURES_FOR_DIGEST) {
+        console.warn(`\u26A0\uFE0F Baker: Insufficient captures: ${session2.captureCount} (need ${MINIMUM_CAPTURES_FOR_DIGEST})`);
+        throw new Error("INSUFFICIENT_CONTENT");
+      }
+      console.log("\u{1F916} Baker generating digest from screenshots...");
+      const digestGenerator = new BatchDigestGenerator(apiKey);
+      const analysis = await digestGenerator.generateDigest(session2.captures, {
+        userName: settings.userName || "User",
+        interests: settings.interests || [],
+        location: settings.location || ""
+      });
+      const recordId = (0, import_uuid.v4)();
+      const newRecord = {
+        id: recordId,
+        data: analysis,
+        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+      };
+      const userDataPath = import_electron4.app.getPath("userData");
+      const recordDir = import_path3.default.join(userDataPath, "analysis_records");
+      const recordPath = import_path3.default.join(recordDir, `${recordId}.json`);
+      const tempPath = import_path3.default.join(recordDir, `${recordId}.tmp`);
+      await import_fs3.default.promises.mkdir(recordDir, { recursive: true });
+      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs3.default.promises.rename(tempPath, recordPath);
+      console.log(`\u{1F4BE} Baker saved digest to disk: ${recordPath}`);
+      const metadataRecord = {
+        id: newRecord.id,
+        data: {
+          date: newRecord.data.date,
+          title: newRecord.data.title,
+          scheduledTime: newRecord.data.scheduledTime,
+          location: newRecord.data.location
+        },
+        leadStoryPreview: newRecord.leadStoryPreview
+      };
+      const currentAnalyses = store.get("analyses") || [];
+      store.set("analyses", [metadataRecord, ...currentAnalyses]);
+      store.set("settings", {
+        ...store.get("settings"),
+        lastBakeDate: now.toISOString(),
+        analysisStatus: "pending_delivery"
+      });
+      console.log(`\u{1F950} Baker (Screenshot-First) complete. Digest saved, awaiting delivery at ${scheduledTime}`);
+      console.log(`\u2705 Screenshot-First Pipeline Complete. Captures: ${session2.captureCount}`);
+    } catch (error) {
+      console.error("\u274C Baker (Screenshot-First) pipeline failed:", error.message);
+      if (context) {
+        await browserManager.close();
+      }
+      console.log(`\u{1F950} Baker failed silently. No paper to deliver at ${scheduledTime}`);
+    }
+  }
 };
 
 // src/main/main.ts

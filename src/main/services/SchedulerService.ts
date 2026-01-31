@@ -9,6 +9,7 @@ import { ActiveSchedule } from '../../types/schedule.js';
 import { BrowserManager } from './BrowserManager.js';
 import { InstagramScraper } from './InstagramScraper.js';
 import { AnalysisGenerator } from './AnalysisGenerator.js';
+import { BatchDigestGenerator } from './BatchDigestGenerator.js';
 import { SecureKeyManager } from './SecureKeyManager.js';
 import { AutomationErrorType } from '../../types/instagram.js';
 
@@ -823,9 +824,15 @@ export class SchedulerService {
         // Re-fetch settings in case archivePendingAnalysis modified them
         const settings = store.get('settings') || {};
 
-        // Use the existing pipeline based on USE_REAL_ANALYSIS flag
+        // Use the existing pipeline based on flags
         if (SchedulerService.USE_REAL_ANALYSIS) {
-            await this.triggerBakerReal(now, store, scheduledTime);
+            if (SchedulerService.USE_SCREENSHOT_FIRST) {
+                // NEW: Screenshot-First Digest architecture
+                await this.triggerBakerScreenshotFirst(now, store, scheduledTime);
+            } else {
+                // LEGACY: Extraction-based architecture
+                await this.triggerBakerReal(now, store, scheduledTime);
+            }
         } else {
             await this.triggerBakerSimulation(now, store, scheduledTime);
         }
@@ -1067,7 +1074,148 @@ export class SchedulerService {
      * - Notifies UI immediately after completion (no pending_delivery state)
      */
     public async triggerDebugRun(): Promise<void> {
-        console.log('🧪 Debug Run: Starting Visible Analysis Pipeline');
+        // Route to screenshot-first or legacy based on flag
+        if (SchedulerService.USE_SCREENSHOT_FIRST) {
+            await this.triggerDebugRunScreenshotFirst();
+        } else {
+            await this.triggerDebugRunLegacy();
+        }
+    }
+
+    /**
+     * DEBUG RUN (Screenshot-First): Uses the new screenshot-based architecture.
+     */
+    private async triggerDebugRunScreenshotFirst(): Promise<void> {
+        console.log('🧪 Debug Run (Screenshot-First): Starting Visible Browsing Pipeline');
+
+        const store = await this.getStore();
+        const settings = store.get('settings') || {};
+        const now = new Date();
+        const scheduledTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+        const MINIMUM_CAPTURES = 10;
+        const browserManager = BrowserManager.getInstance();
+        let context = null;
+
+        try {
+            // 1. Get API Key
+            const apiKey = await SecureKeyManager.getInstance().getKey();
+            if (!apiKey) {
+                console.error('🧪 Debug Run: NO API KEY');
+                this.mainWindow?.webContents.send('analysis-error', { message: 'API key not found.' });
+                return;
+            }
+
+            // 2. Launch browser in VISIBLE mode
+            console.log('🧪 Launching browser (VISIBLE mode)...');
+            context = await browserManager.launch({ headless: false });
+
+            // 3. Validate session
+            console.log('🧪 Validating Instagram session...');
+            const sessionCheck = await browserManager.validateSession();
+            if (!sessionCheck.valid) {
+                throw new Error(sessionCheck.reason || 'SESSION_EXPIRED');
+            }
+
+            // 4. Browse Instagram and capture screenshots
+            console.log('🧪 Browsing Instagram (Screenshot-First mode)...');
+            const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);  // debugMode = true
+            const session = await scraper.browseAndCapture(
+                5,  // 5 minutes of human-paced browsing
+                settings.interests || []
+            );
+
+            console.log(`🧪 Browsing complete: ${session.captureCount} screenshots captured`);
+
+            // 5. Close browser before generation
+            await browserManager.close();
+            context = null;
+
+            // 6. Check minimum captures threshold
+            if (session.captureCount < MINIMUM_CAPTURES) {
+                console.warn(`🧪 Insufficient captures: ${session.captureCount} (need ${MINIMUM_CAPTURES})`);
+                throw new Error('INSUFFICIENT_CONTENT');
+            }
+
+            // 7. Generate digest from screenshots
+            console.log('🧪 Generating digest from screenshots...');
+            const digestGenerator = new BatchDigestGenerator(apiKey);
+            const analysis = await digestGenerator.generateDigest(session.captures, {
+                userName: settings.userName || 'User',
+                interests: settings.interests || [],
+                location: settings.location || ''
+            });
+
+            // 8. Save analysis to file
+            const recordId = uuidv4();
+            const newRecord = {
+                id: recordId,
+                data: analysis,
+                leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+            };
+
+            const userDataPath = app.getPath('userData');
+            const recordDir = path.join(userDataPath, 'analysis_records');
+            const recordPath = path.join(recordDir, `${recordId}.json`);
+            const tempPath = path.join(recordDir, `${recordId}.tmp`);
+
+            await fs.promises.mkdir(recordDir, { recursive: true });
+            await fs.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+            await fs.promises.rename(tempPath, recordPath);
+
+            console.log(`🧪 Saved digest to disk: ${recordPath}`);
+
+            // 9. Save metadata to store
+            const metadataRecord = {
+                id: newRecord.id,
+                data: {
+                    date: newRecord.data.date,
+                    title: newRecord.data.title,
+                    scheduledTime: newRecord.data.scheduledTime,
+                    location: newRecord.data.location
+                },
+                leadStoryPreview: newRecord.leadStoryPreview
+            };
+
+            const currentAnalyses = store.get('analyses') || [];
+            store.set('analyses', [metadataRecord, ...currentAnalyses]);
+
+            // 10. IMMEDIATE DELIVERY
+            store.set('settings', {
+                ...store.get('settings'),
+                lastAnalysisDate: now.toISOString(),
+                analysisStatus: 'ready'
+            });
+
+            // 11. Notify UI immediately
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                console.log('🧪 Notifying UI: analysis-ready');
+                this.mainWindow.webContents.send('analysis-ready', metadataRecord);
+            }
+
+            console.log(`🧪 Debug Run (Screenshot-First) Complete! Captures: ${session.captureCount}`);
+
+        } catch (error: any) {
+            console.error('🧪 Debug Run Failed:', error.message);
+
+            if (context) {
+                await browserManager.close();
+            }
+
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('analysis-error', {
+                    message: `Debug run failed: ${error.message}`,
+                    canRetry: true
+                });
+            }
+        }
+    }
+
+    /**
+     * DEBUG RUN (Legacy): Uses the extraction-based architecture.
+     */
+    private async triggerDebugRunLegacy(): Promise<void> {
+        console.log('🧪 Debug Run (Legacy): Starting Visible Analysis Pipeline');
 
         const store = await this.getStore();
         const settings = store.get('settings') || {};
@@ -1203,4 +1351,133 @@ export class SchedulerService {
      * Set USE_REAL_ANALYSIS to true for production.
      */
     private static USE_REAL_ANALYSIS = true;  // LIVE FLIGHT TEST: Real pipeline enabled
+
+    /**
+     * Switch between extraction-based and screenshot-first approaches.
+     * Set USE_SCREENSHOT_FIRST to true for the new Screenshot-First Digest architecture.
+     */
+    private static USE_SCREENSHOT_FIRST = true;  // NEW: Screenshot-First Digest enabled
+
+    /**
+     * BAKER (Screenshot-First Mode): Browse Instagram naturally, capture screenshots,
+     * then batch-send to LLM for comprehensive digest generation.
+     *
+     * This is the new architecture that:
+     * - Takes screenshots of each post/story during browsing
+     * - No Vision API calls during browsing (all analysis at the end)
+     * - LLM sees actual visual content instead of extracted descriptions
+     */
+    private async triggerBakerScreenshotFirst(now: Date, store: any, scheduledTime: string) {
+        const settings = store.get('settings') || {};
+        const MINIMUM_CAPTURES_FOR_DIGEST = 10;
+
+        console.log(`🥐 Baker (Screenshot-First) - Starting Instagram browsing at ${new Date().toLocaleString()}`);
+
+        const browserManager = BrowserManager.getInstance();
+        let context = null;
+
+        try {
+            // 1. Get API Key
+            const apiKey = await SecureKeyManager.getInstance().getKey();
+            if (!apiKey) {
+                throw new Error('NO_API_KEY');
+            }
+
+            // 2. Launch browser (headless for baker)
+            console.log('🌐 Baker launching browser (headless)...');
+            context = await browserManager.launch({ headless: true });
+
+            // 3. Validate session
+            console.log('🔐 Baker validating Instagram session...');
+            const sessionCheck = await browserManager.validateSession();
+            if (!sessionCheck.valid) {
+                throw new Error(sessionCheck.reason || 'SESSION_EXPIRED');
+            }
+
+            // 4. Browse Instagram and capture screenshots
+            console.log('📱 Baker browsing Instagram (Screenshot-First mode)...');
+            const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
+            const session = await scraper.browseAndCapture(
+                5,  // 5 minutes of human-paced browsing
+                settings.interests || []
+            );
+
+            console.log(`📸 Baker browsing complete: ${session.captureCount} screenshots captured`);
+
+            // 5. Close browser before generation
+            await browserManager.close();
+            context = null;
+
+            // 6. Check minimum captures threshold
+            if (session.captureCount < MINIMUM_CAPTURES_FOR_DIGEST) {
+                console.warn(`⚠️ Baker: Insufficient captures: ${session.captureCount} (need ${MINIMUM_CAPTURES_FOR_DIGEST})`);
+                throw new Error('INSUFFICIENT_CONTENT');
+            }
+
+            // 7. Generate digest from screenshots (ONE API call)
+            console.log('🤖 Baker generating digest from screenshots...');
+            const digestGenerator = new BatchDigestGenerator(apiKey);
+            const analysis = await digestGenerator.generateDigest(session.captures, {
+                userName: settings.userName || 'User',
+                interests: settings.interests || [],
+                location: settings.location || ''
+            });
+
+            // 8. Save analysis to file
+            const recordId = uuidv4();
+            const newRecord = {
+                id: recordId,
+                data: analysis,
+                leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+            };
+
+            const userDataPath = app.getPath('userData');
+            const recordDir = path.join(userDataPath, 'analysis_records');
+            const recordPath = path.join(recordDir, `${recordId}.json`);
+            const tempPath = path.join(recordDir, `${recordId}.tmp`);
+
+            await fs.promises.mkdir(recordDir, { recursive: true });
+            await fs.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+            await fs.promises.rename(tempPath, recordPath);
+
+            console.log(`💾 Baker saved digest to disk: ${recordPath}`);
+
+            // 9. Save metadata to store
+            const metadataRecord = {
+                id: newRecord.id,
+                data: {
+                    date: newRecord.data.date,
+                    title: newRecord.data.title,
+                    scheduledTime: newRecord.data.scheduledTime,
+                    location: newRecord.data.location
+                },
+                leadStoryPreview: newRecord.leadStoryPreview
+            };
+
+            const currentAnalyses = store.get('analyses') || [];
+            store.set('analyses', [metadataRecord, ...currentAnalyses]);
+
+            // 10. SILENT: Update status to 'pending_delivery' - NO NOTIFICATION!
+            store.set('settings', {
+                ...store.get('settings'),
+                lastBakeDate: now.toISOString(),
+                analysisStatus: 'pending_delivery'
+            });
+
+            console.log(`🥐 Baker (Screenshot-First) complete. Digest saved, awaiting delivery at ${scheduledTime}`);
+            console.log(`✅ Screenshot-First Pipeline Complete. Captures: ${session.captureCount}`);
+            // NO mainWindow.webContents.send() here - SILENT!
+
+        } catch (error: any) {
+            console.error('❌ Baker (Screenshot-First) pipeline failed:', error.message);
+
+            // Ensure browser is closed
+            if (context) {
+                await browserManager.close();
+            }
+
+            // Log error but DON'T notify UI - baker is silent
+            console.log(`🥐 Baker failed silently. No paper to deliver at ${scheduledTime}`);
+        }
+    }
 }

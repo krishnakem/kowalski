@@ -261,3 +261,43 @@ export interface InsufficientContentInfo {
     reason: string;
     nextRetry: string;
 }
+
+// ============================================================================
+// Screenshot-First Digest Types
+// ============================================================================
+
+/**
+ * Source type for captured content.
+ */
+export type CaptureSource = 'feed' | 'story' | 'search' | 'profile' | 'carousel';
+
+/**
+ * A single captured screenshot during browsing.
+ */
+export interface CapturedPost {
+    id: number;
+    screenshot: Buffer;           // Raw JPEG image data
+    source: CaptureSource;
+    interest?: string;            // For search results - which interest triggered this
+    timestamp: number;            // Unix timestamp of capture
+    scrollPosition: number;       // Y scroll position for deduplication
+}
+
+/**
+ * Result of a browsing session using screenshot-first approach.
+ */
+export interface BrowsingSession {
+    captures: CapturedPost[];     // All captured screenshots
+    sessionDuration: number;      // Total milliseconds
+    captureCount: number;         // Number of screenshots taken
+    scrapedAt: string;            // ISO timestamp
+}
+
+/**
+ * Configuration for batch digest generation.
+ */
+export interface DigestConfig {
+    userName: string;
+    interests: string[];
+    location?: string;
+}
