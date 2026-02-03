@@ -58,6 +58,17 @@ contextBridge.exposeInMainWorld('api', {
             const subscription = (_event: any, info: any) => callback(info);
             ipcRenderer.on('analysis-insufficient-content', subscription);
             return () => ipcRenderer.removeListener('analysis-insufficient-content', subscription);
+        },
+        // Debug run timer events (Cmd+Shift+H)
+        onDebugRunStarted: (callback: (info: { durationMs: number; startTime: number }) => void) => {
+            const subscription = (_event: any, info: any) => callback(info);
+            ipcRenderer.on('debug-run-started', subscription);
+            return () => ipcRenderer.removeListener('debug-run-started', subscription);
+        },
+        onDebugRunComplete: (callback: () => void) => {
+            const subscription = () => callback();
+            ipcRenderer.on('debug-run-complete', subscription);
+            return () => ipcRenderer.removeListener('debug-run-complete', subscription);
         }
     },
     analyses: {

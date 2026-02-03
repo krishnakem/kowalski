@@ -92,7 +92,7 @@ const ApiSettings = () => {
                   try {
                     const realKey = await window.api.settings.getSecureKey();
                     if (realKey) {
-                      setSettings(prev => ({ ...prev, apiKey: realKey }));
+                      setSettings({ ...settings, apiKey: realKey });
                     }
                   } catch (err: any) {
                     console.error("Unmask error:", err);

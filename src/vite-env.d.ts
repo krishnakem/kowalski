@@ -21,6 +21,9 @@ interface Window {
             getSecureKey: () => Promise<string | null>;
             onAnalysisReady: (callback: (analysis: any) => void) => () => void;
             onScheduleUpdated: (callback: (schedule: any) => void) => () => void;
+            // Debug run timer events (Cmd+Shift+H)
+            onDebugRunStarted: (callback: (info: { durationMs: number; startTime: number }) => void) => () => void;
+            onDebugRunComplete: (callback: () => void) => () => void;
         };
         analyses: {
             get: () => Promise<any[]>;

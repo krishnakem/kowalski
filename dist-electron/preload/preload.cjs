@@ -56,6 +56,17 @@ import_electron.contextBridge.exposeInMainWorld("api", {
       const subscription = (_event, info) => callback(info);
       import_electron.ipcRenderer.on("analysis-insufficient-content", subscription);
       return () => import_electron.ipcRenderer.removeListener("analysis-insufficient-content", subscription);
+    },
+    // Debug run timer events (Cmd+Shift+H)
+    onDebugRunStarted: (callback) => {
+      const subscription = (_event, info) => callback(info);
+      import_electron.ipcRenderer.on("debug-run-started", subscription);
+      return () => import_electron.ipcRenderer.removeListener("debug-run-started", subscription);
+    },
+    onDebugRunComplete: (callback) => {
+      const subscription = () => callback();
+      import_electron.ipcRenderer.on("debug-run-complete", subscription);
+      return () => import_electron.ipcRenderer.removeListener("debug-run-complete", subscription);
     }
   },
   analyses: {

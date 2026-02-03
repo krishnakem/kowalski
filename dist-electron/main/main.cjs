@@ -2132,7 +2132,7 @@ var Bezier = class _Bezier {
       }
       return s;
     }).reverse();
-    const fs6 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils.makeline(bs, fs6), le = utils.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
+    const fs7 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils.makeline(bs, fs7), le = utils.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
     return new PolyBezier(segments);
   }
   outlineshapes(d1, d2, curveIntersectionThreshold) {
@@ -2974,13 +2974,84 @@ var HumanScroll = class {
       if (viewportHeight === null || currentScroll === null) return false;
       const elementCenter = box.y + box.height / 2;
       const viewportCenter = viewportHeight / 2;
-      const scrollNeeded = elementCenter - viewportCenter - currentScroll;
+      const scrollNeeded = elementCenter - viewportCenter;
       if (Math.abs(scrollNeeded) > 50) {
-        await this.scroll({ baseDistance: scrollNeeded });
+        await this.preciseScroll(scrollNeeded);
       }
       return true;
     } catch {
       return false;
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+  }
+  /**
+   * Scroll to center an element with verification and retry.
+   * Ensures the post is actually centered after scrolling.
+   *
+   * This is the recommended method for post-centered browsing.
+   *
+   * @param backendNodeId - CDP backend node ID from accessibility tree
+   * @param maxRetries - Maximum centering attempts (default: 2)
+   * @returns Object with success status and final offset from center
+   */
+  async scrollToElementCentered(backendNodeId, maxRetries = 2) {
+    const TOLERANCE = 80 + Math.random() * 40;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      let cdpSession = null;
+      try {
+        cdpSession = await this.page.context().newCDPSession(this.page);
+        const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
+        if (!box) {
+          return { success: false, finalOffset: Infinity };
+        }
+        const viewportHeight = await this.cdpEvaluate("window.innerHeight");
+        if (!viewportHeight) {
+          return { success: false, finalOffset: Infinity };
+        }
+        const elementCenterY = box.y + box.height / 2;
+        const viewportCenterY = viewportHeight / 2;
+        const offset = elementCenterY - viewportCenterY;
+        if (Math.abs(offset) <= TOLERANCE) {
+          console.log(`  \u2713 Post centered (offset: ${Math.round(offset)}px, attempt: ${attempt})`);
+          return { success: true, finalOffset: offset };
+        }
+        console.log(`  \u{1F4CD} Centering post (offset: ${Math.round(offset)}px, attempt: ${attempt + 1}/${maxRetries + 1})`);
+        await this.preciseScroll(offset);
+        const basePause = 150 + Math.random() * 100;
+        await new Promise((r) => setTimeout(r, basePause * this.sessionTimingMultiplier));
+      } finally {
+        if (cdpSession) {
+          await cdpSession.detach().catch(() => {
+          });
+        }
+      }
+    }
+    const finalOffset = await this.checkElementCenterOffset(backendNodeId);
+    const success = Math.abs(finalOffset) <= TOLERANCE;
+    if (!success) {
+      console.log(`  \u26A0\uFE0F Centering incomplete after ${maxRetries + 1} attempts (final offset: ${Math.round(finalOffset)}px)`);
+    }
+    return { success, finalOffset };
+  }
+  /**
+   * Check how far an element is from viewport center.
+   * Helper method for scroll verification.
+   */
+  async checkElementCenterOffset(backendNodeId) {
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
+      if (!box) return Infinity;
+      const viewportHeight = await this.cdpEvaluate("window.innerHeight");
+      if (!viewportHeight) return Infinity;
+      const elementCenterY = box.y + box.height / 2;
+      const viewportCenterY = viewportHeight / 2;
+      return elementCenterY - viewportCenterY;
     } finally {
       if (cdpSession) {
         await cdpSession.detach().catch(() => {
@@ -3000,6 +3071,29 @@ var HumanScroll = class {
     for (let i = 0; i < steps; i++) {
       await this.page.mouse.wheel(0, stepSize);
       await new Promise((resolve) => setTimeout(resolve, 15 + Math.random() * 15));
+    }
+  }
+  /**
+   * Precise scroll for centering operations.
+   * Unlike scroll(), this does NOT add variability - we need exact positioning.
+   * Still uses easing for human-like feel.
+   *
+   * @param distance - Exact pixels to scroll (positive = down, negative = up)
+   */
+  async preciseScroll(distance) {
+    const steps = 12 + Math.floor(Math.random() * 6);
+    const direction = distance > 0 ? 1 : -1;
+    const absDistance = Math.abs(distance);
+    let scrolled = 0;
+    for (let i = 0; i < steps; i++) {
+      const progress = i / steps;
+      const easing = 1 - Math.pow(1 - progress, 3);
+      const targetScrolled = absDistance * easing;
+      const stepDistance = (targetScrolled - scrolled) * direction;
+      await this.page.mouse.wheel(0, stepDistance);
+      scrolled = targetScrolled;
+      const baseDelay = 10 + Math.random() * 30;
+      await new Promise((resolve) => setTimeout(resolve, baseDelay * this.sessionTimingMultiplier));
     }
   }
   /**
@@ -3171,9 +3265,51 @@ var A11yNavigator = class {
   page;
   // Session-level timing multiplier for cross-session variance in typing delays
   sessionTimingMultiplier;
+  // === CDP Session Management ===
+  // Reduces session churn by reusing sessions within a short window
+  managedSession = null;
+  sessionLastUsed = 0;
+  SESSION_TIMEOUT_MS = 5e3;
+  // Auto-detach after 5s idle
   constructor(page) {
     this.page = page;
     this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
+  }
+  // =========================================================================
+  // CDP Session Management (Reduce Session Churn)
+  // =========================================================================
+  /**
+   * Execute an operation with a managed CDP session.
+   * Sessions are reused within a short window to reduce overhead and staleness.
+   *
+   * @param operation - Async function that uses the CDP session
+   * @returns Result of the operation
+   */
+  async withSession(operation) {
+    const now = Date.now();
+    if (this.managedSession && now - this.sessionLastUsed > this.SESSION_TIMEOUT_MS) {
+      await this.forceReleaseSession();
+    }
+    if (!this.managedSession) {
+      this.managedSession = await this.page.context().newCDPSession(this.page);
+    }
+    this.sessionLastUsed = now;
+    try {
+      return await operation(this.managedSession);
+    } catch (error) {
+      await this.forceReleaseSession();
+      throw error;
+    }
+  }
+  /**
+   * Force-release the managed session (e.g., on navigation or error).
+   */
+  async forceReleaseSession() {
+    if (this.managedSession) {
+      await this.managedSession.detach().catch(() => {
+      });
+      this.managedSession = null;
+    }
   }
   /**
    * Get content state by analyzing URL only.
@@ -3448,46 +3584,367 @@ var A11yNavigator = class {
     return stories;
   }
   /**
+   * Find Instagram post elements (<article>) in the viewport.
+   * Used for post-centered scrolling - each screenshot should contain ONE post.
+   *
+   * Returns posts sorted by vertical position (top to bottom).
+   * Includes backendNodeId for CDP scroll-to-element operations.
+   *
+   * @returns Array of InteractiveElements representing posts with bounding boxes
+   */
+  async findPostElements() {
+    const posts = [];
+    const nodes = await this.getAccessibilityTree();
+    const articleNodes = nodes.filter((node) => {
+      if (node.ignored) return false;
+      const role = node.role?.value?.toLowerCase();
+      return role === "article";
+    });
+    if (articleNodes.length === 0) {
+      return posts;
+    }
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      const viewport = await this.getViewportInfo();
+      for (const node of articleNodes) {
+        if (!node.backendDOMNodeId) continue;
+        const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+        if (!box || box.width <= 0 || box.height <= 0) continue;
+        if (box.width < 200 || box.height < 200) continue;
+        const isNearViewport = box.y < viewport.height + 500 && box.y + box.height > -500;
+        if (!isNearViewport) continue;
+        posts.push({
+          role: "article",
+          name: node.name?.value || "Post",
+          selector: "",
+          // No selector - we use coordinates only
+          boundingBox: box,
+          backendNodeId: node.backendDOMNodeId
+        });
+      }
+    } catch (error) {
+      console.warn("Failed to get post bounding boxes:", error);
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+    return posts.sort((a, b) => (a.boundingBox?.y || 0) - (b.boundingBox?.y || 0));
+  }
+  /**
+   * Find post elements with bounding boxes in a SINGLE CDP session.
+   * Prevents staleness between tree query and box retrieval.
+   *
+   * This is the recommended method for post-centered scrolling.
+   * Unlike findPostElements(), this uses withSession() to ensure
+   * all operations happen atomically.
+   *
+   * @returns Posts with fresh bounding boxes from same CDP session
+   */
+  async findPostElementsAtomic() {
+    return this.withSession(async (cdpSession) => {
+      const posts = [];
+      const response = await cdpSession.send("Accessibility.getFullAXTree");
+      const nodes = response.nodes || [];
+      const articleNodes = nodes.filter((node) => {
+        if (node.ignored) return false;
+        const role = node.role?.value?.toLowerCase();
+        return role === "article";
+      });
+      if (articleNodes.length === 0) {
+        return posts;
+      }
+      const viewportResult = await cdpSession.send("Runtime.evaluate", {
+        expression: `JSON.stringify({
+                    height: window.innerHeight,
+                    scrollY: window.scrollY
+                })`,
+        returnByValue: true
+      });
+      const viewport = JSON.parse(viewportResult.result.value);
+      for (const node of articleNodes) {
+        if (!node.backendDOMNodeId) continue;
+        try {
+          const { model } = await cdpSession.send("DOM.getBoxModel", {
+            backendNodeId: node.backendDOMNodeId
+          });
+          if (!model?.content) continue;
+          const [x1, y1, x2, , , y3] = model.content;
+          const box = {
+            x: x1,
+            y: y1,
+            width: x2 - x1,
+            height: y3 - y1
+          };
+          if (box.width < 200 || box.height < 200) continue;
+          const isNearViewport = box.y < viewport.height + 500 && box.y + box.height > -500;
+          if (!isNearViewport) continue;
+          posts.push({
+            role: "article",
+            name: node.name?.value || "Post",
+            selector: "",
+            boundingBox: box,
+            backendNodeId: node.backendDOMNodeId
+          });
+        } catch {
+          continue;
+        }
+      }
+      return posts.sort((a, b) => (a.boundingBox?.y || 0) - (b.boundingBox?.y || 0));
+    });
+  }
+  /**
    * Find carousel "Next" button for multi-image posts.
    * Instagram uses a button with name containing "Next" or arrow patterns.
    *
    * @returns InteractiveElement with bounding box, or null if not found
    */
-  async findCarouselNextButton() {
-    const nodes = await this.getAccessibilityTree();
-    const nextPatterns = [
-      /^next$/i,
-      /next slide/i,
-      /go to slide/i,
-      /chevron.*right/i
-    ];
-    for (const pattern of nextPatterns) {
-      const matches = this.findMatchingNodes(nodes, "button", pattern);
-      if (matches.length > 0) {
-        const match = matches[0];
-        if (match.backendDOMNodeId) {
-          let cdpSession = null;
-          try {
-            cdpSession = await this.page.context().newCDPSession(this.page);
-            const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
-            if (box && box.width > 0 && box.height > 0) {
-              return {
-                role: match.role?.value || "button",
-                name: match.name?.value || "Next",
-                selector: "",
-                boundingBox: box
-              };
-            }
-          } finally {
-            if (cdpSession) {
-              await cdpSession.detach().catch(() => {
-              });
-            }
+  // =========================================================================
+  // DEPRECATED: Hardcoded button finders removed
+  // Use getAllInteractiveElements() with pattern matching instead.
+  // Example:
+  //   const elements = await navigator.getAllInteractiveElements();
+  //   const nextBtn = elements.find(el => /next|skip|forward/i.test(el.name));
+  // =========================================================================
+  /**
+   * Find ALL buttons on the current page.
+   * This mimics what a screen reader can highlight - every interactive button.
+   * Useful for discovery and debugging.
+   *
+   * @returns Array of InteractiveElements with bounding boxes
+   */
+  async findAllButtons() {
+    return this.withSession(async (cdpSession) => {
+      const buttons = [];
+      const response = await cdpSession.send("Accessibility.getFullAXTree");
+      const nodes = response.nodes || [];
+      const buttonNodes = nodes.filter((node) => {
+        if (node.ignored) return false;
+        const role = node.role?.value?.toLowerCase();
+        return role === "button";
+      });
+      for (const node of buttonNodes) {
+        if (!node.backendDOMNodeId) continue;
+        try {
+          const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+          if (!box) continue;
+          if (box.width > 10 && box.height > 10) {
+            buttons.push({
+              role: "button",
+              name: node.name?.value || "[unnamed]",
+              selector: "",
+              boundingBox: box,
+              backendNodeId: node.backendDOMNodeId
+            });
           }
+        } catch {
+          continue;
         }
       }
+      return buttons;
+    });
+  }
+  // =========================================================================
+  // SCREEN READER APPROACH - Generic Element Discovery
+  // =========================================================================
+  /**
+   * Get ALL interactive elements on the page with full semantic information.
+   * This is how screen readers discover clickable content.
+   *
+   * NO hardcoded patterns - returns raw A11y tree data.
+   * Let the caller decide what to interact with.
+   *
+   * @returns Array of all interactive elements with semantic info
+   */
+  async getAllInteractiveElements() {
+    const INTERACTIVE_ROLES = [
+      "button",
+      "link",
+      "menuitem",
+      "tab",
+      "checkbox",
+      "radio",
+      "switch",
+      "textbox",
+      "searchbox",
+      "slider",
+      "img"
+      // Include images (may be clickable)
+    ];
+    return this.withSession(async (cdpSession) => {
+      const response = await cdpSession.send("Accessibility.getFullAXTree");
+      const nodes = response.nodes || [];
+      const elements = [];
+      for (const node of nodes) {
+        if (node.ignored) continue;
+        const role = node.role?.value?.toLowerCase();
+        if (!INTERACTIVE_ROLES.includes(role || "")) continue;
+        const state = this.extractElementState(node);
+        if (state.disabled) continue;
+        if (!node.backendDOMNodeId) continue;
+        try {
+          const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+          if (!box || box.width < 1 || box.height < 1) continue;
+          elements.push({
+            role: role || "unknown",
+            name: node.name?.value || "[unnamed]",
+            description: node.description?.value || "",
+            value: node.value?.value || "",
+            state,
+            selector: "",
+            boundingBox: box,
+            backendNodeId: node.backendDOMNodeId
+          });
+        } catch {
+          continue;
+        }
+      }
+      return elements;
+    });
+  }
+  /**
+   * Extract state information from a node's properties.
+   * Screen readers use this to determine element state.
+   */
+  extractElementState(node) {
+    const state = {};
+    if (!node.properties) return state;
+    for (const prop of node.properties) {
+      const key = prop.name.toLowerCase();
+      const val = prop.value?.value;
+      if (key === "disabled") state.disabled = Boolean(val);
+      if (key === "checked") state.checked = Boolean(val);
+      if (key === "selected") state.selected = Boolean(val);
+      if (key === "expanded") state.expanded = Boolean(val);
+      if (key === "pressed") state.pressed = Boolean(val);
     }
-    return null;
+    return state;
+  }
+  /**
+   * Filter elements by role.
+   * Example: getAllButtons() is just filterByRole('button')
+   */
+  async filterByRole(role) {
+    const all = await this.getAllInteractiveElements();
+    return all.filter((el) => el.role === role);
+  }
+  /**
+   * Filter elements matching a name pattern.
+   * Example: Find "Next" or "Skip" buttons
+   */
+  async filterByNamePattern(pattern) {
+    const all = await this.getAllInteractiveElements();
+    return all.filter((el) => pattern.test(el.name));
+  }
+  /**
+   * Filter elements in a specific screen region.
+   * Example: Find buttons in the right half of the screen
+   */
+  async filterByRegion(region) {
+    const all = await this.getAllInteractiveElements();
+    return all.filter((el) => {
+      if (!el.boundingBox) return false;
+      const box = el.boundingBox;
+      return box.x >= region.x && box.x + box.width <= region.x + region.width && box.y >= region.y && box.y + box.height <= region.y + region.height;
+    });
+  }
+  /**
+   * Dump all interactive elements for debugging.
+   * Use this to learn what elements Instagram actually has.
+   */
+  async dumpInteractiveElements() {
+    const elements = await this.getAllInteractiveElements();
+    console.log("\n=== A11y Element Discovery (Screen Reader Mode) ===");
+    console.log(`Found ${elements.length} interactive elements:
+`);
+    for (const el of elements) {
+      const box = el.boundingBox;
+      const stateStr = Object.entries(el.state || {}).filter(([, v]) => v).map(([k]) => k).join(", ");
+      console.log(
+        `  [${el.role}] "${el.name}"` + (el.description ? ` - ${el.description}` : "") + (stateStr ? ` (${stateStr})` : "") + ` at (${box?.x?.toFixed(0)}, ${box?.y?.toFixed(0)}) ${box?.width?.toFixed(0)}x${box?.height?.toFixed(0)}`
+      );
+    }
+    console.log("===================================================\n");
+  }
+  // Legacy alias for backward compatibility
+  async findAllInteractiveElements() {
+    return this.getAllInteractiveElements();
+  }
+  // Legacy alias for backward compatibility
+  async dumpAllButtonsForDiscovery() {
+    return this.dumpInteractiveElements();
+  }
+  /**
+   * Detect if current viewport contains video content.
+   * Uses STRICT criteria to avoid false positives on stories.
+   *
+   * Video detection signals (must have at least one):
+   * 1. Mute/unmute/volume button - indicates audio track (videos only)
+   * 2. Video element role - actual video player element
+   * 3. Scrubber/timeline WITH duration display - video player controls
+   *
+   * Explicitly IGNORING (present in all stories, causes false positives):
+   * - Progress bars (story progress indicator)
+   * - Generic pause button (tap-to-pause on stories)
+   *
+   * @returns Object with isVideo and hasAudio flags
+   */
+  async detectVideoContent() {
+    const elements = await this.getAllInteractiveElements();
+    const hasMuteControl = elements.some(
+      (el) => el.role === "button" && /mute|unmute|volume/i.test(el.name)
+    );
+    const hasVideoElement = elements.some(
+      (el) => el.role === "video" || el.role === "application" && /video|player/i.test(el.name)
+    );
+    const hasScrubber = elements.some(
+      (el) => /scrub|timeline|slider|seek/i.test(el.name) || el.role === "slider" && /video|time/i.test(el.name)
+    );
+    const hasDuration = elements.some(
+      (el) => /\d+:\d+/.test(el.name) || /duration|remaining/i.test(el.name)
+    );
+    const isVideo = hasMuteControl || hasVideoElement || hasScrubber && hasDuration;
+    if (isVideo) {
+      console.log(`  \u{1F3AC} Video detected: mute=${hasMuteControl}, videoEl=${hasVideoElement}, scrubber=${hasScrubber}`);
+    }
+    return {
+      isVideo,
+      hasAudio: hasMuteControl
+    };
+  }
+  /**
+   * Get the first element from a list of nodes that has a valid bounding box.
+   * Used by button-finding methods to return actionable elements.
+   *
+   * @param nodes - Array of CDPAXNodes to check
+   * @returns InteractiveElement with bounding box, or null if none found
+   */
+  async getFirstElementWithBoundingBox(nodes) {
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      for (const node of nodes) {
+        if (!node.backendDOMNodeId) continue;
+        const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+        if (box && box.width > 0 && box.height > 0) {
+          return {
+            role: node.role?.value || "unknown",
+            name: node.name?.value || "[unnamed]",
+            selector: "",
+            boundingBox: box,
+            backendNodeId: node.backendDOMNodeId
+          };
+        }
+      }
+      return null;
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
   }
   /**
    * Find Story Highlights on a profile page.
@@ -3565,6 +4022,153 @@ var A11yNavigator = class {
       }
     }
     return null;
+  }
+  // =========================================================================
+  // SPATIAL DISCOVERY: Position-based Element Finding
+  // =========================================================================
+  /**
+   * Find a button positioned on the edge of content using spatial reasoning.
+   * Uses tiered strategy: 1) Image-relative search, 2) Viewport-center fallback
+   *
+   * For carousel navigation:
+   * - Button on RIGHT edge = likely "next"
+   * - Button on LEFT edge = likely "previous"
+   *
+   * Key insight: Carousel buttons are ALWAYS in the content area (center of screen),
+   * NEVER in sidebars. This allows safe fallback when image detection fails.
+   *
+   * @param side - 'right' for next, 'left' for previous
+   * @param contentArea - Optional bounding box of the content area
+   * @returns Button element positioned on the specified side, or null
+   */
+  async findEdgeButton(side, contentArea) {
+    const elements = await this.getAllInteractiveElements();
+    const viewport = await this.getViewportInfo();
+    const clickables = elements.filter(
+      (el) => (el.role === "button" || el.role === "link") && el.boundingBox && el.boundingBox.width > 0
+    );
+    if (clickables.length === 0) return null;
+    if (contentArea) {
+      const edgeMargin = contentArea.width * 0.3;
+      const overflow = contentArea.width * 0.05;
+      if (side === "right") {
+        const rightZoneStart = contentArea.x + contentArea.width - edgeMargin;
+        const rightZoneEnd = contentArea.x + contentArea.width + overflow;
+        const rightButtons = clickables.filter((btn) => {
+          const box = btn.boundingBox;
+          const buttonCenterX = box.x + box.width / 2;
+          const buttonCenterY = box.y + box.height / 2;
+          const inRightZone = buttonCenterX >= rightZoneStart && buttonCenterX <= rightZoneEnd;
+          const inVerticalBounds = buttonCenterY >= contentArea.y - 20 && buttonCenterY <= contentArea.y + contentArea.height + 20;
+          return inRightZone && inVerticalBounds;
+        }).sort((a, b) => b.boundingBox.x - a.boundingBox.x);
+        if (rightButtons.length > 0) {
+          console.log(`  \u{1F3AF} Spatial (image): found ${rightButtons.length} button(s), using "${rightButtons[0].name}" at x=${rightButtons[0].boundingBox.x}`);
+          return rightButtons[0];
+        }
+      } else {
+        const leftZoneStart = contentArea.x - overflow;
+        const leftZoneEnd = contentArea.x + edgeMargin;
+        const leftButtons = clickables.filter((btn) => {
+          const box = btn.boundingBox;
+          const buttonCenterX = box.x + box.width / 2;
+          const buttonCenterY = box.y + box.height / 2;
+          const inLeftZone = buttonCenterX >= leftZoneStart && buttonCenterX <= leftZoneEnd;
+          const inVerticalBounds = buttonCenterY >= contentArea.y - 20 && buttonCenterY <= contentArea.y + contentArea.height + 20;
+          return inLeftZone && inVerticalBounds;
+        }).sort((a, b) => a.boundingBox.x - b.boundingBox.x);
+        if (leftButtons.length > 0) {
+          console.log(`  \u{1F3AF} Spatial (image): found ${leftButtons.length} button(s), using "${leftButtons[0].name}" at x=${leftButtons[0].boundingBox.x}`);
+          return leftButtons[0];
+        }
+      }
+    }
+    const viewportCenterX = viewport.width / 2;
+    const inStoryViewer = this.isInStoryViewer();
+    if (inStoryViewer) {
+      const storyZoneStart = viewport.width * 0.28;
+      const storyZoneEnd = viewport.width * 0.72;
+      if (side === "right") {
+        const rightButtons = clickables.filter((btn) => {
+          const box = btn.boundingBox;
+          const buttonCenterX = box.x + box.width / 2;
+          return buttonCenterX > viewportCenterX && buttonCenterX < storyZoneEnd;
+        }).sort((a, b) => a.boundingBox.x - b.boundingBox.x);
+        if (rightButtons.length > 0) {
+          console.log(`  \u{1F3AF} Spatial (story): found ${rightButtons.length} button(s), using "${rightButtons[0].name}" at x=${Math.round(rightButtons[0].boundingBox.x)}`);
+          return rightButtons[0];
+        }
+      } else {
+        const leftButtons = clickables.filter((btn) => {
+          const box = btn.boundingBox;
+          const buttonCenterX = box.x + box.width / 2;
+          return buttonCenterX > storyZoneStart && buttonCenterX < viewportCenterX;
+        }).sort((a, b) => b.boundingBox.x - a.boundingBox.x);
+        if (leftButtons.length > 0) {
+          console.log(`  \u{1F3AF} Spatial (story): found ${leftButtons.length} button(s), using "${leftButtons[0].name}" at x=${Math.round(leftButtons[0].boundingBox.x)}`);
+          return leftButtons[0];
+        }
+      }
+      console.log(`  \u{1F3AF} Spatial (story): no button found in ${side} zone`);
+      return null;
+    }
+    const safeZoneStart = viewport.width * 0.15;
+    const safeZoneEnd = viewport.width * 0.85;
+    if (side === "right") {
+      const rightButtons = clickables.filter((btn) => {
+        const box = btn.boundingBox;
+        const buttonCenterX = box.x + box.width / 2;
+        return buttonCenterX > viewportCenterX && buttonCenterX < safeZoneEnd;
+      }).sort((a, b) => b.boundingBox.x - a.boundingBox.x);
+      if (rightButtons.length > 0) {
+        console.log(`  \u{1F3AF} Spatial (fallback): found ${rightButtons.length} button(s), using "${rightButtons[0].name}" at x=${Math.round(rightButtons[0].boundingBox.x)}`);
+        return rightButtons[0];
+      }
+    } else {
+      const leftButtons = clickables.filter((btn) => {
+        const box = btn.boundingBox;
+        const buttonCenterX = box.x + box.width / 2;
+        return buttonCenterX > safeZoneStart && buttonCenterX < viewportCenterX;
+      }).sort((a, b) => a.boundingBox.x - b.boundingBox.x);
+      if (leftButtons.length > 0) {
+        console.log(`  \u{1F3AF} Spatial (fallback): found ${leftButtons.length} button(s), using "${leftButtons[0].name}" at x=${Math.round(leftButtons[0].boundingBox.x)}`);
+        return leftButtons[0];
+      }
+    }
+    console.log(`  \u{1F3AF} Spatial: no button found in ${side} zone`);
+    return null;
+  }
+  /**
+   * Find navigation controls for carousel/gallery using spatial reasoning.
+   * Returns next/previous buttons based on position, not text patterns.
+   *
+   * Uses expanded image detection (img, figure, graphic roles) and passes
+   * contentArea to findEdgeButton which will use fallback if needed.
+   */
+  async findCarouselControls() {
+    const elements = await this.getAllInteractiveElements();
+    const imageElements = elements.filter(
+      (el) => (el.role === "img" || el.role === "figure" || el.role === "graphic") && el.boundingBox && el.boundingBox.width > 100
+    );
+    let mainImage;
+    let maxArea = 0;
+    for (const img of imageElements) {
+      const area = (img.boundingBox?.width || 0) * (img.boundingBox?.height || 0);
+      if (area > maxArea) {
+        maxArea = area;
+        mainImage = img;
+      }
+    }
+    const contentArea = mainImage?.boundingBox;
+    if (contentArea) {
+      console.log(`  \u{1F3AF} Using image bounds: ${Math.round(contentArea.width)}x${Math.round(contentArea.height)} at (${Math.round(contentArea.x)}, ${Math.round(contentArea.y)})`);
+    } else {
+      console.log(`  \u{1F3AF} No image found, using viewport-center fallback`);
+    }
+    return {
+      next: await this.findEdgeButton("right", contentArea),
+      previous: await this.findEdgeButton("left", contentArea)
+    };
   }
   /**
    * Find post caption text in the accessibility tree.
@@ -3730,6 +4334,39 @@ var A11yNavigator = class {
       return nodeName.includes("comment") && node.role?.value === "button";
     });
     return hasLikeButton || hasCommentButton;
+  }
+  /**
+   * Detect if the current viewport shows an ad/sponsored content.
+   * Uses accessibility tree to find ad indicators without Vision API.
+   *
+   * Detection signals:
+   * - "Sponsored" label (below username in post header)
+   * - "Learn more" button (common in ads)
+   * - "Shop now" button
+   * - "Paid partnership" text
+   *
+   * @returns Object with isAd flag and reason
+   */
+  async detectAdContent() {
+    const nodes = await this.getAccessibilityTree();
+    for (const node of nodes) {
+      if (node.ignored) continue;
+      const nodeName = node.name?.value?.toLowerCase() || "";
+      const nodeRole = node.role?.value?.toLowerCase() || "";
+      if (nodeName === "sponsored") {
+        return { isAd: true, reason: "Sponsored label detected" };
+      }
+      if ((nodeRole === "button" || nodeRole === "link") && nodeName.includes("learn more")) {
+        return { isAd: true, reason: "Learn more button detected" };
+      }
+      if ((nodeRole === "button" || nodeRole === "link") && nodeName.includes("shop now")) {
+        return { isAd: true, reason: "Shop now button detected" };
+      }
+      if (nodeName.includes("paid partnership")) {
+        return { isAd: true, reason: "Paid partnership detected" };
+      }
+    }
+    return { isAd: false };
   }
   /**
    * Get enhanced content state using both URL and accessibility tree.
@@ -4374,6 +5011,267 @@ var A11yNavigator = class {
    */
   async getFullAccessibilityTree() {
     return this.getAccessibilityTree();
+  }
+  // =========================================================================
+  // UNIVERSAL ACCESSIBILITY (Screen Reader-Like Capabilities)
+  // =========================================================================
+  /**
+   * Find ANY element by role and name pattern - NO size filters, NO limits.
+   * This is the screen reader equivalent - can find any element in the tree.
+   *
+   * @param role - Accessibility role (e.g., 'button', 'link', 'image', 'textbox')
+   * @param namePattern - Regex pattern to match against accessible name
+   * @returns First matching element with bounding box, or null
+   */
+  async findAnyElement(role, namePattern) {
+    const pattern = typeof namePattern === "string" ? new RegExp(namePattern, "i") : namePattern;
+    const nodes = await this.getAccessibilityTree();
+    const match = nodes.find((node) => {
+      if (node.ignored) return false;
+      const nodeRole = node.role?.value?.toLowerCase();
+      const nodeName = node.name?.value || "";
+      return nodeRole === role.toLowerCase() && pattern.test(nodeName);
+    });
+    if (!match?.backendDOMNodeId) return null;
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+      if (box && box.width > 0 && box.height > 0) {
+        return {
+          role: match.role?.value || role,
+          name: match.name?.value || "",
+          selector: "",
+          boundingBox: box,
+          backendNodeId: match.backendDOMNodeId
+        };
+      }
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+    return null;
+  }
+  /**
+   * Find ALL elements matching role and pattern - NO limits.
+   * Returns every match in the accessibility tree.
+   *
+   * @param role - Accessibility role (e.g., 'button', 'link')
+   * @param namePattern - Regex pattern to match against accessible name
+   * @returns Array of all matching elements with bounding boxes
+   */
+  async findAllElements(role, namePattern) {
+    const pattern = typeof namePattern === "string" ? new RegExp(namePattern, "i") : namePattern;
+    const nodes = await this.getAccessibilityTree();
+    const elements = [];
+    const matches = nodes.filter((node) => {
+      if (node.ignored) return false;
+      const nodeRole = node.role?.value?.toLowerCase();
+      const nodeName = node.name?.value || "";
+      return nodeRole === role.toLowerCase() && pattern.test(nodeName);
+    });
+    if (matches.length === 0) return elements;
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      for (const match of matches) {
+        if (!match.backendDOMNodeId) continue;
+        const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+        if (box && box.width > 0 && box.height > 0) {
+          elements.push({
+            role: match.role?.value || role,
+            name: match.name?.value || "",
+            selector: "",
+            boundingBox: box,
+            backendNodeId: match.backendDOMNodeId
+          });
+        }
+      }
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+    return elements;
+  }
+  /**
+   * Find element WITHIN a specific container (e.g., find Like button inside a post).
+   * Uses childIds to traverse the tree contextually like a screen reader.
+   *
+   * @param containerNodeId - The backendNodeId of the container element
+   * @param role - Role to search for within container
+   * @param namePattern - Name pattern to match
+   * @returns Matching element within the container, or null
+   */
+  async findElementInContainer(containerNodeId, role, namePattern) {
+    const pattern = typeof namePattern === "string" ? new RegExp(namePattern, "i") : namePattern;
+    const nodes = await this.getAccessibilityTree();
+    const nodeMap = /* @__PURE__ */ new Map();
+    for (const node of nodes) {
+      nodeMap.set(node.nodeId, node);
+    }
+    const container = nodes.find((n) => n.backendDOMNodeId === containerNodeId);
+    if (!container) return null;
+    const searchChildren = (nodeId) => {
+      const node = nodeMap.get(nodeId);
+      if (!node) return null;
+      if (!node.ignored && node.role?.value?.toLowerCase() === role.toLowerCase() && pattern.test(node.name?.value || "")) {
+        return node;
+      }
+      for (const childId of node.childIds || []) {
+        const found = searchChildren(childId);
+        if (found) return found;
+      }
+      return null;
+    };
+    const match = searchChildren(container.nodeId);
+    if (!match?.backendDOMNodeId) return null;
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+      if (box && box.width > 0 && box.height > 0) {
+        return {
+          role: match.role?.value || role,
+          name: match.name?.value || "",
+          selector: "",
+          boundingBox: box,
+          backendNodeId: match.backendDOMNodeId
+        };
+      }
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+    return null;
+  }
+  /**
+   * Get all child elements of a node - enables tree traversal like screen readers.
+   *
+   * @param parentNodeId - The backendNodeId of the parent element
+   * @returns Array of child elements with their roles, names, and bounding boxes
+   */
+  async getChildElements(parentNodeId) {
+    const nodes = await this.getAccessibilityTree();
+    const children = [];
+    const nodeMap = /* @__PURE__ */ new Map();
+    for (const node of nodes) {
+      nodeMap.set(node.nodeId, node);
+    }
+    const parent = nodes.find((n) => n.backendDOMNodeId === parentNodeId);
+    if (!parent || !parent.childIds) return children;
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      for (const childId of parent.childIds) {
+        const child = nodeMap.get(childId);
+        if (!child || child.ignored || !child.backendDOMNodeId) continue;
+        const box = await this.getNodeBoundingBox(cdpSession, child.backendDOMNodeId);
+        if (box && box.width > 0 && box.height > 0) {
+          children.push({
+            role: child.role?.value || "unknown",
+            name: child.name?.value || "",
+            selector: "",
+            boundingBox: box,
+            backendNodeId: child.backendDOMNodeId
+          });
+        }
+      }
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+    return children;
+  }
+  /**
+   * Extract metadata from a post container.
+   * Traverses the post's children to find username, timestamp, counts, etc.
+   *
+   * @param postNodeId - The backendNodeId of the post (article) element
+   * @returns PostMetadata object with extracted info, or null
+   */
+  async extractPostMetadata(postNodeId) {
+    const nodes = await this.getAccessibilityTree();
+    const nodeMap = /* @__PURE__ */ new Map();
+    for (const node of nodes) {
+      nodeMap.set(node.nodeId, node);
+    }
+    const container = nodes.find((n) => n.backendDOMNodeId === postNodeId);
+    if (!container) return null;
+    const metadata = {};
+    const searchMetadata = (nodeId) => {
+      const node = nodeMap.get(nodeId);
+      if (!node || node.ignored) return;
+      const name = node.name?.value || "";
+      const role = node.role?.value?.toLowerCase() || "";
+      if (/\d+\s*(second|minute|hour|day|week|month)s?\s*ago/i.test(name) || /^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+/i.test(name)) {
+        metadata.timestamp = name;
+      }
+      if (/^[\d,]+\s*likes?$/i.test(name)) {
+        metadata.likeCount = name;
+      }
+      if (/view\s*(all\s*)?\d+\s*comments?/i.test(name)) {
+        metadata.commentCount = name;
+      }
+      if (role === "link" && (name.startsWith("@") || /^[a-z0-9._]+$/i.test(name))) {
+        if (!metadata.username) {
+          metadata.username = name.startsWith("@") ? name : `@${name}`;
+        }
+      }
+      for (const childId of node.childIds || []) {
+        searchMetadata(childId);
+      }
+    };
+    searchMetadata(container.nodeId);
+    return metadata;
+  }
+  /**
+   * Dump the full accessibility tree to console for debugging.
+   * Shows exactly what a screen reader would see.
+   */
+  async dumpAccessibilityTree() {
+    const nodes = await this.getAccessibilityTree();
+    console.log("\n========== ACCESSIBILITY TREE DUMP ==========\n");
+    console.log(`Total nodes: ${nodes.length}
+`);
+    const byRole = /* @__PURE__ */ new Map();
+    for (const node of nodes) {
+      if (node.ignored) continue;
+      const role = node.role?.value || "unknown";
+      if (!byRole.has(role)) {
+        byRole.set(role, []);
+      }
+      byRole.get(role).push(node);
+    }
+    console.log("=== SUMMARY BY ROLE ===");
+    for (const [role, roleNodes] of byRole.entries()) {
+      console.log(`  ${role}: ${roleNodes.length} elements`);
+    }
+    console.log("\n=== INTERACTIVE ELEMENTS ===");
+    const interactiveRoles = ["button", "link", "textbox", "searchbox", "checkbox", "radio", "menuitem"];
+    for (const role of interactiveRoles) {
+      const roleNodes = byRole.get(role) || [];
+      if (roleNodes.length > 0) {
+        console.log(`
+[${role.toUpperCase()}] (${roleNodes.length} found)`);
+        for (const node of roleNodes.slice(0, 20)) {
+          const name = node.name?.value || "[no name]";
+          const hasBox = !!node.backendDOMNodeId;
+          console.log(`  \u2022 "${name.slice(0, 50)}${name.length > 50 ? "..." : ""}" ${hasBox ? "\u2713" : "\u2717"}`);
+        }
+        if (roleNodes.length > 20) {
+          console.log(`  ... and ${roleNodes.length - 20} more`);
+        }
+      }
+    }
+    console.log("\n========== END DUMP ==========\n");
   }
   // =========================================================================
   // DEBUG: GAZE OVERLAY VISUALIZATION
@@ -5058,22 +5956,64 @@ ${JSON.stringify(spatialMap.slice(0, 15), null, 0)}`;
 };
 
 // src/main/services/ScreenshotCollector.ts
+var import_crypto = require("crypto");
+var fs3 = __toESM(require("fs"), 1);
+var path3 = __toESM(require("path"), 1);
 var DEFAULT_CONFIG = {
-  maxCaptures: 50,
-  // ~7.5MB memory at 150KB/screenshot
+  maxCaptures: 60,
+  // Capture more, filter later with ImageTagger
   jpegQuality: 85,
   // Good balance of quality and size
   minScrollDelta: 200
   // Must scroll at least 200px for new capture
+};
+var STORY_CROP_CONFIG = {
+  topMargin: 65,
+  // Crop out progress bar and header
+  bottomMargin: 70
+  // Crop out reply box
 };
 var ScreenshotCollector = class {
   page;
   captures = [];
   config;
   lastScrollPosition = 0;
+  outputDir = null;
+  // Deduplication tracking
+  capturedPostIds = /* @__PURE__ */ new Set();
+  // Track by Instagram post ID
+  capturedHashes = /* @__PURE__ */ new Set();
+  // Track by image hash (for carousel/story)
+  capturedPositions = /* @__PURE__ */ new Set();
+  // Track by scroll position bucket (100px)
   constructor(page, config = {}) {
     this.page = page;
     this.config = { ...DEFAULT_CONFIG, ...config };
+    if (this.config.saveToDirectory) {
+      const sessionTimestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      this.outputDir = path3.join(this.config.saveToDirectory, `session_${sessionTimestamp}`);
+      this.ensureOutputDir();
+      console.log(`\u{1F4F8} Debug screenshots will be saved to: ${this.outputDir}`);
+    }
+  }
+  /**
+   * Ensure the output directory exists for saving screenshots.
+   */
+  ensureOutputDir() {
+    if (this.outputDir && !fs3.existsSync(this.outputDir)) {
+      fs3.mkdirSync(this.outputDir, { recursive: true });
+    }
+  }
+  /**
+   * Save a screenshot to disk for debugging.
+   * Only saves if outputDir is configured.
+   */
+  saveScreenshotToDisk(screenshot, source, id) {
+    if (!this.outputDir) return;
+    const filename = `${id.toString().padStart(3, "0")}_${source}.jpg`;
+    const filepath = path3.join(this.outputDir, filename);
+    fs3.writeFileSync(filepath, screenshot);
+    console.log(`  \u{1F4BE} Saved: ${filename}`);
   }
   /**
    * Capture the current viewport as a post screenshot.
@@ -5089,29 +6029,70 @@ var ScreenshotCollector = class {
       return false;
     }
     const scrollPosition = await this.getScrollPosition();
+    const postId = this.extractPostId();
+    if (postId && this.capturedPostIds.has(postId)) {
+      console.log(`\u{1F4F8} Skipping duplicate post: ${postId}`);
+      return false;
+    }
+    const positionBucket = Math.round(scrollPosition / 300);
+    if (source !== "carousel" && source !== "story" && this.capturedPositions.has(positionBucket)) {
+      console.log(`\u{1F4F8} Skipping duplicate position: bucket ${positionBucket} (scroll ~${scrollPosition}px)`);
+      return false;
+    }
     if (source === "feed" && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
       console.log(`\u{1F4F8} Scroll delta too small (${Math.abs(scrollPosition - this.lastScrollPosition)}px), skipping duplicate`);
       return false;
     }
     try {
-      const screenshot = await this.page.screenshot({
-        type: "jpeg",
-        quality: this.config.jpegQuality,
-        fullPage: false
-        // Viewport only
-      });
+      const viewport = this.page.viewportSize();
+      let screenshot;
+      if (source === "story" && viewport) {
+        const clipHeight = viewport.height - STORY_CROP_CONFIG.topMargin - STORY_CROP_CONFIG.bottomMargin;
+        screenshot = await this.page.screenshot({
+          type: "jpeg",
+          quality: this.config.jpegQuality,
+          clip: {
+            x: 0,
+            y: STORY_CROP_CONFIG.topMargin,
+            width: viewport.width,
+            height: Math.max(clipHeight, 100)
+            // Ensure minimum height
+          }
+        });
+        console.log(`\u{1F4F8} Story cropped: removed top ${STORY_CROP_CONFIG.topMargin}px and bottom ${STORY_CROP_CONFIG.bottomMargin}px`);
+      } else {
+        screenshot = await this.page.screenshot({
+          type: "jpeg",
+          quality: this.config.jpegQuality,
+          fullPage: false
+          // Viewport only
+        });
+      }
+      const hash = this.computeImageHash(screenshot);
+      if (this.capturedHashes.has(hash)) {
+        console.log(`\u{1F4F8} Skipping duplicate (hash match): ${hash.slice(0, 8)}...`);
+        return false;
+      }
       this.captures.push({
         id: this.captures.length + 1,
         screenshot,
         source,
         interest,
+        postId,
+        // For Instagram embed rendering
         timestamp: Date.now(),
         scrollPosition
       });
+      if (postId) {
+        this.capturedPostIds.add(postId);
+      }
+      this.capturedHashes.add(hash);
+      this.capturedPositions.add(positionBucket);
       if (source === "feed") {
         this.lastScrollPosition = scrollPosition;
       }
-      console.log(`\u{1F4F8} Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ""})`);
+      this.saveScreenshotToDisk(screenshot, source, this.captures.length);
+      console.log(`\u{1F4F8} Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ""}${postId ? ` [postId: ${postId}]` : ""})`);
       return true;
     } catch (error) {
       console.error("\u{1F4F8} Screenshot capture failed:", error);
@@ -5158,6 +6139,9 @@ var ScreenshotCollector = class {
   clear() {
     this.captures = [];
     this.lastScrollPosition = 0;
+    this.capturedPostIds.clear();
+    this.capturedHashes.clear();
+    this.capturedPositions.clear();
     console.log("\u{1F4F8} Collector cleared");
   }
   /**
@@ -5165,6 +6149,89 @@ var ScreenshotCollector = class {
    */
   resetScrollTracking() {
     this.lastScrollPosition = 0;
+  }
+  /**
+   * Capture multiple frames during video playback.
+   * Called when video content is detected. Simulates natural video watching
+   * by capturing frames at intervals during the watch duration.
+   *
+   * @param source - Where this content came from (feed, story, etc.)
+   * @param watchDurationMs - How long to watch (human-like: 8-20 seconds)
+   * @param frameIntervalMs - Interval between frames (2-3 seconds)
+   * @returns Number of unique frames captured
+   */
+  async captureVideoFrames(source, watchDurationMs = 12e3, frameIntervalMs = 2500) {
+    const videoId = this.extractPostId() || `video_${Date.now()}`;
+    const frameCount = Math.floor(watchDurationMs / frameIntervalMs);
+    let capturedFrames = 0;
+    console.log(`\u{1F3AC} Starting video frame capture: ${frameCount} frames over ${(watchDurationMs / 1e3).toFixed(1)}s`);
+    for (let i = 0; i < frameCount; i++) {
+      if (this.captures.length >= this.config.maxCaptures) {
+        console.log(`\u{1F4F8} Max captures reached, stopping video frames`);
+        break;
+      }
+      if (i > 0) {
+        await this.delay(frameIntervalMs);
+      }
+      try {
+        const screenshot = await this.page.screenshot({
+          type: "jpeg",
+          quality: this.config.jpegQuality,
+          fullPage: false
+        });
+        const hash = this.computeImageHash(screenshot);
+        if (this.capturedHashes.has(hash)) {
+          console.log(`\u{1F3AC} Frame ${i + 1}: duplicate, skipping`);
+          continue;
+        }
+        this.capturedHashes.add(hash);
+        this.captures.push({
+          id: this.captures.length + 1,
+          screenshot,
+          source,
+          postId: this.extractPostId(),
+          timestamp: Date.now(),
+          scrollPosition: 0,
+          // Video frames don't need scroll tracking
+          isVideoFrame: true,
+          videoId,
+          frameIndex: capturedFrames + 1,
+          totalFrames: frameCount
+          // Will be updated at end
+        });
+        this.saveScreenshotToDisk(screenshot, source, this.captures.length);
+        capturedFrames++;
+        console.log(`\u{1F3AC} Frame ${capturedFrames} captured`);
+      } catch (error) {
+        console.error(`\u{1F3AC} Frame capture failed:`, error);
+      }
+    }
+    this.captures.filter((c) => c.videoId === videoId).forEach((c) => c.totalFrames = capturedFrames);
+    console.log(`\u{1F3AC} Video complete: ${capturedFrames} unique frames captured`);
+    return capturedFrames;
+  }
+  /**
+   * Simple delay helper for video frame timing.
+   */
+  delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  /**
+   * Extract Instagram post ID from current URL.
+   * Post URLs follow pattern: instagram.com/p/{POST_ID}/
+   * Returns undefined for non-post pages (stories, feed, etc.)
+   */
+  extractPostId() {
+    const url = this.page.url();
+    const match = url.match(/\/p\/([A-Za-z0-9_-]+)\//);
+    return match?.[1];
+  }
+  /**
+   * Compute a simple hash of the screenshot for deduplication.
+   * Uses MD5 on the entire buffer - fast enough for our needs.
+   */
+  computeImageHash(screenshot) {
+    return (0, import_crypto.createHash)("md5").update(screenshot).digest("hex");
   }
   /**
    * Get current scroll Y position via CDP (no page.evaluate needed).
@@ -5198,8 +6265,10 @@ var ScreenshotCollector = class {
 };
 
 // src/main/services/InstagramScraper.ts
-var fs3 = __toESM(require("fs"), 1);
-var path3 = __toESM(require("path"), 1);
+var fs4 = __toESM(require("fs"), 1);
+var path4 = __toESM(require("path"), 1);
+var os = __toESM(require("os"), 1);
+var import_crypto2 = require("crypto");
 var InstagramScraper = class {
   context;
   apiKey;
@@ -5258,7 +6327,8 @@ var InstagramScraper = class {
     const maxVisionCalls = Math.floor(availableForVision / 0.01);
     console.log(`\u{1F4CA} Session budget: max ${maxVisionCalls} Vision API calls`);
     const startTime = Date.now();
-    this.page = await this.context.newPage();
+    const existingPages = this.context.pages();
+    this.page = existingPages.length > 0 ? existingPages[0] : await this.context.newPage();
     this.ghost = new GhostMouse(this.page);
     this.scroll = new HumanScroll(this.page);
     this.navigator = new A11yNavigator(this.page);
@@ -5356,9 +6426,11 @@ var InstagramScraper = class {
     this.vision = new ContentVision(this.apiKey);
     this.strategicGaze = new StrategicGaze(this.apiKey);
     this.screenshotCollector = new ScreenshotCollector(this.page, {
-      maxCaptures: 50,
+      maxCaptures: 60,
+      // Capture more, ImageTagger will filter to best 25
       jpegQuality: 85,
-      minScrollDelta: 200
+      minScrollDelta: 200,
+      saveToDirectory: path4.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
     });
     if (this.debugMode) {
       await this.ghost.enableVisibleCursor();
@@ -5465,79 +6537,264 @@ var InstagramScraper = class {
   /**
    * Watch stories and capture each one (no Vision API).
    */
-  async watchAndCaptureStories() {
+  async watchAndCaptureStories(maxStories = 8) {
     console.log("\u{1F3AC} Watching stories...");
     const storyCircles = await this.navigator.findStoryCircles();
-    if (storyCircles.length === 0) {
+    if (storyCircles.length === 0 || !storyCircles[0].boundingBox) {
       console.log("  No stories found");
       return;
     }
-    const firstStory = storyCircles[0];
-    if (firstStory.boundingBox) {
-      await this.clickWithGaze(firstStory.boundingBox, "button", "watch_story");
-      await this.humanDelay(2e3, 3e3);
-    } else {
-      return;
+    await this.clickWithGaze(storyCircles[0].boundingBox, "button", "watch_story");
+    await this.humanDelay(2e3, 3e3);
+    if (this.debugMode) {
+      console.log("  \u{1F50D} Discovering story viewer buttons...");
+      await this.navigator.dumpInteractiveElements();
     }
-    const maxStories = Math.min(8, storyCircles.length);
+    let lastStoryHash = "";
+    let stuckCount = 0;
     let storiesWatched = 0;
     for (let i = 0; i < maxStories; i++) {
       if (!this.navigator.isInStoryViewer()) {
-        console.log("  Exited story viewer");
+        console.log("  \u{1F4F1} Exited story viewer");
         break;
       }
-      await this.screenshotCollector.captureCurrentPost("story");
-      storiesWatched++;
-      const viewTime = 2e3 + Math.random() * 4e3;
-      await this.humanDelay(viewTime, viewTime + 1e3);
-      const viewportSize = this.page.viewportSize();
-      if (viewportSize) {
-        const rightZone = {
-          x: viewportSize.width * 0.6,
-          y: viewportSize.height * 0.2,
-          width: viewportSize.width * 0.35,
-          height: viewportSize.height * 0.6
-        };
-        await this.ghost.clickElement(rightZone, 0.2);
+      const currentHash = await this.getQuickViewportHash();
+      if (currentHash === lastStoryHash) {
+        stuckCount++;
+        console.log(`  \u26A0\uFE0F Same story as before (${stuckCount}/3)`);
+        if (stuckCount >= 3) {
+          console.log("  \u{1F4F1} Stuck on same story, exiting");
+          break;
+        }
+        await this.advanceStory();
+        await this.humanDelay(800, 1200);
+        continue;
       }
-      await this.humanDelay(1e3, 2e3);
+      stuckCount = 0;
+      lastStoryHash = currentHash;
+      const videoInfo = await this.navigator.detectVideoContent();
+      if (videoInfo.isVideo) {
+        console.log(`  \u{1F3AC} Video story - capturing frames`);
+        const watchDuration = 3e3 + Math.random() * 2e3;
+        await this.screenshotCollector.captureVideoFrames("story", watchDuration, 1500);
+      } else {
+        await this.screenshotCollector.captureCurrentPost("story");
+        await this.humanDelay(500, 1e3);
+      }
+      storiesWatched++;
+      console.log(`  \u{1F4F8} Story ${storiesWatched} captured`);
+      const advanced = await this.advanceStory();
+      if (!advanced) {
+        console.log("  \u{1F4F1} Could not advance, may be at end of stories");
+        stuckCount++;
+      }
+      await this.humanDelay(800, 1200);
     }
     await this.navigator.pressEscape();
-    await this.humanDelay(1e3, 2e3);
-    console.log(`\u2705 Stories complete. Captured ${storiesWatched} stories`);
+    await this.humanDelay(500, 1e3);
+    console.log(`\u2705 Stories complete: ${storiesWatched} captured`);
   }
   /**
-   * Browse feed naturally and capture each post (no Vision API).
+   * Advance to next story by clicking the right arrow button.
+   * Falls back to keyboard if button not found.
+   *
+   * @returns true if advancement was attempted
+   */
+  async advanceStory() {
+    const nextBtn = await this.navigator.findEdgeButton("right");
+    if (nextBtn?.boundingBox) {
+      console.log(`  \u27A1\uFE0F Clicking next: "${nextBtn.name}" at x=${Math.round(nextBtn.boundingBox.x)}`);
+      await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
+      return true;
+    }
+    console.log("  \u27A1\uFE0F Button not found, trying arrow key");
+    await this.page.keyboard.press("ArrowRight");
+    return true;
+  }
+  /**
+   * Quick viewport hash for change detection (low quality = fast).
+   * Used to detect if story/content actually changed after navigation.
+   */
+  async getQuickViewportHash() {
+    const screenshot = await this.page.screenshot({
+      type: "jpeg",
+      quality: 20,
+      // Low quality for speed
+      fullPage: false
+    });
+    return (0, import_crypto2.createHash)("md5").update(screenshot).digest("hex").slice(0, 12);
+  }
+  /**
+   * Explore a post deeply before capturing.
+   *
+   * This method implements "deep exploration" as requested:
+   * 1. Expand truncated captions (click "more" button)
+   * 2. Check for carousel posts and capture all slides
+   *
+   * @returns Object with number of slides captured (1 if not a carousel) and whether it's a carousel
+   */
+  async explorePostDeeply() {
+    let capturedSlides = 0;
+    let isCarousel = false;
+    let isVideo = false;
+    const moreButton = await this.navigator.findMoreButton();
+    if (moreButton?.boundingBox) {
+      console.log("  \u{1F4DD} Expanding truncated caption...");
+      await this.ghost.clickElement(moreButton.boundingBox, 0.3);
+      await this.humanDelay(800, 1200);
+      const stillTruncated = await this.navigator.findMoreButton();
+      if (stillTruncated?.boundingBox) {
+        console.log("  \u{1F4DD} Caption still truncated, trying again...");
+        await this.ghost.clickElement(stillTruncated.boundingBox, 0.3);
+        await this.humanDelay(500, 800);
+      }
+    }
+    const videoInfo = await this.navigator.detectVideoContent();
+    if (videoInfo.isVideo) {
+      isVideo = true;
+      console.log(`  \u{1F3AC} Video post detected${videoInfo.hasAudio ? " (with audio)" : ""}`);
+      const watchDuration = 8e3 + Math.random() * 12e3;
+      const frames = await this.screenshotCollector.captureVideoFrames("feed", watchDuration);
+      capturedSlides = frames;
+      return { capturedSlides, isCarousel, isVideo };
+    }
+    const { next: carouselNext } = await this.navigator.findCarouselControls();
+    if (!carouselNext) {
+      const elements = await this.navigator.getAllInteractiveElements();
+      const buttons = elements.filter((e) => e.role === "button").map((e) => `"${e.name}"`).slice(0, 8);
+      if (buttons.length > 0) {
+        console.log(`  \u{1F4CB} Available buttons: ${buttons.join(", ")}`);
+      }
+    }
+    if (carouselNext?.boundingBox) {
+      isCarousel = true;
+      console.log(`  \u{1F3A0} Carousel detected: "${carouselNext.name}" [${carouselNext.role}]`);
+      await this.screenshotCollector.captureCurrentPost("carousel");
+      capturedSlides++;
+      const maxSlides = 10;
+      let slideCount = 1;
+      let previousSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+      if (previousSlideIndicator) {
+        console.log(`  \u{1F3A0} Starting at slide ${previousSlideIndicator.current} of ${previousSlideIndicator.total}`);
+      }
+      while (slideCount < maxSlides) {
+        const { next: nextBtn } = await this.navigator.findCarouselControls();
+        if (!nextBtn?.boundingBox) {
+          console.log(`  \u{1F3A0} No next button found via spatial discovery`);
+          break;
+        }
+        await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
+        await this.humanDelay(800, 1500);
+        const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+        if (currentSlideIndicator && previousSlideIndicator && currentSlideIndicator.current === previousSlideIndicator.current) {
+          console.log(`  \u{1F3A0} Slide unchanged after click (still ${currentSlideIndicator.current}), stopping carousel`);
+          break;
+        }
+        previousSlideIndicator = currentSlideIndicator;
+        await this.screenshotCollector.captureCurrentPost("carousel");
+        slideCount++;
+        capturedSlides++;
+      }
+      console.log(`  \u{1F3A0} Captured ${capturedSlides} carousel slides`);
+    }
+    return { capturedSlides, isCarousel, isVideo };
+  }
+  /**
+   * Browse feed with POST-CENTERED capture and DEEP EXPLORATION (no Vision API).
+   *
+   * This method ensures each screenshot contains ONE post only by:
+   * 1. Detecting post elements via accessibility tree
+   * 2. Centering each post in the viewport before capturing
+   * 3. Tracking captured posts by ABSOLUTE position (scroll + element Y) to avoid duplicates
+   * 4. Deep exploration: expanding captions, exploring carousel slides
+   *
+   * FIXES APPLIED:
+   * - Uses absolute Y position (scrollY + element.y) for deduplication (stable across scrolls)
+   * - Single centering calculation (let scrollToElementByCDP handle it)
+   * - Scroll verification to detect stuck situations
    */
   async browseFeedWithCapture(targetMinutes) {
     const startTime = Date.now();
     const endTime = startTime + targetMinutes * 60 * 1e3;
-    let scrollCount = 0;
-    console.log(`\u{1F504} Browsing feed for ${targetMinutes.toFixed(1)} minutes...`);
+    const capturedPostAbsoluteYs = /* @__PURE__ */ new Set();
+    let consecutiveEmpty = 0;
+    const maxConsecutiveEmpty = 3;
+    console.log(`\u{1F504} Browsing feed (deep exploration mode) for ${targetMinutes.toFixed(1)} minutes...`);
     await this.scroll.scrollToTop();
     await this.humanDelay(1e3, 2e3);
+    const viewportInfo = await this.scroll.getViewportInfo();
+    const viewportHeight = viewportInfo.height;
     while (Date.now() < endTime) {
-      if (this.screenshotCollector.getCaptureCount() >= 50) {
+      if (this.screenshotCollector.getCaptureCount() >= 60) {
         console.log("\u{1F4F8} Max captures reached, stopping browse");
         break;
       }
-      const scrollResult = await this.scroll.scrollWithIntent(this.navigator, {
-        variability: 0.25,
-        microAdjustProb: 0.2
-      });
-      scrollCount++;
-      await this.humanDelay(1500, 3500);
-      await this.screenshotCollector.captureCurrentPost("feed");
-      if (scrollCount % 5 === 0) {
-        console.log(`  \u{1F4CA} Scroll #${scrollCount}, Content: ${scrollResult.contentType}, Captures: ${this.screenshotCollector.getCaptureCount()}`);
+      const currentScrollY = await this.scroll.getScrollPosition();
+      const posts = await this.navigator.findPostElementsAtomic();
+      let targetPost = null;
+      for (const post of posts) {
+        if (!post.boundingBox || !post.backendNodeId) continue;
+        const absoluteY = Math.round((currentScrollY + post.boundingBox.y) / 100);
+        const postTop = post.boundingBox.y;
+        const postBottom = postTop + post.boundingBox.height;
+        const isVisible = postTop < viewportHeight && postBottom > 0;
+        if (isVisible && !capturedPostAbsoluteYs.has(absoluteY)) {
+          targetPost = { ...post, absoluteY };
+          break;
+        }
       }
-      if (Math.random() < 0.15) {
-        const pauseTime = 3e3 + Math.random() * 5e3;
-        console.log(`  \u2615 Reading pause (${(pauseTime / 1e3).toFixed(1)}s)...`);
-        await this.humanDelay(pauseTime, pauseTime + 1e3);
+      if (targetPost && targetPost.boundingBox && targetPost.backendNodeId) {
+        const centerResult = await this.scroll.scrollToElementCentered(
+          targetPost.backendNodeId,
+          2
+          // max 2 retry attempts
+        );
+        if (!centerResult.success) {
+          console.log(`  \u26A0\uFE0F Centering incomplete (offset: ${Math.round(centerResult.finalOffset)}px), using fallback`);
+          await this.scroll.scroll({ baseDistance: 350 });
+        }
+        await this.humanDelay(400, 800);
+        const adCheck = await this.navigator.detectAdContent();
+        if (adCheck.isAd) {
+          console.log(`  \u{1F6AB} Skipping ad: ${adCheck.reason}`);
+          capturedPostAbsoluteYs.add(targetPost.absoluteY);
+          consecutiveEmpty = 0;
+          continue;
+        }
+        const exploration = await this.explorePostDeeply();
+        if (!exploration.isCarousel) {
+          await this.screenshotCollector.captureCurrentPost("feed");
+        }
+        capturedPostAbsoluteYs.add(targetPost.absoluteY);
+        consecutiveEmpty = 0;
+        const postHeight = targetPost.boundingBox.height;
+        const readingTime = postHeight > 600 ? 2500 + Math.random() * 3e3 : 1500 + Math.random() * 2e3;
+        await this.humanDelay(readingTime, readingTime + 500);
+        if (Math.random() < 0.12) {
+          const pauseTime = 3e3 + Math.random() * 4e3;
+          console.log(`  \u2615 Reading pause (${(pauseTime / 1e3).toFixed(1)}s)...`);
+          await this.humanDelay(pauseTime, pauseTime + 500);
+        }
+        const captureCount = this.screenshotCollector.getCaptureCount();
+        if (captureCount % 5 === 0) {
+          console.log(`  \u{1F4CA} Captured ${captureCount} screenshots, ${capturedPostAbsoluteYs.size} unique posts`);
+        }
+      } else {
+        consecutiveEmpty++;
+        if (consecutiveEmpty >= maxConsecutiveEmpty) {
+          console.log("  \u{1F4DC} No new posts found after multiple attempts, ending browse");
+          break;
+        }
+        console.log(`  \u{1F4DC} No new posts visible, scrolling down (attempt ${consecutiveEmpty}/${maxConsecutiveEmpty})...`);
+        await this.scroll.scrollWithIntent(this.navigator, {
+          baseDistance: 500,
+          variability: 0.2,
+          microAdjustProb: 0.15
+        });
+        await this.humanDelay(1500, 2500);
       }
     }
-    console.log(`\u2705 Feed browse complete. ${scrollCount} scrolls, ${this.screenshotCollector.getCaptureCount()} captures`);
+    console.log(`\u2705 Feed browse complete. Captured ${this.screenshotCollector.getCaptureCount()} screenshots (${capturedPostAbsoluteYs.size} unique posts)`);
   }
   // =========================================================================
   // PHASE A: ACTIVE SEARCH (LEGACY - for backward compatibility)
@@ -5725,15 +6982,21 @@ var InstagramScraper = class {
         console.log(`  \u{1F4F7} Photo story - quick view...`);
         await this.humanDelay(2e3, 4e3);
       }
-      const viewportSize = this.page.viewportSize();
-      if (viewportSize) {
-        const rightZone = {
-          x: viewportSize.width * 0.6,
-          y: viewportSize.height * 0.2,
-          width: viewportSize.width * 0.35,
-          height: viewportSize.height * 0.6
-        };
-        await this.ghost.clickElement(rightZone, 0.2);
+      const nextStoryBtn = await this.navigator.findEdgeButton("right");
+      if (nextStoryBtn?.boundingBox) {
+        console.log(`  \u{1F3AF} Found next via spatial: "${nextStoryBtn.name}" at x=${nextStoryBtn.boundingBox.x}`);
+        await this.ghost.clickElement(nextStoryBtn.boundingBox, 0.3);
+      } else {
+        const viewportSize = this.page.viewportSize();
+        if (viewportSize) {
+          const rightZone = {
+            x: viewportSize.width * 0.6,
+            y: viewportSize.height * 0.2,
+            width: viewportSize.width * 0.35,
+            height: viewportSize.height * 0.6
+          };
+          await this.ghost.clickElement(rightZone, 0.2);
+        }
       }
       await this.humanDelay(1e3, 2e3);
     }
@@ -5840,9 +7103,9 @@ var InstagramScraper = class {
           } else {
             consecutiveDuplicates = 0;
           }
-          const carouselNext = await this.navigator.findCarouselNextButton();
+          const { next: carouselNext } = await this.navigator.findCarouselControls();
           if (carouselNext?.boundingBox) {
-            console.log(`  \u{1F3A0} Carousel detected, exploring slides...`);
+            console.log(`  \u{1F3A0} Carousel detected via spatial at x=${carouselNext.boundingBox.x}`);
             const carouselSlides = await this.exploreCarousel("feed", "feed_carousel");
             for (const slide of carouselSlides) {
               const slideKey = `${slide.username}-${slide.caption.slice(0, 50)}`;
@@ -5886,17 +7149,17 @@ var InstagramScraper = class {
       console.log(`    \u{1F3A0} Starting at slide ${previousSlideIndicator.current} of ${previousSlideIndicator.total}`);
     }
     while (slideNumber <= maxSlides) {
-      const nextButton = await this.navigator.findCarouselNextButton();
+      const { next: nextButton } = await this.navigator.findCarouselControls();
       if (!nextButton?.boundingBox) {
-        console.log(`    \u{1F3A0} Carousel complete (${slideNumber - 1} slides captured)`);
+        console.log(`    \u{1F3A0} Carousel complete (${slideNumber - 1} slides) - no next button found`);
         break;
       }
       const hoverDuration = 800 + Math.random() * 700;
-      console.log(`    \u{1F3A0} Hovering over Next button...`);
+      console.log(`    \u{1F3A0} Hovering over button at x=${nextButton.boundingBox.x}`);
       await this.ghost.hoverElement(nextButton.boundingBox, hoverDuration, 0.3);
-      const nextButtonAfterHover = await this.navigator.findCarouselNextButton();
+      const { next: nextButtonAfterHover } = await this.navigator.findCarouselControls();
       if (!nextButtonAfterHover?.boundingBox) {
-        console.log(`    \u26A0\uFE0F Next button disappeared after hover, skipping`);
+        console.log(`    \u26A0\uFE0F Button disappeared after hover, skipping`);
         break;
       }
       let navigationSucceeded = false;
@@ -6023,15 +7286,20 @@ var InstagramScraper = class {
             });
           }
         }
-        const viewportSize = this.page.viewportSize();
-        if (viewportSize) {
-          const rightZone = {
-            x: viewportSize.width * 0.7,
-            y: viewportSize.height * 0.3,
-            width: viewportSize.width * 0.25,
-            height: viewportSize.height * 0.4
-          };
-          await this.ghost.clickElement(rightZone, 0.2);
+        const nextBtn = await this.navigator.findEdgeButton("right");
+        if (nextBtn?.boundingBox) {
+          await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
+        } else {
+          const viewportSize = this.page.viewportSize();
+          if (viewportSize) {
+            const rightZone = {
+              x: viewportSize.width * 0.7,
+              y: viewportSize.height * 0.3,
+              width: viewportSize.width * 0.25,
+              height: viewportSize.height * 0.4
+            };
+            await this.ghost.clickElement(rightZone, 0.2);
+          }
         }
         await this.humanDelay(5e3, 8e3);
       }
@@ -6110,19 +7378,19 @@ var InstagramScraper = class {
     console.log("\u26A0\uFE0F NAVIGATION LOOP DETECTED");
     console.log("\u26A0\uFE0F \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
     if (!this.diagnosticsDir) {
-      this.diagnosticsDir = path3.join(process.cwd(), "diagnostics");
-      if (!fs3.existsSync(this.diagnosticsDir)) {
-        fs3.mkdirSync(this.diagnosticsDir, { recursive: true });
+      this.diagnosticsDir = path4.join(process.cwd(), "diagnostics");
+      if (!fs4.existsSync(this.diagnosticsDir)) {
+        fs4.mkdirSync(this.diagnosticsDir, { recursive: true });
       }
     }
     const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
     try {
-      const screenshotPath = path3.join(this.diagnosticsDir, `loop_detected_screen_${timestamp}.png`);
+      const screenshotPath = path4.join(this.diagnosticsDir, `loop_detected_screen_${timestamp}.png`);
       await this.page.screenshot({ path: screenshotPath, fullPage: false });
       console.log(`\u{1F4F8} Screenshot saved: ${screenshotPath}`);
       const a11yTree = await this.navigator.getFullAccessibilityTree();
-      const treePath = path3.join(this.diagnosticsDir, `loop_diagnostic_tree_${timestamp}.json`);
-      fs3.writeFileSync(treePath, JSON.stringify({
+      const treePath = path4.join(this.diagnosticsDir, `loop_diagnostic_tree_${timestamp}.json`);
+      fs4.writeFileSync(treePath, JSON.stringify({
         timestamp,
         action,
         coordinate,
@@ -6746,7 +8014,24 @@ Location: ${config.location || "Not specified"}
 Date: ${dayName}, ${dateStr}
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-III. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
+III. AD & SPONSORED CONTENT DETECTION (CRITICAL)
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+COMPLETELY SKIP and do NOT include in the digest:
+- Posts with "Sponsored" label visible
+- Posts with "Paid partnership" label
+- Ads (product promotions with "Shop Now", "Learn More" buttons)
+- Brand accounts pushing products with pricing
+- Influencer sponsored content (typically has disclaimers)
+- Screenshots that are mostly blank, loading, or unclear
+
+INCLUDE (even if commercial):
+- News organization updates (even with subscription CTAs)
+- Personal accounts sharing genuine experiences
+- Entertainment/sports content (games, shows, events)
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+IV. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
 1. **ATTRIBUTION (MANDATORY)**:
@@ -6766,7 +8051,7 @@ III. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
 3. **PRIORITIZATION**:
    - Search results matching "${interestsList}" = HIGH PRIORITY (feature prominently)
    - Breaking news / time-sensitive content = HIGH PRIORITY
-   - Stories = MEDIUM (ephemeral, context-dependent)
+   - Stories from friends/followed accounts = HIGH (personal relevance)
    - Generic lifestyle posts = LOW (brief mention or skip)
 
 4. **NO HALLUCINATIONS**:
@@ -6783,43 +8068,45 @@ III. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
    \u274C Do NOT report on duplicate/similar screenshots multiple times
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-IV. OUTPUT STRUCTURE
+V. OUTPUT STRUCTURE
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-Return valid JSON with this exact structure:
+Return valid JSON with this structure:
 {
     "title": "[Compelling headline based on top story - be specific and engaging]",
     "subtitle": "[Key strategic insight in one sentence] \u2014 ${dayName}, ${dateStr}",
     "sections": [
         {
-            "heading": "\u{1F3AF} Strategic Interests: ${config.interests[0] || "Your Feed"}",
+            "heading": "[Your chosen heading with emoji - based on content themes you observe]",
             "content": [
                 "\u2022 **@handle**: [Fact from screenshot]. [Contextual Analysis: trend/implication].",
                 "\u2022 **@handle**: [Another fact with depth]."
-            ]
-        },
-        {
-            "heading": "\u{1F30D} Global Intelligence",
-            "content": [
-                "\u2022 **@handle**: [Newsworthy item with context].",
-                "\u2022 **@handle**: [Another newsworthy item]."
-            ]
-        },
-        {
-            "heading": "\u26A1 Lightning Round",
-            "content": [
-                "\u2022 **@handle**: [Quick hit - one sentence].",
-                "\u2022 **@handle**: [Quick hit - one sentence]."
             ]
         }
     ]
 }
 
-TARGET: 15-25 high-quality bullets total across all sections.
+**SECTION RULES** (CRITICAL):
+- CREATE YOUR OWN HEADINGS based on the content themes you observe
+- Group related content into logical sections with descriptive headings
+- Use emojis at the start of each heading (e.g., "\u{1F3C8} Football Updates", "\u{1F310} World News", "\u{1F3AC} Entertainment")
+- Do NOT use generic headings like "Section 1" - be specific to the content
+- Aim for 2-5 sections depending on content variety
+- Each section should have a clear theme that groups related posts
+
+**HEADING EXAMPLES** (create your own based on what you see):
+- "\u{1F3C8} Cal Football Recruiting" (if you see multiple football-related posts)
+- "\u{1F30D} Breaking News" (for urgent/important news items)
+- "\u{1F3AD} Entertainment & Pop Culture" (for entertainment content)
+- "\u{1F4F1} Tech & Innovation" (for technology content)
+- "\u{1F3E0} Local Bay Area" (for location-specific content)
+- "\u{1F465} Friends & Following" (for personal updates from followed accounts)
+
+TARGET: 15-25 high-quality bullets total across sections.
 SKIP: Ads, sponsored content, empty/unclear screenshots, duplicate content.
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-V. EXAMPLES
+VI. EXAMPLES
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
 \u2705 CORRECT (with depth):
@@ -6832,7 +8119,13 @@ V. EXAMPLES
 \u2022 Someone posted about a new restaurant opening...
 
 \u274C WRONG (hallucinating):
-\u2022 **@UniversityAccount**: "Fostering lifelong connections through education" (if you can't read this in the screenshot, don't invent it)`;
+\u2022 **@UniversityAccount**: "Fostering lifelong connections through education" (if you can't read this in the screenshot, don't invent it)
+
+\u2705 CORRECT SECTION HEADING (based on content):
+"\u{1F3C8} Cal Football & ACC News" (when you see multiple football posts)
+
+\u274C WRONG SECTION HEADING (generic):
+"Strategic Interests" (too generic - be specific to what you observe)`;
   }
   /**
    * Parse the LLM response into a structured AnalysisObject.
@@ -6846,7 +8139,8 @@ V. EXAMPLES
       heading: s.heading || "Untitled Section",
       content: Array.isArray(s.content) ? s.content : [s.content || ""]
     }));
-    console.log("\u2705 Digest generated successfully");
+    console.log(`\u2705 Digest generated successfully`);
+    console.log(`   Sections: ${sections.length}`);
     return {
       title: parsed.title,
       subtitle: parsed.subtitle || `Your Instagram Digest \u2014 ${dayName}, ${dateStr}`,
@@ -6859,6 +8153,225 @@ V. EXAMPLES
         hour12: true
       })
     };
+  }
+};
+
+// src/main/services/ImageTagger.ts
+var ImageTagger = class {
+  apiKey;
+  userInterests;
+  usageService;
+  constructor(apiKey, userInterests) {
+    this.apiKey = apiKey;
+    this.userInterests = userInterests;
+    this.usageService = UsageService.getInstance();
+  }
+  /**
+   * Batch-tag all captured images in a single API call.
+   * Uses gpt-4o-mini for cost efficiency.
+   *
+   * @param captures - Array of captured screenshots to tag
+   * @returns TaggingResult with tags for each image and token usage
+   */
+  async tagBatch(captures) {
+    if (captures.length === 0) {
+      console.log("\u{1F3F7}\uFE0F No images to tag");
+      return { tags: [], tokensUsed: 0 };
+    }
+    console.log(`\u{1F3F7}\uFE0F Tagging ${captures.length} images with gpt-4o-mini...`);
+    const imageContents = captures.map((capture) => ({
+      type: "image_url",
+      image_url: {
+        url: `data:image/jpeg;base64,${capture.screenshot.toString("base64")}`,
+        detail: "low"
+        // Cost optimization
+      }
+    }));
+    const prompt = this.buildTaggingPrompt(captures.length);
+    const messageContent = [
+      { type: "text", text: prompt },
+      ...imageContents
+    ];
+    try {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          // Cost-efficient for tagging
+          messages: [{
+            role: "user",
+            content: messageContent
+          }],
+          max_tokens: 3e3,
+          temperature: 0.1,
+          // Low for consistent tagging
+          response_format: { type: "json_object" }
+        })
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("\u274C Tagging API error:", errorData);
+        throw new Error("TAGGING_FAILED");
+      }
+      const data = await response.json();
+      const tokensUsed = data.usage?.total_tokens || 0;
+      if (data.usage) {
+        await this.usageService.incrementUsage(data.usage);
+        console.log(`\u{1F4B0} Tagging cost tracked: ${tokensUsed} tokens`);
+      }
+      const content = data.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error("TAGGING_FAILED: No content in response");
+      }
+      const tags = this.parseTaggingResponse(content, captures.length);
+      const adCount = tags.filter((t2) => t2.isAd).length;
+      const blankCount = tags.filter((t2) => t2.isBlank).length;
+      const validCount = tags.filter((t2) => !t2.isAd && !t2.isBlank).length;
+      console.log(`\u{1F3F7}\uFE0F Tagged ${tags.length} images:`);
+      console.log(`   Ads: ${adCount}, Blank: ${blankCount}, Valid: ${validCount}`);
+      return { tags, tokensUsed };
+    } catch (error) {
+      console.error("\u274C Tagging failed:", error.message);
+      return { tags: [], tokensUsed: 0 };
+    }
+  }
+  /**
+   * Select the best N images based on tags.
+   * Filters out ads and blank images, then sorts by relevance + quality.
+   *
+   * @param captures - Original captured screenshots
+   * @param tags - Tags from tagBatch()
+   * @param count - Maximum number of images to select (default 25)
+   * @returns Selected captures in original chronological order
+   */
+  selectBest(captures, tags, count = 25) {
+    if (tags.length === 0) {
+      console.log(`\u{1F3F7}\uFE0F No tags available, using first ${count} captures`);
+      return captures.slice(0, count);
+    }
+    const validTags = tags.filter((t2) => !t2.isAd && !t2.isBlank);
+    if (validTags.length === 0) {
+      console.warn("\u{1F3F7}\uFE0F All images filtered (ads/blank), using original captures");
+      return captures.slice(0, count);
+    }
+    const sorted = [...validTags].sort((a, b) => {
+      const scoreA = a.relevance * 1.5 + a.quality;
+      const scoreB = b.relevance * 1.5 + b.quality;
+      return scoreB - scoreA;
+    });
+    const selectedIds = new Set(sorted.slice(0, count).map((t2) => t2.imageId));
+    const selected = captures.filter((c) => selectedIds.has(c.id));
+    console.log(`\u{1F3F7}\uFE0F Selected ${selected.length} best images from ${captures.length} total`);
+    const topTags = sorted.slice(0, 5);
+    console.log(`\u{1F3F7}\uFE0F Top selections:`);
+    for (const tag of topTags) {
+      console.log(`   #${tag.imageId}: relevance=${tag.relevance}, quality=${tag.quality} - ${tag.description.substring(0, 40)}...`);
+    }
+    return selected;
+  }
+  /**
+   * Build the tagging prompt for gpt-4o-mini.
+   */
+  buildTaggingPrompt(imageCount) {
+    const interests = this.userInterests.length > 0 ? this.userInterests.join(", ") : "general news and updates";
+    return `You are analyzing ${imageCount} Instagram screenshots. For each image (numbered 1-${imageCount} in order), provide a brief tag.
+
+USER INTERESTS: ${interests}
+
+For each image, determine:
+1. isAd: Is this sponsored content, an ad, or promotional material? (true/false)
+2. isBlank: Is this a loading screen, blank, or unreadable? (true/false)
+3. relevance: How relevant is this to the user's interests? (0-10, where 10 = directly matches interests)
+4. quality: How clear and informative is this screenshot? (0-10, where 10 = perfect quality, readable text)
+5. description: One brief sentence describing what's shown (max 50 chars)
+
+DETECTION RULES:
+
+Mark isAd=true for:
+- Posts with "Sponsored" label visible
+- Posts with "Paid partnership" label
+- Product ads with "Shop Now", "Learn More" buttons
+- Brand accounts with pricing/promotions
+- Influencer sponsored content with disclaimers
+
+Mark isBlank=true for:
+- Loading spinners or skeleton UI
+- Mostly empty/white screens
+- Text too small or blurry to read
+- Transition screens between content
+- Error states
+
+SCORING GUIDE:
+
+relevance 8-10: Directly matches user interests (e.g., sports team they follow, local news)
+relevance 5-7: Generally newsworthy or broadly interesting
+relevance 2-4: Personal/lifestyle content, generic posts
+relevance 0-1: Off-topic, irrelevant to most users
+
+quality 8-10: Clear image, readable text, complete post visible
+quality 5-7: Acceptable quality, some text readable
+quality 2-4: Partial content visible, some blur
+quality 0-1: Unreadable, severely cropped, or corrupted
+
+Return JSON with this exact format:
+{
+    "tags": [
+        {"imageId": 1, "isAd": false, "isBlank": false, "relevance": 8, "quality": 9, "description": "Cal Football recruiting news"},
+        {"imageId": 2, "isAd": true, "isBlank": false, "relevance": 0, "quality": 7, "description": "Sponsored product ad"},
+        {"imageId": 3, "isAd": false, "isBlank": true, "relevance": 0, "quality": 0, "description": "Loading screen"}
+    ]
+}
+
+IMPORTANT: You must return a tag for EVERY image from 1 to ${imageCount}. Do not skip any.`;
+  }
+  /**
+   * Parse the LLM response into ImageTag array.
+   * Handles missing tags by filling with defaults.
+   */
+  parseTaggingResponse(content, expectedCount) {
+    try {
+      const parsed = JSON.parse(content);
+      const rawTags = parsed.tags || [];
+      const tagMap = /* @__PURE__ */ new Map();
+      for (const tag of rawTags) {
+        if (typeof tag.imageId === "number") {
+          tagMap.set(tag.imageId, tag);
+        }
+      }
+      const result = [];
+      for (let i = 1; i <= expectedCount; i++) {
+        const existing = tagMap.get(i);
+        if (existing) {
+          result.push({
+            imageId: i,
+            isAd: Boolean(existing.isAd),
+            isBlank: Boolean(existing.isBlank),
+            relevance: Math.max(0, Math.min(10, Number(existing.relevance) || 0)),
+            quality: Math.max(0, Math.min(10, Number(existing.quality) || 0)),
+            description: String(existing.description || "No description")
+          });
+        } else {
+          console.warn(`\u{1F3F7}\uFE0F Missing tag for image #${i}, using default`);
+          result.push({
+            imageId: i,
+            isAd: false,
+            isBlank: false,
+            // Don't exclude, just give low score
+            relevance: 3,
+            quality: 3,
+            description: "Tag missing from LLM response"
+          });
+        }
+      }
+      return result;
+    } catch (e) {
+      console.error("\u274C Failed to parse tagging response:", e);
+      return [];
+    }
   }
 };
 
@@ -7612,13 +9125,21 @@ var SchedulerService = class _SchedulerService {
     const now = /* @__PURE__ */ new Date();
     const scheduledTime = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
     const MINIMUM_CAPTURES = 10;
+    const BROWSE_DURATION_MS = 5 * 60 * 1e3;
     const browserManager = BrowserManager.getInstance();
     let context = null;
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("debug-run-started", {
+        durationMs: BROWSE_DURATION_MS,
+        startTime: Date.now()
+      });
+    }
     try {
       const apiKey = await SecureKeyManager.getInstance().getKey();
       if (!apiKey) {
         console.error("\u{1F9EA} Debug Run: NO API KEY");
         this.mainWindow?.webContents.send("analysis-error", { message: "API key not found." });
+        this.mainWindow?.webContents.send("debug-run-complete", {});
         return;
       }
       console.log("\u{1F9EA} Launching browser (VISIBLE mode)...");
@@ -7642,24 +9163,56 @@ var SchedulerService = class _SchedulerService {
         console.warn(`\u{1F9EA} Insufficient captures: ${session2.captureCount} (need ${MINIMUM_CAPTURES})`);
         throw new Error("INSUFFICIENT_CONTENT");
       }
-      console.log("\u{1F9EA} Generating digest from screenshots...");
+      console.log("\u{1F9EA} Tagging captured images for smart selection...");
+      const tagger = new ImageTagger(apiKey, settings.interests || []);
+      const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session2.captures);
+      const bestCaptures = tagger.selectBest(session2.captures, tags, 25);
+      console.log(`\u{1F9EA} Tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
+      console.log("\u{1F9EA} Generating digest from selected screenshots...");
       const digestGenerator = new BatchDigestGenerator(apiKey);
-      const analysis = await digestGenerator.generateDigest(session2.captures, {
+      const analysis = await digestGenerator.generateDigest(bestCaptures, {
         userName: settings.userName || "User",
         interests: settings.interests || [],
         location: settings.location || ""
       });
       const recordId = (0, import_uuid.v4)();
-      const newRecord = {
-        id: recordId,
-        data: analysis,
-        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
-      };
       const userDataPath = import_electron4.app.getPath("userData");
       const recordDir = import_path3.default.join(userDataPath, "analysis_records");
+      const imagesDir = import_path3.default.join(recordDir, recordId, "images");
+      await import_fs3.default.promises.mkdir(imagesDir, { recursive: true });
+      const selectedIds = new Set(bestCaptures.map((c) => c.id));
+      const imageMetadata = [];
+      for (const capture of bestCaptures) {
+        const filename = `${capture.id}.jpg`;
+        const imagePath = import_path3.default.join(imagesDir, filename);
+        await import_fs3.default.promises.writeFile(imagePath, capture.screenshot);
+        const captureTag = tags.find((t2) => t2.imageId === capture.id);
+        imageMetadata.push({
+          id: capture.id,
+          filename,
+          source: capture.source,
+          interest: capture.interest,
+          postId: capture.postId,
+          permalink: capture.postId ? `https://www.instagram.com/p/${capture.postId}/` : void 0,
+          tag: captureTag ? {
+            relevance: captureTag.relevance,
+            quality: captureTag.quality,
+            description: captureTag.description
+          } : void 0
+        });
+      }
+      console.log(`\u{1F5BC}\uFE0F Saved ${imageMetadata.length} selected images to ${imagesDir}`);
+      const analysisWithImages = {
+        ...analysis,
+        images: imageMetadata
+      };
+      const newRecord = {
+        id: recordId,
+        data: analysisWithImages,
+        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+      };
       const recordPath = import_path3.default.join(recordDir, `${recordId}.json`);
       const tempPath = import_path3.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs3.default.promises.mkdir(recordDir, { recursive: true });
       await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
       await import_fs3.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F9EA} Saved digest to disk: ${recordPath}`);
@@ -7683,6 +9236,7 @@ var SchedulerService = class _SchedulerService {
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         console.log("\u{1F9EA} Notifying UI: analysis-ready");
         this.mainWindow.webContents.send("analysis-ready", metadataRecord);
+        this.mainWindow.webContents.send("debug-run-complete", {});
       }
       console.log(`\u{1F9EA} Debug Run (Screenshot-First) Complete! Captures: ${session2.captureCount}`);
     } catch (error) {
@@ -7695,6 +9249,7 @@ var SchedulerService = class _SchedulerService {
           message: `Debug run failed: ${error.message}`,
           canRetry: true
         });
+        this.mainWindow.webContents.send("debug-run-complete", {});
       }
     }
   }
@@ -7708,13 +9263,21 @@ var SchedulerService = class _SchedulerService {
     const now = /* @__PURE__ */ new Date();
     const scheduledTime = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
     const MINIMUM_POSTS_FOR_ANALYSIS = 5;
+    const BROWSE_DURATION_MS = 5 * 60 * 1e3;
     const browserManager = BrowserManager.getInstance();
     let context = null;
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("debug-run-started", {
+        durationMs: BROWSE_DURATION_MS,
+        startTime: Date.now()
+      });
+    }
     try {
       const apiKey = await SecureKeyManager.getInstance().getKey();
       if (!apiKey) {
         console.error("\u{1F9EA} Debug Run: NO API KEY");
         this.mainWindow?.webContents.send("analysis-error", { message: "API key not found." });
+        this.mainWindow?.webContents.send("debug-run-complete", {});
         return;
       }
       console.log("\u{1F9EA} Launching browser (VISIBLE mode)...");
@@ -7782,6 +9345,7 @@ var SchedulerService = class _SchedulerService {
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         console.log("\u{1F9EA} Notifying UI: analysis-ready");
         this.mainWindow.webContents.send("analysis-ready", metadataRecord);
+        this.mainWindow.webContents.send("debug-run-complete", {});
       }
       console.log(`\u{1F9EA} Debug Run Complete! Cost: ~$${(session2.visionApiCalls * 0.01 + 0.02).toFixed(2)}`);
     } catch (error) {
@@ -7794,6 +9358,7 @@ var SchedulerService = class _SchedulerService {
           message: `Debug run failed: ${error.message}`,
           canRetry: true
         });
+        this.mainWindow.webContents.send("debug-run-complete", {});
       }
     }
   }
@@ -7851,24 +9416,55 @@ var SchedulerService = class _SchedulerService {
         console.warn(`\u26A0\uFE0F Baker: Insufficient captures: ${session2.captureCount} (need ${MINIMUM_CAPTURES_FOR_DIGEST})`);
         throw new Error("INSUFFICIENT_CONTENT");
       }
-      console.log("\u{1F916} Baker generating digest from screenshots...");
+      console.log("\u{1F3F7}\uFE0F Baker tagging captured images for smart selection...");
+      const tagger = new ImageTagger(apiKey, settings.interests || []);
+      const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session2.captures);
+      const bestCaptures = tagger.selectBest(session2.captures, tags, 25);
+      console.log(`\u{1F3F7}\uFE0F Baker tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
+      console.log("\u{1F916} Baker generating digest from selected screenshots...");
       const digestGenerator = new BatchDigestGenerator(apiKey);
-      const analysis = await digestGenerator.generateDigest(session2.captures, {
+      const analysis = await digestGenerator.generateDigest(bestCaptures, {
         userName: settings.userName || "User",
         interests: settings.interests || [],
         location: settings.location || ""
       });
       const recordId = (0, import_uuid.v4)();
-      const newRecord = {
-        id: recordId,
-        data: analysis,
-        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
-      };
       const userDataPath = import_electron4.app.getPath("userData");
       const recordDir = import_path3.default.join(userDataPath, "analysis_records");
+      const imagesDir = import_path3.default.join(recordDir, recordId, "images");
+      await import_fs3.default.promises.mkdir(imagesDir, { recursive: true });
+      const imageMetadata = [];
+      for (const capture of bestCaptures) {
+        const filename = `${capture.id}.jpg`;
+        const imagePath = import_path3.default.join(imagesDir, filename);
+        await import_fs3.default.promises.writeFile(imagePath, capture.screenshot);
+        const captureTag = tags.find((t2) => t2.imageId === capture.id);
+        imageMetadata.push({
+          id: capture.id,
+          filename,
+          source: capture.source,
+          interest: capture.interest,
+          postId: capture.postId,
+          permalink: capture.postId ? `https://www.instagram.com/p/${capture.postId}/` : void 0,
+          tag: captureTag ? {
+            relevance: captureTag.relevance,
+            quality: captureTag.quality,
+            description: captureTag.description
+          } : void 0
+        });
+      }
+      console.log(`\u{1F5BC}\uFE0F Baker saved ${imageMetadata.length} selected images to ${imagesDir}`);
+      const analysisWithImages = {
+        ...analysis,
+        images: imageMetadata
+      };
+      const newRecord = {
+        id: recordId,
+        data: analysisWithImages,
+        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+      };
       const recordPath = import_path3.default.join(recordDir, `${recordId}.json`);
       const tempPath = import_path3.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs3.default.promises.mkdir(recordDir, { recursive: true });
       await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
       await import_fs3.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F4BE} Baker saved digest to disk: ${recordPath}`);
@@ -7921,6 +9517,17 @@ if (!import_electron5.app.getLoginItemSettings().openAtLogin) {
 if (require2("electron-squirrel-startup")) {
   import_electron5.app.quit();
 }
+import_electron5.protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "kowalski-local",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true
+    }
+  }
+]);
 var isQuitting = false;
 var mainWindow = null;
 var SHARED_PARTITION = "persist:instagram_shared";
@@ -7984,6 +9591,39 @@ var createWindow = () => {
   });
 };
 import_electron5.app.on("ready", () => {
+  const protocolHandler = (request, callback) => {
+    const url = new URL(request.url);
+    const recordId = url.hostname;
+    const filePath = url.pathname.startsWith("/") ? url.pathname.slice(1) : url.pathname;
+    const userDataPath2 = import_electron5.app.getPath("userData");
+    const fullPath = import_path4.default.join(userDataPath2, "analysis_records", recordId, filePath);
+    console.log(`\u{1F4F7} Protocol request: ${request.url}`);
+    console.log(`\u{1F4F7} Resolved path: ${fullPath}`);
+    if (import_fs4.default.existsSync(fullPath)) {
+      console.log(`\u{1F4F7} File exists, serving: ${fullPath}`);
+      callback({ path: fullPath });
+    } else {
+      console.error(`\u274C Protocol error: File not found: ${fullPath}`);
+      console.error(`\u274C RecordId: ${recordId}, FilePath: ${filePath}`);
+      const recordsDir = import_path4.default.join(userDataPath2, "analysis_records");
+      if (import_fs4.default.existsSync(recordsDir)) {
+        console.log(`\u{1F4C2} Contents of analysis_records: ${import_fs4.default.readdirSync(recordsDir).join(", ")}`);
+        const recordDir = import_path4.default.join(recordsDir, recordId);
+        if (import_fs4.default.existsSync(recordDir)) {
+          console.log(`\u{1F4C2} Contents of ${recordId}: ${import_fs4.default.readdirSync(recordDir).join(", ")}`);
+          const imagesDir = import_path4.default.join(recordDir, "images");
+          if (import_fs4.default.existsSync(imagesDir)) {
+            console.log(`\u{1F4C2} Contents of images: ${import_fs4.default.readdirSync(imagesDir).join(", ")}`);
+          }
+        }
+      }
+      callback({ error: -6 });
+    }
+  };
+  import_electron5.protocol.registerFileProtocol("kowalski-local", protocolHandler);
+  console.log("\u2705 Registered kowalski-local protocol on default session");
+  import_electron5.session.fromPartition(SHARED_PARTITION).protocol.registerFileProtocol("kowalski-local", protocolHandler);
+  console.log(`\u2705 Registered kowalski-local protocol on partition: ${SHARED_PARTITION}`);
   createWindow();
   console.log("Session persistence enabled.");
   console.log("Session persistence enabled.");

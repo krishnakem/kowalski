@@ -70,12 +70,18 @@ const generateAnalysis = (date: Date, location: string): AnalysisObject => {
   ];
 
   const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
+  const timeStr = date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
 
   return {
     title: `The ${dayName} Analysis`,
     subtitle: `${date.toLocaleDateString()} · ${location}`,
     date: date.toISOString(),
     location,
+    scheduledTime: timeStr,
     sections
   };
 };

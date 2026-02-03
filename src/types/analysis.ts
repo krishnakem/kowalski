@@ -3,6 +3,28 @@ export interface AnalysisSection {
     content: string[]; // Array of paragraphs
 }
 
+/**
+ * Image metadata for the digest gallery.
+ */
+export interface DigestImage {
+    id: number;
+    filename: string;          // "1.jpg"
+    source: 'feed' | 'story' | 'search' | 'profile' | 'carousel';
+    interest?: string;         // For search results - which interest triggered this
+    postId?: string;           // Instagram post ID for embed rendering (e.g., "C1a2B3c4D5e")
+    permalink?: string;        // Full Instagram URL (e.g., "https://instagram.com/p/C1a2B3c4D5e/")
+}
+
+/**
+ * Story highlight metadata for the stories carousel.
+ * LLM curates which stories are interesting and extracts account names.
+ */
+export interface StoryHighlight {
+    imageId: number;           // References DigestImage.id
+    account: string;           // @username extracted from screenshot
+    summary: string;           // Brief description of story content
+}
+
 export interface AnalysisObject {
     title: string;
     subtitle: string;
@@ -10,6 +32,13 @@ export interface AnalysisObject {
     location: string;
     scheduledTime: string; // e.g., "10:00 AM" - the slot this was triggered for
     sections: AnalysisSection[];
+
+    // Image gallery data
+    images?: DigestImage[];
+    featuredImages?: number[];  // Image IDs highlighted as hero images
+
+    // Stories carousel data (LLM-curated interesting stories only)
+    storyHighlights?: StoryHighlight[];
 }
 
 export interface ArchivedAnalysis {

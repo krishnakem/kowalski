@@ -10,6 +10,7 @@ import { BrowserManager } from './BrowserManager.js';
 import { InstagramScraper } from './InstagramScraper.js';
 import { AnalysisGenerator } from './AnalysisGenerator.js';
 import { BatchDigestGenerator } from './BatchDigestGenerator.js';
+import { ImageTagger } from './ImageTagger.js';
 import { SecureKeyManager } from './SecureKeyManager.js';
 import { AutomationErrorType } from '../../types/instagram.js';
 
@@ -1094,8 +1095,17 @@ export class SchedulerService {
         const scheduledTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
         const MINIMUM_CAPTURES = 10;
+        const BROWSE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
         const browserManager = BrowserManager.getInstance();
         let context = null;
+
+        // Notify UI that debug run started (for 5-minute timer)
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('debug-run-started', {
+                durationMs: BROWSE_DURATION_MS,
+                startTime: Date.now()
+            });
+        }
 
         try {
             // 1. Get API Key
@@ -1103,6 +1113,7 @@ export class SchedulerService {
             if (!apiKey) {
                 console.error('🧪 Debug Run: NO API KEY');
                 this.mainWindow?.webContents.send('analysis-error', { message: 'API key not found.' });
+                this.mainWindow?.webContents.send('debug-run-complete', {});
                 return;
             }
 
@@ -1137,29 +1148,77 @@ export class SchedulerService {
                 throw new Error('INSUFFICIENT_CONTENT');
             }
 
-            // 7. Generate digest from screenshots
-            console.log('🧪 Generating digest from screenshots...');
+            // 6.5. Tag and select best images
+            console.log('🧪 Tagging captured images for smart selection...');
+            const tagger = new ImageTagger(apiKey, settings.interests || []);
+            const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session.captures);
+            const bestCaptures = tagger.selectBest(session.captures, tags, 25);
+            console.log(`🧪 Tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
+
+            // 7. Generate digest from SELECTED screenshots (best 25)
+            console.log('🧪 Generating digest from selected screenshots...');
             const digestGenerator = new BatchDigestGenerator(apiKey);
-            const analysis = await digestGenerator.generateDigest(session.captures, {
+            const analysis = await digestGenerator.generateDigest(bestCaptures, {
                 userName: settings.userName || 'User',
                 interests: settings.interests || [],
                 location: settings.location || ''
             });
 
-            // 8. Save analysis to file
+            // 8. Save images to disk (only selected images to save space)
             const recordId = uuidv4();
+            const userDataPath = app.getPath('userData');
+            const recordDir = path.join(userDataPath, 'analysis_records');
+            const imagesDir = path.join(recordDir, recordId, 'images');
+
+            await fs.promises.mkdir(imagesDir, { recursive: true });
+
+            // Build a set of selected image IDs for quick lookup
+            const selectedIds = new Set(bestCaptures.map(c => c.id));
+
+            // Build image metadata and save SELECTED files only
+            const imageMetadata: { id: number; filename: string; source: string; interest?: string; postId?: string; permalink?: string; tag?: { relevance: number; quality: number; description: string } }[] = [];
+            for (const capture of bestCaptures) {
+                const filename = `${capture.id}.jpg`;
+                const imagePath = path.join(imagesDir, filename);
+                await fs.promises.writeFile(imagePath, capture.screenshot);
+
+                // Find the tag for this capture
+                const captureTag = tags.find(t => t.imageId === capture.id);
+
+                imageMetadata.push({
+                    id: capture.id,
+                    filename,
+                    source: capture.source,
+                    interest: capture.interest,
+                    postId: capture.postId,
+                    permalink: capture.postId
+                        ? `https://www.instagram.com/p/${capture.postId}/`
+                        : undefined,
+                    tag: captureTag ? {
+                        relevance: captureTag.relevance,
+                        quality: captureTag.quality,
+                        description: captureTag.description
+                    } : undefined
+                });
+            }
+
+            console.log(`🖼️ Saved ${imageMetadata.length} selected images to ${imagesDir}`);
+
+            // 9. Save analysis JSON with image metadata
+            const analysisWithImages = {
+                ...analysis,
+                images: imageMetadata
+            };
+
             const newRecord = {
                 id: recordId,
-                data: analysis,
+                data: analysisWithImages,
                 leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
             };
 
-            const userDataPath = app.getPath('userData');
-            const recordDir = path.join(userDataPath, 'analysis_records');
             const recordPath = path.join(recordDir, `${recordId}.json`);
             const tempPath = path.join(recordDir, `${recordId}.tmp`);
 
-            await fs.promises.mkdir(recordDir, { recursive: true });
             await fs.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
             await fs.promises.rename(tempPath, recordPath);
 
@@ -1191,6 +1250,8 @@ export class SchedulerService {
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 console.log('🧪 Notifying UI: analysis-ready');
                 this.mainWindow.webContents.send('analysis-ready', metadataRecord);
+                // Notify UI that debug run completed (stop timer)
+                this.mainWindow.webContents.send('debug-run-complete', {});
             }
 
             console.log(`🧪 Debug Run (Screenshot-First) Complete! Captures: ${session.captureCount}`);
@@ -1207,6 +1268,8 @@ export class SchedulerService {
                     message: `Debug run failed: ${error.message}`,
                     canRetry: true
                 });
+                // Notify UI that debug run completed (stop timer even on error)
+                this.mainWindow.webContents.send('debug-run-complete', {});
             }
         }
     }
@@ -1223,8 +1286,17 @@ export class SchedulerService {
         const scheduledTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
         const MINIMUM_POSTS_FOR_ANALYSIS = 5;
+        const BROWSE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
         const browserManager = BrowserManager.getInstance();
         let context = null;
+
+        // Notify UI that debug run started (for 5-minute timer)
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('debug-run-started', {
+                durationMs: BROWSE_DURATION_MS,
+                startTime: Date.now()
+            });
+        }
 
         try {
             // 1. Get API Key
@@ -1232,6 +1304,7 @@ export class SchedulerService {
             if (!apiKey) {
                 console.error('🧪 Debug Run: NO API KEY');
                 this.mainWindow?.webContents.send('analysis-error', { message: 'API key not found.' });
+                this.mainWindow?.webContents.send('debug-run-complete', {});
                 return;
             }
 
@@ -1322,6 +1395,8 @@ export class SchedulerService {
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 console.log('🧪 Notifying UI: analysis-ready');
                 this.mainWindow.webContents.send('analysis-ready', metadataRecord);
+                // Notify UI that debug run completed (stop timer)
+                this.mainWindow.webContents.send('debug-run-complete', {});
             }
 
             console.log(`🧪 Debug Run Complete! Cost: ~$${(session.visionApiCalls * 0.01 + 0.02).toFixed(2)}`);
@@ -1340,6 +1415,8 @@ export class SchedulerService {
                     message: `Debug run failed: ${error.message}`,
                     canRetry: true
                 });
+                // Notify UI that debug run completed (stop timer even on error)
+                this.mainWindow.webContents.send('debug-run-complete', {});
             }
         }
     }
@@ -1414,29 +1491,74 @@ export class SchedulerService {
                 throw new Error('INSUFFICIENT_CONTENT');
             }
 
-            // 7. Generate digest from screenshots (ONE API call)
-            console.log('🤖 Baker generating digest from screenshots...');
+            // 6.5. Tag and select best images
+            console.log('🏷️ Baker tagging captured images for smart selection...');
+            const tagger = new ImageTagger(apiKey, settings.interests || []);
+            const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session.captures);
+            const bestCaptures = tagger.selectBest(session.captures, tags, 25);
+            console.log(`🏷️ Baker tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
+
+            // 7. Generate digest from SELECTED screenshots (best 25)
+            console.log('🤖 Baker generating digest from selected screenshots...');
             const digestGenerator = new BatchDigestGenerator(apiKey);
-            const analysis = await digestGenerator.generateDigest(session.captures, {
+            const analysis = await digestGenerator.generateDigest(bestCaptures, {
                 userName: settings.userName || 'User',
                 interests: settings.interests || [],
                 location: settings.location || ''
             });
 
-            // 8. Save analysis to file
+            // 8. Save images to disk (only selected images to save space)
             const recordId = uuidv4();
+            const userDataPath = app.getPath('userData');
+            const recordDir = path.join(userDataPath, 'analysis_records');
+            const imagesDir = path.join(recordDir, recordId, 'images');
+
+            await fs.promises.mkdir(imagesDir, { recursive: true });
+
+            // Build image metadata and save SELECTED files only
+            const imageMetadata: { id: number; filename: string; source: string; interest?: string; postId?: string; permalink?: string; tag?: { relevance: number; quality: number; description: string } }[] = [];
+            for (const capture of bestCaptures) {
+                const filename = `${capture.id}.jpg`;
+                const imagePath = path.join(imagesDir, filename);
+                await fs.promises.writeFile(imagePath, capture.screenshot);
+
+                // Find the tag for this capture
+                const captureTag = tags.find(t => t.imageId === capture.id);
+
+                imageMetadata.push({
+                    id: capture.id,
+                    filename,
+                    source: capture.source,
+                    interest: capture.interest,
+                    postId: capture.postId,
+                    permalink: capture.postId
+                        ? `https://www.instagram.com/p/${capture.postId}/`
+                        : undefined,
+                    tag: captureTag ? {
+                        relevance: captureTag.relevance,
+                        quality: captureTag.quality,
+                        description: captureTag.description
+                    } : undefined
+                });
+            }
+
+            console.log(`🖼️ Baker saved ${imageMetadata.length} selected images to ${imagesDir}`);
+
+            // 9. Save analysis JSON with image metadata
+            const analysisWithImages = {
+                ...analysis,
+                images: imageMetadata
+            };
+
             const newRecord = {
                 id: recordId,
-                data: analysis,
+                data: analysisWithImages,
                 leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
             };
 
-            const userDataPath = app.getPath('userData');
-            const recordDir = path.join(userDataPath, 'analysis_records');
             const recordPath = path.join(recordDir, `${recordId}.json`);
             const tempPath = path.join(recordDir, `${recordId}.tmp`);
 
-            await fs.promises.mkdir(recordDir, { recursive: true });
             await fs.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
             await fs.promises.rename(tempPath, recordPath);
 

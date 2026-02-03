@@ -198,18 +198,117 @@ export class HumanScroll {
             if (viewportHeight === null || currentScroll === null) return false;
 
             // Calculate how far to scroll to center element in viewport
+            // NOTE: box.y is viewport-relative (from DOM.getBoxModel), not document-relative
+            // So we just need: elementCenter - viewportCenter (no currentScroll subtraction)
             const elementCenter = box.y + box.height / 2;
             const viewportCenter = viewportHeight / 2;
-            const scrollNeeded = elementCenter - viewportCenter - currentScroll;
+            const scrollNeeded = elementCenter - viewportCenter;
 
             // Only scroll if significant movement needed
             if (Math.abs(scrollNeeded) > 50) {
-                await this.scroll({ baseDistance: scrollNeeded });
+                // Use precise scroll for centering (no variability)
+                await this.preciseScroll(scrollNeeded);
             }
 
             return true;
         } catch {
             return false;
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
+    }
+
+    /**
+     * Scroll to center an element with verification and retry.
+     * Ensures the post is actually centered after scrolling.
+     *
+     * This is the recommended method for post-centered browsing.
+     *
+     * @param backendNodeId - CDP backend node ID from accessibility tree
+     * @param maxRetries - Maximum centering attempts (default: 2)
+     * @returns Object with success status and final offset from center
+     */
+    async scrollToElementCentered(
+        backendNodeId: number,
+        maxRetries: number = 2
+    ): Promise<{ success: boolean; finalOffset: number }> {
+        // STEALTH: Variable tolerance (80-120px, not fixed) to avoid detection patterns
+        const TOLERANCE = 80 + Math.random() * 40;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            let cdpSession: CDPSession | null = null;
+            try {
+                cdpSession = await this.page.context().newCDPSession(this.page);
+
+                // Get element bounding box
+                const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
+                if (!box) {
+                    return { success: false, finalOffset: Infinity };
+                }
+
+                // Get viewport info
+                const viewportHeight = await this.cdpEvaluate<number>('window.innerHeight');
+                if (!viewportHeight) {
+                    return { success: false, finalOffset: Infinity };
+                }
+
+                // Calculate current offset from center
+                // box.y is viewport-relative
+                const elementCenterY = box.y + box.height / 2;
+                const viewportCenterY = viewportHeight / 2;
+                const offset = elementCenterY - viewportCenterY;
+
+                // Check if already centered
+                if (Math.abs(offset) <= TOLERANCE) {
+                    console.log(`  ✓ Post centered (offset: ${Math.round(offset)}px, attempt: ${attempt})`);
+                    return { success: true, finalOffset: offset };
+                }
+
+                // Scroll to center
+                console.log(`  📍 Centering post (offset: ${Math.round(offset)}px, attempt: ${attempt + 1}/${maxRetries + 1})`);
+                await this.preciseScroll(offset);
+
+                // STEALTH: Variable pause with session multiplier for scroll to settle
+                const basePause = 150 + Math.random() * 100;
+                await new Promise(r => setTimeout(r, basePause * this.sessionTimingMultiplier));
+
+            } finally {
+                if (cdpSession) {
+                    await cdpSession.detach().catch(() => {});
+                }
+            }
+        }
+
+        // Final check after all retries
+        const finalOffset = await this.checkElementCenterOffset(backendNodeId);
+        const success = Math.abs(finalOffset) <= TOLERANCE;
+
+        if (!success) {
+            console.log(`  ⚠️ Centering incomplete after ${maxRetries + 1} attempts (final offset: ${Math.round(finalOffset)}px)`);
+        }
+
+        return { success, finalOffset };
+    }
+
+    /**
+     * Check how far an element is from viewport center.
+     * Helper method for scroll verification.
+     */
+    private async checkElementCenterOffset(backendNodeId: number): Promise<number> {
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+            const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
+            if (!box) return Infinity;
+
+            const viewportHeight = await this.cdpEvaluate<number>('window.innerHeight');
+            if (!viewportHeight) return Infinity;
+
+            const elementCenterY = box.y + box.height / 2;
+            const viewportCenterY = viewportHeight / 2;
+            return elementCenterY - viewportCenterY;
         } finally {
             if (cdpSession) {
                 await cdpSession.detach().catch(() => {});
@@ -231,6 +330,36 @@ export class HumanScroll {
             await this.page.mouse.wheel(0, stepSize);
             // Randomized delay (was hardcoded 20ms - bot signal!)
             await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15));
+        }
+    }
+
+    /**
+     * Precise scroll for centering operations.
+     * Unlike scroll(), this does NOT add variability - we need exact positioning.
+     * Still uses easing for human-like feel.
+     *
+     * @param distance - Exact pixels to scroll (positive = down, negative = up)
+     */
+    async preciseScroll(distance: number): Promise<void> {
+        const steps = 12 + Math.floor(Math.random() * 6);  // 12-18 steps
+        const direction = distance > 0 ? 1 : -1;
+        const absDistance = Math.abs(distance);
+
+        let scrolled = 0;
+
+        for (let i = 0; i < steps; i++) {
+            // Easing: ease-out (fast start, slow end)
+            const progress = i / steps;
+            const easing = 1 - Math.pow(1 - progress, 3);
+            const targetScrolled = absDistance * easing;
+            const stepDistance = (targetScrolled - scrolled) * direction;
+
+            await this.page.mouse.wheel(0, stepDistance);
+            scrolled = targetScrolled;
+
+            // STEALTH: Variable delay with session multiplier (same range as regular scroll)
+            const baseDelay = 10 + Math.random() * 30;  // 10-40ms base
+            await new Promise(resolve => setTimeout(resolve, baseDelay * this.sessionTimingMultiplier));
         }
     }
 

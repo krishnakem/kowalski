@@ -57,13 +57,32 @@ export interface SessionValidationResult {
 // ============================================================================
 
 /**
+ * Element state - exposed by screen readers for interactive elements.
+ * Mirrors what VoiceOver/NVDA announce about element state.
+ */
+export interface ElementState {
+    disabled?: boolean;
+    checked?: boolean;
+    selected?: boolean;
+    expanded?: boolean;
+    pressed?: boolean;
+}
+
+/**
  * Interactive element found via accessibility tree.
+ * Enhanced with full semantic info like screen readers expose.
  */
 export interface InteractiveElement {
     role: string;
     name: string;
     selector: string;
     boundingBox?: BoundingBox;
+    backendNodeId?: number;  // CDP node ID for scroll-to-element operations
+
+    // Screen reader semantic info (NEW)
+    description?: string;    // ARIA description
+    value?: string;          // Current value (for inputs/sliders)
+    state?: ElementState;    // Element state (disabled, checked, etc.)
 }
 
 /**
@@ -82,6 +101,53 @@ export interface BoundingBox {
 export interface Point {
     x: number;
     y: number;
+}
+
+// ============================================================================
+// Accessibility Tree Types (Screen Reader-Like Navigation)
+// ============================================================================
+
+/**
+ * Raw CDP accessibility node (from Accessibility.getFullAXTree).
+ * This mirrors what Chrome DevTools Protocol returns.
+ */
+export interface CDPAXNode {
+    nodeId: string;
+    ignored?: boolean;
+    role?: { type: string; value: string };
+    name?: { type: string; value: string; sources?: unknown[] };
+    description?: { type: string; value: string };
+    value?: { type: string; value: string };
+    properties?: Array<{ name: string; value: { type: string; value: unknown } }>;
+    childIds?: string[];
+    backendDOMNodeId?: number;
+}
+
+/**
+ * Enhanced accessibility node with parent link for hierarchy queries.
+ * Built from CDP response by walking the childIds and creating reverse links.
+ */
+export interface AXTreeNode extends CDPAXNode {
+    parentId?: string;     // Reverse link for ancestor queries (we populate this)
+    depth: number;         // Tree depth for debugging (0 = root)
+}
+
+/**
+ * Navigable accessibility tree with O(1) lookups.
+ * Enables screen reader-like navigation using parent-child relationships.
+ */
+export interface AXTree {
+    root: AXTreeNode;
+    nodeMap: Map<string, AXTreeNode>;        // nodeId → node
+    backendMap: Map<number, AXTreeNode>;     // backendDOMNodeId → node
+}
+
+/**
+ * Options for findEdgeButton with hierarchy support.
+ */
+export interface EdgeButtonOptions {
+    contentArea?: BoundingBox;      // Existing spatial hint (image bounds)
+    containerNodeId?: string;        // Hierarchy constraint (search only within this container)
 }
 
 // ============================================================================
@@ -279,8 +345,15 @@ export interface CapturedPost {
     screenshot: Buffer;           // Raw JPEG image data
     source: CaptureSource;
     interest?: string;            // For search results - which interest triggered this
+    postId?: string;              // Instagram post ID (e.g., "C1a2B3c4D5e") for embed support
     timestamp: number;            // Unix timestamp of capture
     scrollPosition: number;       // Y scroll position for deduplication
+
+    // Video frame tracking (for multi-frame sampling)
+    isVideoFrame?: boolean;       // True if this is a video frame capture
+    videoId?: string;             // Groups frames from same video (postId or generated)
+    frameIndex?: number;          // 1, 2, 3... for ordering frames
+    totalFrames?: number;         // Total frames captured for this video
 }
 
 /**
@@ -300,4 +373,29 @@ export interface DigestConfig {
     userName: string;
     interests: string[];
     location?: string;
+}
+
+// ============================================================================
+// Image Tagging Types
+// ============================================================================
+
+/**
+ * Tag assigned to each image during pre-filtering.
+ * Used by ImageTagger to score and filter screenshots before digest generation.
+ */
+export interface ImageTag {
+    imageId: number;
+    isAd: boolean;              // Sponsored/promoted content
+    isBlank: boolean;           // Loading screen, empty, or unclear
+    relevance: number;          // 0-10 score based on user interests
+    quality: number;            // 0-10 visual quality score
+    description: string;        // Brief description for debugging
+}
+
+/**
+ * Result of batch tagging operation.
+ */
+export interface TaggingResult {
+    tags: ImageTag[];
+    tokensUsed: number;
 }

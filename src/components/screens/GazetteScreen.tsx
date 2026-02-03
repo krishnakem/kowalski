@@ -1,14 +1,12 @@
-import { useRef, useMemo, useCallback, memo, useEffect, useState } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { motion, useScroll, useTransform } from "framer-motion";
-import { Settings, ArrowLeft, Archive } from "lucide-react";
-import { PixelPin, PixelClose, WavingPenguin } from "../icons/PixelIcons";
+import { useCallback, memo, useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { motion } from "framer-motion";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
-import { ease, duration, spring, stagger } from "@/lib/animations";
+import { ease, duration } from "@/lib/animations";
 import type { AnalysisObject } from "@/types/analysis";
-import { AnalysisRenderer } from "@/components/gazette/AnalysisRenderer";
+import { DigestView } from "@/components/gazette/DigestView";
 
 // Update Props Interface
 interface GazetteScreenProps {
@@ -23,32 +21,24 @@ interface GazetteScreenProps {
 // Local Transitions
 const buttonEntranceTransition = { duration: duration.normal, ease: ease.cinematic };
 const articleEntranceTransition = { duration: duration.slow, ease: ease.cinematic };
-const headerTransition = { duration: duration.normal, ease: ease.cinematic, delay: 0.1 };
-const sectionTransition = { duration: duration.normal, ease: ease.cinematic };
 
 const GazetteScreen = memo(({ onClose, analysisData: propData, analysisId: propId, isArchived: propIsArchived = false }: GazetteScreenProps) => {
   const navigate = useNavigate();
-  const { id } = useParams<{ id: string }>(); // Valid for route /archive/:id
-  const location = useLocation();
-  const { settings } = useSettings();
-  const { analyses, isLoaded: archivesLoaded, hasPastAnalyses } = useArchivedAnalyses();
+  const { id } = useParams<{ id: string }>();
+  const { analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
 
   // Determine effective data
   const [effectiveData, setEffectiveData] = useState<AnalysisObject | null>(propData || null);
   const [effectiveId, setEffectiveId] = useState<string | null>(propId || null);
-  const [isArchived, setIsArchived] = useState(propIsArchived);
 
   useEffect(() => {
     if (propData) {
       setEffectiveData(propData);
-      // UPDATE: Capture Prop ID if available
       if (propId) {
         setEffectiveId(propId);
       }
-      setIsArchived(propIsArchived);
       return;
     }
-    // ...
   }, [id, propData, propId, propIsArchived, analyses, archivesLoaded, navigate]);
 
   useEffect(() => {
@@ -64,7 +54,6 @@ const GazetteScreen = memo(({ onClose, analysisData: propData, analysisId: propI
       if (found) {
         setEffectiveData(found.data);
         setEffectiveId(found.id);
-        setIsArchived(true);
       } else {
         // ID provided but not found in list. 
         // INSTANT FIX: Trust the ID and try to fetch it directly later.
@@ -78,7 +67,6 @@ const GazetteScreen = memo(({ onClose, analysisData: propData, analysisId: propI
       if (analyses.length > 0) {
         setEffectiveData(analyses[0].data);
         setEffectiveId(analyses[0].id);
-        setIsArchived(false);
       }
     }
   }, [id, propData, analyses, archivesLoaded, navigate]);
@@ -120,14 +108,6 @@ const GazetteScreen = memo(({ onClose, analysisData: propData, analysisId: propI
   }, [effectiveData, effectiveId]);
 
 
-  const hasArchivedAnalyses = archivesLoaded && hasPastAnalyses;
-
-  // Parallax scroll effects
-  const { scrollY } = useScroll();
-  const headerY = useTransform(scrollY, [0, 300], [0, 50]);
-  const headerOpacity = useTransform(scrollY, [0, 200], [1, 0.3]);
-  const headerScale = useTransform(scrollY, [0, 300], [1, 0.95]);
-
   // Three-Hub Architecture: Back always goes to Archive List (with specific state)
   const handleClose = useCallback(() => {
     console.log("GazetteScreen: Back button clicked. Navigating to Archive Hierarchically.");
@@ -151,23 +131,7 @@ const GazetteScreen = memo(({ onClose, analysisData: propData, analysisId: propI
     }
   }, [onClose, navigate, effectiveData]);
 
-  const handleNavigateToSettings = useCallback(() => {
-    navigate("/settings", { state: { from: "gazette" } });
-  }, [navigate]);
-
-
-  // Hydrate date if it's a string (Handle null effectiveData gracefully by checking specific usage or defaulting)
-  const dateStr = effectiveData?.date || new Date().toISOString();
-  const date = dateStr instanceof Date ? dateStr : new Date(dateStr);
-
-  // Memoize expensive string operations
-  const { dayName, monthDay } = useMemo(() => ({
-    dayName: date.toLocaleDateString("en-US", { weekday: "long" }),
-    monthDay: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-  }), [date]);
-
-  // Loading state (Moved AFTER hooks)
-  // Loading state (Moved AFTER hooks)
+  // Loading state
   // Fix: Check if sections are missing. If so, treat as loading (waiting for fetch)
   // This prevents AnalysisRenderer from crashing on undefined 'sections'
   const isDataIncomplete = effectiveData && (!effectiveData.sections || effectiveData.sections.length === 0);
@@ -190,14 +154,6 @@ const GazetteScreen = memo(({ onClose, analysisData: propData, analysisId: propI
       </div>
     );
   }
-
-  // Prefer data provided in analysis, fallback to settings (if legacy data)
-  const locationVal = effectiveData.location; // Can be empty string now
-  const displayTitle = effectiveData.title || `The ${dayName} Analysis`;
-
-  // Format Time: Use the stored scheduledTime from the analysis data
-  const timeStr = effectiveData.scheduledTime || "8:00 AM";
-  const displayTime = `${timeStr} Analysis`;
 
   return (
     <div className="min-h-screen flex flex-col items-center py-16 px-6 bg-background relative">
@@ -232,51 +188,11 @@ const GazetteScreen = memo(({ onClose, analysisData: propData, analysisId: propI
         transition={articleEntranceTransition}
         className="max-w-[650px] w-full"
       >
-        {/* Masthead with Parallax */}
-        <motion.header
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={headerTransition}
-          style={{
-            y: headerY,
-            opacity: headerOpacity,
-            scale: headerScale,
-          }}
-          className="text-center mb-12"
-        >
-          <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-4 tracking-tight">
-            {displayTitle}
-          </h1>
-          <div className="flex items-center justify-center gap-3 text-muted-foreground text-sm font-serif italic mb-6">
-            <PixelPin size={14} />
-
-            {/* Conditional Location Display from Metadata */}
-            <span>
-              {monthDay} · {displayTime}
-              {locationVal ? ` · ${locationVal}` : ''}
-            </span>
-          </div>
-          <div className="divider max-w-[120px] mx-auto opacity-60" />
-        </motion.header>
-
-        {/* Render Analysis Content */}
-        <AnalysisRenderer data={effectiveData} />
-
-        {/* Footer - All Caught Up */}
-        <motion.footer
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={sectionTransition}
-          className="text-center mb-10"
-        >
-          <div className="flex flex-col items-center gap-4">
-            <WavingPenguin size={48} />
-            <p className="text-xl font-serif text-foreground italic tracking-tight">
-              You are all caught up.
-            </p>
-          </div>
-        </motion.footer>
+        {/* Text-focused Digest View */}
+        <DigestView
+          data={effectiveData}
+          recordId={effectiveId || ''}
+        />
       </motion.article>
     </div>
   );

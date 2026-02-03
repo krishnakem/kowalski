@@ -12,7 +12,7 @@
  */
 
 import { CapturedPost, DigestConfig } from '../../types/instagram.js';
-import { AnalysisObject, AnalysisSection } from '../../types/analysis.js';
+import { AnalysisObject, AnalysisSection, StoryHighlight } from '../../types/analysis.js';
 import { UsageService } from './UsageService.js';
 
 /**
@@ -185,7 +185,24 @@ Location: ${config.location || 'Not specified'}
 Date: ${dayName}, ${dateStr}
 
 ═══════════════════════════════════════════════════════════════════════════════
-III. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
+III. AD & SPONSORED CONTENT DETECTION (CRITICAL)
+═══════════════════════════════════════════════════════════════════════════════
+
+COMPLETELY SKIP and do NOT include in the digest:
+- Posts with "Sponsored" label visible
+- Posts with "Paid partnership" label
+- Ads (product promotions with "Shop Now", "Learn More" buttons)
+- Brand accounts pushing products with pricing
+- Influencer sponsored content (typically has disclaimers)
+- Screenshots that are mostly blank, loading, or unclear
+
+INCLUDE (even if commercial):
+- News organization updates (even with subscription CTAs)
+- Personal accounts sharing genuine experiences
+- Entertainment/sports content (games, shows, events)
+
+═══════════════════════════════════════════════════════════════════════════════
+IV. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
 ═══════════════════════════════════════════════════════════════════════════════
 
 1. **ATTRIBUTION (MANDATORY)**:
@@ -205,7 +222,7 @@ III. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
 3. **PRIORITIZATION**:
    - Search results matching "${interestsList}" = HIGH PRIORITY (feature prominently)
    - Breaking news / time-sensitive content = HIGH PRIORITY
-   - Stories = MEDIUM (ephemeral, context-dependent)
+   - Stories from friends/followed accounts = HIGH (personal relevance)
    - Generic lifestyle posts = LOW (brief mention or skip)
 
 4. **NO HALLUCINATIONS**:
@@ -222,43 +239,45 @@ III. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
    ❌ Do NOT report on duplicate/similar screenshots multiple times
 
 ═══════════════════════════════════════════════════════════════════════════════
-IV. OUTPUT STRUCTURE
+V. OUTPUT STRUCTURE
 ═══════════════════════════════════════════════════════════════════════════════
 
-Return valid JSON with this exact structure:
+Return valid JSON with this structure:
 {
     "title": "[Compelling headline based on top story - be specific and engaging]",
     "subtitle": "[Key strategic insight in one sentence] — ${dayName}, ${dateStr}",
     "sections": [
         {
-            "heading": "🎯 Strategic Interests: ${config.interests[0] || 'Your Feed'}",
+            "heading": "[Your chosen heading with emoji - based on content themes you observe]",
             "content": [
                 "• **@handle**: [Fact from screenshot]. [Contextual Analysis: trend/implication].",
                 "• **@handle**: [Another fact with depth]."
-            ]
-        },
-        {
-            "heading": "🌍 Global Intelligence",
-            "content": [
-                "• **@handle**: [Newsworthy item with context].",
-                "• **@handle**: [Another newsworthy item]."
-            ]
-        },
-        {
-            "heading": "⚡ Lightning Round",
-            "content": [
-                "• **@handle**: [Quick hit - one sentence].",
-                "• **@handle**: [Quick hit - one sentence]."
             ]
         }
     ]
 }
 
-TARGET: 15-25 high-quality bullets total across all sections.
+**SECTION RULES** (CRITICAL):
+- CREATE YOUR OWN HEADINGS based on the content themes you observe
+- Group related content into logical sections with descriptive headings
+- Use emojis at the start of each heading (e.g., "🏈 Football Updates", "🌐 World News", "🎬 Entertainment")
+- Do NOT use generic headings like "Section 1" - be specific to the content
+- Aim for 2-5 sections depending on content variety
+- Each section should have a clear theme that groups related posts
+
+**HEADING EXAMPLES** (create your own based on what you see):
+- "🏈 Cal Football Recruiting" (if you see multiple football-related posts)
+- "🌍 Breaking News" (for urgent/important news items)
+- "🎭 Entertainment & Pop Culture" (for entertainment content)
+- "📱 Tech & Innovation" (for technology content)
+- "🏠 Local Bay Area" (for location-specific content)
+- "👥 Friends & Following" (for personal updates from followed accounts)
+
+TARGET: 15-25 high-quality bullets total across sections.
 SKIP: Ads, sponsored content, empty/unclear screenshots, duplicate content.
 
 ═══════════════════════════════════════════════════════════════════════════════
-V. EXAMPLES
+VI. EXAMPLES
 ═══════════════════════════════════════════════════════════════════════════════
 
 ✅ CORRECT (with depth):
@@ -271,7 +290,13 @@ V. EXAMPLES
 • Someone posted about a new restaurant opening...
 
 ❌ WRONG (hallucinating):
-• **@UniversityAccount**: "Fostering lifelong connections through education" (if you can't read this in the screenshot, don't invent it)`;
+• **@UniversityAccount**: "Fostering lifelong connections through education" (if you can't read this in the screenshot, don't invent it)
+
+✅ CORRECT SECTION HEADING (based on content):
+"🏈 Cal Football & ACC News" (when you see multiple football posts)
+
+❌ WRONG SECTION HEADING (generic):
+"Strategic Interests" (too generic - be specific to what you observe)`;
     }
 
     /**
@@ -290,13 +315,15 @@ V. EXAMPLES
             throw new Error('Invalid response structure: missing title or sections');
         }
 
-        // Map sections
-        const sections: AnalysisSection[] = parsed.sections.map((s: { heading?: string; content?: string | string[] }) => ({
-            heading: s.heading || 'Untitled Section',
-            content: Array.isArray(s.content) ? s.content : [s.content || '']
-        }));
+        // Map sections - LLM creates its own headings based on content
+        const sections: AnalysisSection[] = parsed.sections
+            .map((s: { heading?: string; content?: string | string[] }) => ({
+                heading: s.heading || 'Untitled Section',
+                content: Array.isArray(s.content) ? s.content : [s.content || '']
+            }));
 
-        console.log('✅ Digest generated successfully');
+        console.log(`✅ Digest generated successfully`);
+        console.log(`   Sections: ${sections.length}`);
 
         return {
             title: parsed.title,

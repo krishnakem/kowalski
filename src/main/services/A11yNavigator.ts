@@ -21,29 +21,18 @@ import {
     FeedTerminationConfig,
     TerminationResult,
     InteractiveElement,
+    ElementState,
     BoundingBox,
     GazeTarget,
     ContentDensity,
     ContentType,
-    SpatialNode
+    SpatialNode,
+    CDPAXNode,
+    AXTree,
+    AXTreeNode,
+    EdgeButtonOptions
 } from '../../types/instagram.js';
 import type { GhostMouse } from './GhostMouse.js';
-
-/**
- * Raw CDP Accessibility Node structure.
- * This is the format returned by Accessibility.getFullAXTree.
- */
-interface CDPAXNode {
-    nodeId: string;
-    ignored: boolean;
-    role?: { type: string; value: string };
-    name?: { type: string; value: string; sources?: unknown[] };
-    description?: { type: string; value: string };
-    value?: { type: string; value: string };
-    properties?: Array<{ name: string; value: { type: string; value: unknown } }>;
-    childIds?: string[];
-    backendDOMNodeId?: number;
-}
 
 /**
  * CDP Accessibility tree response.
@@ -67,10 +56,63 @@ export class A11yNavigator {
     // Session-level timing multiplier for cross-session variance in typing delays
     private sessionTimingMultiplier: number;
 
+    // === CDP Session Management ===
+    // Reduces session churn by reusing sessions within a short window
+    private managedSession: CDPSession | null = null;
+    private sessionLastUsed: number = 0;
+    private readonly SESSION_TIMEOUT_MS = 5000; // Auto-detach after 5s idle
+
     constructor(page: Page) {
         this.page = page;
         // Vary timing by ±30% per session (0.7 to 1.3)
         this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
+    }
+
+    // =========================================================================
+    // CDP Session Management (Reduce Session Churn)
+    // =========================================================================
+
+    /**
+     * Execute an operation with a managed CDP session.
+     * Sessions are reused within a short window to reduce overhead and staleness.
+     *
+     * @param operation - Async function that uses the CDP session
+     * @returns Result of the operation
+     */
+    private async withSession<T>(
+        operation: (session: CDPSession) => Promise<T>
+    ): Promise<T> {
+        const now = Date.now();
+
+        // If existing session is stale (unused for > 5s), detach it
+        if (this.managedSession && (now - this.sessionLastUsed) > this.SESSION_TIMEOUT_MS) {
+            await this.forceReleaseSession();
+        }
+
+        // Create new session if needed
+        if (!this.managedSession) {
+            this.managedSession = await this.page.context().newCDPSession(this.page);
+        }
+
+        this.sessionLastUsed = now;
+
+        try {
+            return await operation(this.managedSession);
+        } catch (error) {
+            // On error, release session and re-throw
+            await this.forceReleaseSession();
+            throw error;
+        }
+    }
+
+    /**
+     * Force-release the managed session (e.g., on navigation or error).
+     */
+    private async forceReleaseSession(): Promise<void> {
+        if (this.managedSession) {
+            await this.managedSession.detach().catch(() => {});
+            this.managedSession = null;
+        }
     }
 
     /**
@@ -412,49 +454,707 @@ export class A11yNavigator {
     }
 
     /**
+     * Find Instagram post elements (<article>) in the viewport.
+     * Used for post-centered scrolling - each screenshot should contain ONE post.
+     *
+     * Returns posts sorted by vertical position (top to bottom).
+     * Includes backendNodeId for CDP scroll-to-element operations.
+     *
+     * @returns Array of InteractiveElements representing posts with bounding boxes
+     */
+    async findPostElements(): Promise<InteractiveElement[]> {
+        const posts: InteractiveElement[] = [];
+        const nodes = await this.getAccessibilityTree();
+
+        // Instagram posts are <article> elements with role="article"
+        // They contain the post content, username, like count, etc.
+        const articleNodes = nodes.filter(node => {
+            if (node.ignored) return false;
+            const role = node.role?.value?.toLowerCase();
+            return role === 'article';
+        });
+
+        if (articleNodes.length === 0) {
+            return posts;
+        }
+
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+            const viewport = await this.getViewportInfo();
+
+            for (const node of articleNodes) {
+                if (!node.backendDOMNodeId) continue;
+
+                const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+                if (!box || box.width <= 0 || box.height <= 0) continue;
+
+                // Filter for actual post containers (not tiny nested articles)
+                // Posts are typically >200px wide and >200px tall
+                if (box.width < 200 || box.height < 200) continue;
+
+                // Only include posts that are at least partially visible
+                // (within reasonable distance of viewport)
+                const isNearViewport = box.y < viewport.height + 500 &&
+                                       box.y + box.height > -500;
+                if (!isNearViewport) continue;
+
+                posts.push({
+                    role: 'article',
+                    name: node.name?.value || 'Post',
+                    selector: '',  // No selector - we use coordinates only
+                    boundingBox: box,
+                    backendNodeId: node.backendDOMNodeId
+                });
+            }
+        } catch (error) {
+            console.warn('Failed to get post bounding boxes:', error);
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
+
+        // Sort by Y position (top to bottom)
+        return posts.sort((a, b) => (a.boundingBox?.y || 0) - (b.boundingBox?.y || 0));
+    }
+
+    /**
+     * Find post elements with bounding boxes in a SINGLE CDP session.
+     * Prevents staleness between tree query and box retrieval.
+     *
+     * This is the recommended method for post-centered scrolling.
+     * Unlike findPostElements(), this uses withSession() to ensure
+     * all operations happen atomically.
+     *
+     * @returns Posts with fresh bounding boxes from same CDP session
+     */
+    async findPostElementsAtomic(): Promise<InteractiveElement[]> {
+        return this.withSession(async (cdpSession) => {
+            const posts: InteractiveElement[] = [];
+
+            // Step 1: Get accessibility tree
+            const response = await cdpSession.send('Accessibility.getFullAXTree') as CDPAXTreeResponse;
+            const nodes = response.nodes || [];
+
+            // Step 2: Filter for article nodes
+            const articleNodes = nodes.filter(node => {
+                if (node.ignored) return false;
+                const role = node.role?.value?.toLowerCase();
+                return role === 'article';
+            });
+
+            if (articleNodes.length === 0) {
+                return posts;
+            }
+
+            // Step 3: Get viewport info (same session)
+            const viewportResult = await cdpSession.send('Runtime.evaluate', {
+                expression: `JSON.stringify({
+                    height: window.innerHeight,
+                    scrollY: window.scrollY
+                })`,
+                returnByValue: true
+            });
+            const viewport = JSON.parse(viewportResult.result.value as string);
+
+            // Step 4: Get bounding boxes in same session (prevents staleness!)
+            for (const node of articleNodes) {
+                if (!node.backendDOMNodeId) continue;
+
+                try {
+                    const { model } = await cdpSession.send('DOM.getBoxModel', {
+                        backendNodeId: node.backendDOMNodeId
+                    });
+
+                    if (!model?.content) continue;
+
+                    const [x1, y1, x2, , , y3] = model.content;
+                    const box: BoundingBox = {
+                        x: x1,
+                        y: y1,
+                        width: x2 - x1,
+                        height: y3 - y1
+                    };
+
+                    // Filter for actual posts (not tiny elements)
+                    if (box.width < 200 || box.height < 200) continue;
+
+                    // Check if near viewport
+                    const isNearViewport = box.y < viewport.height + 500 &&
+                                           box.y + box.height > -500;
+                    if (!isNearViewport) continue;
+
+                    posts.push({
+                        role: 'article',
+                        name: node.name?.value || 'Post',
+                        selector: '',
+                        boundingBox: box,
+                        backendNodeId: node.backendDOMNodeId
+                    });
+                } catch {
+                    // Skip elements that fail to get box model
+                    continue;
+                }
+            }
+
+            // Sort by Y position (top to bottom)
+            return posts.sort((a, b) => (a.boundingBox?.y || 0) - (b.boundingBox?.y || 0));
+        });
+    }
+
+    /**
      * Find carousel "Next" button for multi-image posts.
      * Instagram uses a button with name containing "Next" or arrow patterns.
      *
      * @returns InteractiveElement with bounding box, or null if not found
      */
-    async findCarouselNextButton(): Promise<InteractiveElement | null> {
-        const nodes = await this.getAccessibilityTree();
+    // =========================================================================
+    // DEPRECATED: Hardcoded button finders removed
+    // Use getAllInteractiveElements() with pattern matching instead.
+    // Example:
+    //   const elements = await navigator.getAllInteractiveElements();
+    //   const nextBtn = elements.find(el => /next|skip|forward/i.test(el.name));
+    // =========================================================================
 
-        // Look for "Next" button patterns used by Instagram carousels
-        const nextPatterns = [
-            /^next$/i,
-            /next slide/i,
-            /go to slide/i,
-            /chevron.*right/i
-        ];
+    /**
+     * Find ALL buttons on the current page.
+     * This mimics what a screen reader can highlight - every interactive button.
+     * Useful for discovery and debugging.
+     *
+     * @returns Array of InteractiveElements with bounding boxes
+     */
+    async findAllButtons(): Promise<InteractiveElement[]> {
+        return this.withSession(async (cdpSession) => {
+            const buttons: InteractiveElement[] = [];
 
-        for (const pattern of nextPatterns) {
-            const matches = this.findMatchingNodes(nodes, 'button', pattern);
-            if (matches.length > 0) {
-                const match = matches[0];
-                if (match.backendDOMNodeId) {
-                    let cdpSession: CDPSession | null = null;
-                    try {
-                        cdpSession = await this.page.context().newCDPSession(this.page);
-                        const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
-                        if (box && box.width > 0 && box.height > 0) {
-                            return {
-                                role: match.role?.value || 'button',
-                                name: match.name?.value || 'Next',
-                                selector: '',
-                                boundingBox: box
-                            };
-                        }
-                    } finally {
-                        if (cdpSession) {
-                            await cdpSession.detach().catch(() => {});
-                        }
+            const response = await cdpSession.send('Accessibility.getFullAXTree') as CDPAXTreeResponse;
+            const nodes = response.nodes || [];
+
+            // Find all button-role elements
+            const buttonNodes = nodes.filter(node => {
+                if (node.ignored) return false;
+                const role = node.role?.value?.toLowerCase();
+                return role === 'button';
+            });
+
+            // Get bounding boxes for all
+            for (const node of buttonNodes) {
+                if (!node.backendDOMNodeId) continue;
+
+                try {
+                    const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+                    if (!box) continue;
+
+                    // Include even small buttons (story nav buttons may be small)
+                    if (box.width > 10 && box.height > 10) {
+                        buttons.push({
+                            role: 'button',
+                            name: node.name?.value || '[unnamed]',
+                            selector: '',
+                            boundingBox: box,
+                            backendNodeId: node.backendDOMNodeId
+                        });
+                    }
+                } catch {
+                    continue;
+                }
+            }
+
+            return buttons;
+        });
+    }
+
+    // =========================================================================
+    // SCREEN READER APPROACH - Generic Element Discovery
+    // =========================================================================
+
+    // -------------------------------------------------------------------------
+    // Hierarchy-Aware Navigation (Screen Reader-Like Tree Traversal)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Interactive roles that screen readers expose for navigation.
+     */
+    private readonly INTERACTIVE_ROLES = [
+        'button', 'link', 'menuitem', 'tab',
+        'checkbox', 'radio', 'switch',
+        'textbox', 'searchbox', 'slider',
+        'img'  // Include images (may be clickable)
+    ];
+
+    /**
+     * Build a navigable tree from the flat CDP accessibility response.
+     * Establishes parent-child relationships for hierarchy queries.
+     *
+     * This is the foundation for screen reader-like navigation:
+     * - Enables "find button inside THIS container" queries
+     * - Supports ancestor lookups (e.g., "what article contains this button?")
+     * - Provides O(1) lookup by nodeId or backendDOMNodeId
+     *
+     * @returns AXTree with nodeMap and backendMap for O(1) lookups, or null if failed
+     */
+    async buildAccessibilityTree(): Promise<AXTree | null> {
+        return this.withSession(async (cdpSession) => {
+            const response = await cdpSession.send('Accessibility.getFullAXTree') as CDPAXTreeResponse;
+            const nodes = response.nodes || [];
+
+            if (nodes.length === 0) return null;
+
+            // Build lookup maps
+            const nodeMap = new Map<string, AXTreeNode>();
+            const backendMap = new Map<number, AXTreeNode>();
+
+            // First pass: create all nodes with depth tracking
+            for (const node of nodes) {
+                const treeNode: AXTreeNode = { ...node, depth: 0 };
+                nodeMap.set(node.nodeId, treeNode);
+                if (node.backendDOMNodeId) {
+                    backendMap.set(node.backendDOMNodeId, treeNode);
+                }
+            }
+
+            // Second pass: establish parent links and calculate depths
+            for (const node of nodes) {
+                const parentNode = nodeMap.get(node.nodeId);
+                if (!parentNode || !node.childIds) continue;
+
+                for (const childId of node.childIds) {
+                    const childNode = nodeMap.get(childId);
+                    if (childNode) {
+                        childNode.parentId = node.nodeId;
+                        childNode.depth = parentNode.depth + 1;
                     }
                 }
             }
+
+            // Root is first node (usually document/rootWebArea)
+            const root = nodeMap.get(nodes[0].nodeId);
+            if (!root) return null;
+
+            return { root, nodeMap, backendMap };
+        });
+    }
+
+    /**
+     * Check if a node is a descendant of another node.
+     * Walks up the tree from child to ancestor.
+     *
+     * @param tree - The accessibility tree
+     * @param childNodeId - The potential descendant's nodeId
+     * @param ancestorNodeId - The potential ancestor's nodeId
+     * @returns true if childNodeId is a descendant of ancestorNodeId
+     */
+    private isDescendantOf(tree: AXTree, childNodeId: string, ancestorNodeId: string): boolean {
+        let current = tree.nodeMap.get(childNodeId);
+        while (current?.parentId) {
+            if (current.parentId === ancestorNodeId) return true;
+            current = tree.nodeMap.get(current.parentId);
+        }
+        return false;
+    }
+
+    /**
+     * Find ancestor matching one of the given roles.
+     * Useful for finding "the article containing this button".
+     *
+     * @param tree - The accessibility tree
+     * @param nodeId - Starting node's nodeId
+     * @param roles - Array of roles to search for (e.g., ['article', 'region', 'dialog'])
+     * @returns First ancestor matching a role, or null
+     */
+    private findAncestorByRole(tree: AXTree, nodeId: string, roles: string[]): AXTreeNode | null {
+        let current = tree.nodeMap.get(nodeId);
+        while (current?.parentId) {
+            current = tree.nodeMap.get(current.parentId);
+            if (current) {
+                const role = current.role?.value?.toLowerCase();
+                if (role && roles.includes(role)) return current;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get all interactive descendants of a container.
+     * Returns elements that are hierarchically inside the container.
+     *
+     * This is the key method for scoped searches:
+     * - "Find all buttons inside this carousel"
+     * - "Find all links inside this article"
+     *
+     * @param tree - The accessibility tree
+     * @param ancestorNodeId - The container's nodeId
+     * @param roleFilter - Optional array of roles to filter (e.g., ['button', 'link'])
+     * @returns Array of InteractiveElements that are descendants of the container
+     */
+    private async getDescendantElements(
+        tree: AXTree,
+        ancestorNodeId: string,
+        roleFilter?: string[]
+    ): Promise<InteractiveElement[]> {
+        const elements: InteractiveElement[] = [];
+        const ancestorNode = tree.nodeMap.get(ancestorNodeId);
+        if (!ancestorNode) return elements;
+
+        // Collect all descendant nodeIds first (sync traversal)
+        const descendantNodeIds: string[] = [];
+        const collectDescendants = (nodeId: string) => {
+            const node = tree.nodeMap.get(nodeId);
+            if (!node || node.ignored) return;
+
+            const role = node.role?.value?.toLowerCase();
+
+            // Check if this node matches our filter
+            if (role && this.INTERACTIVE_ROLES.includes(role)) {
+                if (!roleFilter || roleFilter.includes(role)) {
+                    descendantNodeIds.push(nodeId);
+                }
+            }
+
+            // Traverse children
+            if (node.childIds) {
+                for (const childId of node.childIds) {
+                    collectDescendants(childId);
+                }
+            }
+        };
+
+        // Start from ancestor's children
+        if (ancestorNode.childIds) {
+            for (const childId of ancestorNode.childIds) {
+                collectDescendants(childId);
+            }
         }
 
+        // Now get bounding boxes for all matching descendants (single session)
+        return this.withSession(async (cdpSession) => {
+            for (const nodeId of descendantNodeIds) {
+                const node = tree.nodeMap.get(nodeId);
+                if (!node?.backendDOMNodeId) continue;
+
+                try {
+                    const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+                    if (box && box.width > 0 && box.height > 0) {
+                        elements.push({
+                            role: node.role?.value?.toLowerCase() || 'unknown',
+                            name: node.name?.value || '[unnamed]',
+                            selector: '',
+                            boundingBox: box,
+                            backendNodeId: node.backendDOMNodeId
+                        });
+                    }
+                } catch {
+                    // Skip nodes we can't get boxes for
+                }
+            }
+            return elements;
+        });
+    }
+
+    /**
+     * Find the semantic container (article, region, dialog, figure) for an element.
+     * Essential for scoped searches - "find buttons inside THIS post".
+     *
+     * @param backendNodeId - The backendDOMNodeId of the element
+     * @returns Container info with nodeId and role, or null if no container found
+     */
+    async findContainerForElement(backendNodeId: number): Promise<{
+        containerNodeId: string;
+        containerRole: string;
+        backendNodeId: number;
+    } | null> {
+        const tree = await this.buildAccessibilityTree();
+        if (!tree) return null;
+
+        const elementNode = tree.backendMap.get(backendNodeId);
+        if (!elementNode) return null;
+
+        // Container roles (semantic boundaries)
+        const containerRoles = ['article', 'region', 'dialog', 'main', 'navigation', 'figure'];
+
+        const container = this.findAncestorByRole(tree, elementNode.nodeId, containerRoles);
+        if (!container) return null;
+
+        return {
+            containerNodeId: container.nodeId,
+            containerRole: container.role?.value || 'unknown',
+            backendNodeId: container.backendDOMNodeId || 0
+        };
+    }
+
+    /**
+     * Find the story viewer container (dialog/modal).
+     * Stories open in a modal overlay with specific characteristics.
+     *
+     * @returns Container nodeId if found, or null
+     */
+    async findStoryViewerContainer(): Promise<string | null> {
+        const tree = await this.buildAccessibilityTree();
+        if (!tree) return null;
+
+        // Story viewer is typically a dialog or region with story-related content
+        for (const [nodeId, node] of tree.nodeMap) {
+            const role = node.role?.value?.toLowerCase();
+            if (role === 'dialog' || role === 'region') {
+                // Check if this container has story-like content
+                // (close button, navigation buttons)
+                const descendants = await this.getDescendantElements(tree, nodeId, ['button']);
+                const hasStoryNav = descendants.some(d =>
+                    /close|next|previous|pause|story/i.test(d.name)
+                );
+                if (hasStoryNav && descendants.length >= 2) {
+                    console.log(`  🎯 Found story container: ${role} with ${descendants.length} buttons`);
+                    return nodeId;
+                }
+            }
+        }
         return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // End Hierarchy-Aware Navigation
+    // -------------------------------------------------------------------------
+
+    /**
+     * Get ALL interactive elements on the page with full semantic information.
+     * This is how screen readers discover clickable content.
+     *
+     * NO hardcoded patterns - returns raw A11y tree data.
+     * Let the caller decide what to interact with.
+     *
+     * @returns Array of all interactive elements with semantic info
+     */
+    async getAllInteractiveElements(): Promise<InteractiveElement[]> {
+        return this.withSession(async (cdpSession) => {
+            const response = await cdpSession.send('Accessibility.getFullAXTree') as CDPAXTreeResponse;
+            const nodes = response.nodes || [];
+            const elements: InteractiveElement[] = [];
+
+            for (const node of nodes) {
+                // Skip ignored elements (not in a11y tree)
+                if (node.ignored) continue;
+
+                const role = node.role?.value?.toLowerCase();
+
+                // Only actionable roles (using class property)
+                if (!this.INTERACTIVE_ROLES.includes(role || '')) continue;
+
+                // Extract state from properties array
+                const state = this.extractElementState(node);
+
+                // Skip disabled elements (can't interact)
+                if (state.disabled) continue;
+
+                // Get bounding box
+                if (!node.backendDOMNodeId) continue;
+
+                try {
+                    const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+                    // Trust the a11y tree - any visible element is valid (was 5px, too restrictive)
+                    if (!box || box.width < 1 || box.height < 1) continue;
+
+                    elements.push({
+                        role: role || 'unknown',
+                        name: node.name?.value || '[unnamed]',
+                        description: node.description?.value || '',
+                        value: node.value?.value || '',
+                        state,
+                        selector: '',
+                        boundingBox: box,
+                        backendNodeId: node.backendDOMNodeId
+                    });
+                } catch {
+                    continue;
+                }
+            }
+
+            return elements;
+        });
+    }
+
+    /**
+     * Extract state information from a node's properties.
+     * Screen readers use this to determine element state.
+     */
+    private extractElementState(node: CDPAXNode): ElementState {
+        const state: ElementState = {};
+
+        if (!node.properties) return state;
+
+        for (const prop of node.properties) {
+            const key = prop.name.toLowerCase();
+            const val = prop.value?.value;
+
+            if (key === 'disabled') state.disabled = Boolean(val);
+            if (key === 'checked') state.checked = Boolean(val);
+            if (key === 'selected') state.selected = Boolean(val);
+            if (key === 'expanded') state.expanded = Boolean(val);
+            if (key === 'pressed') state.pressed = Boolean(val);
+        }
+
+        return state;
+    }
+
+    /**
+     * Filter elements by role.
+     * Example: getAllButtons() is just filterByRole('button')
+     */
+    async filterByRole(role: string): Promise<InteractiveElement[]> {
+        const all = await this.getAllInteractiveElements();
+        return all.filter(el => el.role === role);
+    }
+
+    /**
+     * Filter elements matching a name pattern.
+     * Example: Find "Next" or "Skip" buttons
+     */
+    async filterByNamePattern(pattern: RegExp): Promise<InteractiveElement[]> {
+        const all = await this.getAllInteractiveElements();
+        return all.filter(el => pattern.test(el.name));
+    }
+
+    /**
+     * Filter elements in a specific screen region.
+     * Example: Find buttons in the right half of the screen
+     */
+    async filterByRegion(region: BoundingBox): Promise<InteractiveElement[]> {
+        const all = await this.getAllInteractiveElements();
+        return all.filter(el => {
+            if (!el.boundingBox) return false;
+            const box = el.boundingBox;
+            return box.x >= region.x &&
+                   box.x + box.width <= region.x + region.width &&
+                   box.y >= region.y &&
+                   box.y + box.height <= region.y + region.height;
+        });
+    }
+
+    /**
+     * Dump all interactive elements for debugging.
+     * Use this to learn what elements Instagram actually has.
+     */
+    async dumpInteractiveElements(): Promise<void> {
+        const elements = await this.getAllInteractiveElements();
+
+        console.log('\n=== A11y Element Discovery (Screen Reader Mode) ===');
+        console.log(`Found ${elements.length} interactive elements:\n`);
+
+        for (const el of elements) {
+            const box = el.boundingBox;
+            const stateStr = Object.entries(el.state || {})
+                .filter(([, v]) => v)
+                .map(([k]) => k)
+                .join(', ');
+
+            console.log(
+                `  [${el.role}] "${el.name}"` +
+                (el.description ? ` - ${el.description}` : '') +
+                (stateStr ? ` (${stateStr})` : '') +
+                ` at (${box?.x?.toFixed(0)}, ${box?.y?.toFixed(0)}) ${box?.width?.toFixed(0)}x${box?.height?.toFixed(0)}`
+            );
+        }
+        console.log('===================================================\n');
+    }
+
+    // Legacy alias for backward compatibility
+    async findAllInteractiveElements(): Promise<InteractiveElement[]> {
+        return this.getAllInteractiveElements();
+    }
+
+    // Legacy alias for backward compatibility
+    async dumpAllButtonsForDiscovery(): Promise<void> {
+        return this.dumpInteractiveElements();
+    }
+
+    /**
+     * Detect if current viewport contains video content.
+     * Uses STRICT criteria to avoid false positives on stories.
+     *
+     * Video detection signals (must have at least one):
+     * 1. Mute/unmute/volume button - indicates audio track (videos only)
+     * 2. Video element role - actual video player element
+     * 3. Scrubber/timeline WITH duration display - video player controls
+     *
+     * Explicitly IGNORING (present in all stories, causes false positives):
+     * - Progress bars (story progress indicator)
+     * - Generic pause button (tap-to-pause on stories)
+     *
+     * @returns Object with isVideo and hasAudio flags
+     */
+    async detectVideoContent(): Promise<{ isVideo: boolean; hasAudio: boolean }> {
+        const elements = await this.getAllInteractiveElements();
+
+        // STRONG signal: Mute/unmute/volume controls (only videos have audio controls)
+        const hasMuteControl = elements.some(el =>
+            el.role === 'button' && /mute|unmute|volume/i.test(el.name)
+        );
+
+        // STRONG signal: Actual video element in a11y tree
+        const hasVideoElement = elements.some(el =>
+            el.role === 'video' ||
+            (el.role === 'application' && /video|player/i.test(el.name))
+        );
+
+        // MODERATE signal: Scrubber/timeline control (video players have these, story progress bars don't)
+        const hasScrubber = elements.some(el =>
+            /scrub|timeline|slider|seek/i.test(el.name) ||
+            (el.role === 'slider' && /video|time/i.test(el.name))
+        );
+
+        // MODERATE signal: Duration display (shows time like "0:30" - videos only)
+        const hasDuration = elements.some(el =>
+            /\d+:\d+/.test(el.name) || /duration|remaining/i.test(el.name)
+        );
+
+        // Video detection: need at least one STRONG signal, or both moderate signals
+        const isVideo = hasMuteControl || hasVideoElement || (hasScrubber && hasDuration);
+
+        if (isVideo) {
+            console.log(`  🎬 Video detected: mute=${hasMuteControl}, videoEl=${hasVideoElement}, scrubber=${hasScrubber}`);
+        }
+
+        return {
+            isVideo,
+            hasAudio: hasMuteControl
+        };
+    }
+
+    /**
+     * Get the first element from a list of nodes that has a valid bounding box.
+     * Used by button-finding methods to return actionable elements.
+     *
+     * @param nodes - Array of CDPAXNodes to check
+     * @returns InteractiveElement with bounding box, or null if none found
+     */
+    private async getFirstElementWithBoundingBox(
+        nodes: CDPAXNode[]
+    ): Promise<InteractiveElement | null> {
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+
+            for (const node of nodes) {
+                if (!node.backendDOMNodeId) continue;
+
+                const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+                if (box && box.width > 0 && box.height > 0) {
+                    return {
+                        role: node.role?.value || 'unknown',
+                        name: node.name?.value || '[unnamed]',
+                        selector: '',
+                        boundingBox: box,
+                        backendNodeId: node.backendDOMNodeId
+                    };
+                }
+            }
+
+            return null;
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
     }
 
     /**
@@ -552,6 +1252,303 @@ export class A11yNavigator {
         }
 
         return null;
+    }
+
+    // =========================================================================
+    // SPATIAL DISCOVERY: Position-based Element Finding
+    // =========================================================================
+
+    /**
+     * Find a button positioned on the edge of content using spatial reasoning.
+     * Uses tiered strategy: 1) Image-relative search, 2) Viewport-center fallback
+     *
+     * For carousel navigation:
+     * - Button on RIGHT edge = likely "next"
+     * - Button on LEFT edge = likely "previous"
+     *
+     * Key insight: Carousel buttons are ALWAYS in the content area (center of screen),
+     * NEVER in sidebars. This allows safe fallback when image detection fails.
+     *
+     * NEW: Supports hierarchy-first search when containerNodeId provided.
+     * Falls back to spatial search for backward compatibility.
+     *
+     * @param side - 'right' for next, 'left' for previous
+     * @param options - Optional EdgeButtonOptions with contentArea and/or containerNodeId
+     * @returns Button element positioned on the specified side, or null
+     */
+    async findEdgeButton(
+        side: 'right' | 'left',
+        options?: EdgeButtonOptions
+    ): Promise<InteractiveElement | null> {
+        const viewport = await this.getViewportInfo();
+
+        // === STRATEGY 0: HIERARCHY-FIRST (if containerNodeId provided) ===
+        // This is the screen reader approach: find buttons INSIDE the container
+        if (options?.containerNodeId) {
+            const tree = await this.buildAccessibilityTree();
+            if (tree) {
+                // Get only buttons/links that are descendants of container
+                const descendants = await this.getDescendantElements(
+                    tree,
+                    options.containerNodeId,
+                    ['button', 'link']
+                );
+
+                if (descendants.length > 0) {
+                    // Filter by side (same spatial logic, but on scoped elements)
+                    const centerX = viewport.width / 2;
+
+                    const sideButtons = descendants.filter(btn => {
+                        const box = btn.boundingBox!;
+                        const btnCenterX = box.x + box.width / 2;
+                        return side === 'right' ? btnCenterX > centerX : btnCenterX < centerX;
+                    });
+
+                    if (sideButtons.length > 0) {
+                        // Sort by distance from center
+                        // For stories: pick closest to center (arrow buttons are near content)
+                        // For carousel: pick furthest from center (buttons are at edges)
+                        const inStory = this.isInStoryViewer();
+                        sideButtons.sort((a, b) => {
+                            const aX = a.boundingBox!.x;
+                            const bX = b.boundingBox!.x;
+                            return inStory
+                                ? (side === 'right' ? aX - bX : bX - aX)  // Closest to center
+                                : (side === 'right' ? bX - aX : aX - bX); // Furthest from center
+                        });
+
+                        console.log(`  🎯 Hierarchy: found ${sideButtons.length} ${side} button(s) in container, using "${sideButtons[0].name}"`);
+                        return sideButtons[0];
+                    }
+                }
+                console.log(`  🎯 Hierarchy: no ${side} buttons in container, falling back to spatial`);
+            }
+        }
+
+        // Get all elements for spatial strategies
+        const elements = await this.getAllInteractiveElements();
+
+        // Filter to clickable elements (buttons and links)
+        const clickables = elements.filter(el =>
+            (el.role === 'button' || el.role === 'link') &&
+            el.boundingBox && el.boundingBox.width > 0
+        );
+
+        if (clickables.length === 0) return null;
+
+        // Extract contentArea from options for backward compatibility
+        const contentArea = options?.contentArea;
+
+        // === STRATEGY 1: Image-relative search (when contentArea provided) ===
+        if (contentArea) {
+            // Expanded margin: 30% of content width, with 5% overflow allowed
+            const edgeMargin = contentArea.width * 0.30;
+            const overflow = contentArea.width * 0.05;  // Allow buttons slightly outside
+
+            if (side === 'right') {
+                const rightZoneStart = contentArea.x + contentArea.width - edgeMargin;
+                const rightZoneEnd = contentArea.x + contentArea.width + overflow;
+
+                const rightButtons = clickables
+                    .filter(btn => {
+                        const box = btn.boundingBox!;
+                        const buttonCenterX = box.x + box.width / 2;
+                        const buttonCenterY = box.y + box.height / 2;
+
+                        const inRightZone = buttonCenterX >= rightZoneStart && buttonCenterX <= rightZoneEnd;
+                        // Allow 20px vertical tolerance for buttons near edges
+                        const inVerticalBounds = buttonCenterY >= contentArea.y - 20 &&
+                                                buttonCenterY <= contentArea.y + contentArea.height + 20;
+
+                        return inRightZone && inVerticalBounds;
+                    })
+                    .sort((a, b) => (b.boundingBox!.x) - (a.boundingBox!.x));
+
+                if (rightButtons.length > 0) {
+                    console.log(`  🎯 Spatial (image): found ${rightButtons.length} button(s), using "${rightButtons[0].name}" at x=${rightButtons[0].boundingBox!.x}`);
+                    return rightButtons[0];
+                }
+            } else {
+                const leftZoneStart = contentArea.x - overflow;
+                const leftZoneEnd = contentArea.x + edgeMargin;
+
+                const leftButtons = clickables
+                    .filter(btn => {
+                        const box = btn.boundingBox!;
+                        const buttonCenterX = box.x + box.width / 2;
+                        const buttonCenterY = box.y + box.height / 2;
+
+                        const inLeftZone = buttonCenterX >= leftZoneStart && buttonCenterX <= leftZoneEnd;
+                        const inVerticalBounds = buttonCenterY >= contentArea.y - 20 &&
+                                                buttonCenterY <= contentArea.y + contentArea.height + 20;
+
+                        return inLeftZone && inVerticalBounds;
+                    })
+                    .sort((a, b) => (a.boundingBox!.x) - (b.boundingBox!.x));
+
+                if (leftButtons.length > 0) {
+                    console.log(`  🎯 Spatial (image): found ${leftButtons.length} button(s), using "${leftButtons[0].name}" at x=${leftButtons[0].boundingBox!.x}`);
+                    return leftButtons[0];
+                }
+            }
+        }
+
+        // === STRATEGY 2: Context-aware fallback ===
+        const viewportCenterX = viewport.width / 2;
+        const inStoryViewer = this.isInStoryViewer();
+
+        // Story viewer has a different layout:
+        // - Story content is centered (roughly 30-70% of viewport width)
+        // - Arrow buttons are at the EDGES of story content, not viewport edges
+        // - Thumbnail buttons are at the FAR edges (0-25% and 75-100%)
+        // For stories: search CLOSER to center, pick button nearest to center
+        // For carousel/feed: search wider zone, pick button furthest from center
+
+        if (inStoryViewer) {
+            // STORY MODE: Tighter zone, pick CLOSEST to center
+            // Story arrows are typically at 30-45% (left) and 55-70% (right) of viewport
+            const storyZoneStart = viewport.width * 0.28;
+            const storyZoneEnd = viewport.width * 0.72;
+
+            if (side === 'right') {
+                const rightButtons = clickables
+                    .filter(btn => {
+                        const box = btn.boundingBox!;
+                        const buttonCenterX = box.x + box.width / 2;
+                        // Right of center but within story content zone (not thumbnails)
+                        return buttonCenterX > viewportCenterX && buttonCenterX < storyZoneEnd;
+                    })
+                    // Sort by CLOSEST to center (ascending x), not furthest
+                    .sort((a, b) => (a.boundingBox!.x) - (b.boundingBox!.x));
+
+                if (rightButtons.length > 0) {
+                    console.log(`  🎯 Spatial (story): found ${rightButtons.length} button(s), using "${rightButtons[0].name}" at x=${Math.round(rightButtons[0].boundingBox!.x)}`);
+                    return rightButtons[0];
+                }
+            } else {
+                const leftButtons = clickables
+                    .filter(btn => {
+                        const box = btn.boundingBox!;
+                        const buttonCenterX = box.x + box.width / 2;
+                        // Left of center but within story content zone (not thumbnails)
+                        return buttonCenterX > storyZoneStart && buttonCenterX < viewportCenterX;
+                    })
+                    // Sort by CLOSEST to center (descending x), not furthest
+                    .sort((a, b) => (b.boundingBox!.x) - (a.boundingBox!.x));
+
+                if (leftButtons.length > 0) {
+                    console.log(`  🎯 Spatial (story): found ${leftButtons.length} button(s), using "${leftButtons[0].name}" at x=${Math.round(leftButtons[0].boundingBox!.x)}`);
+                    return leftButtons[0];
+                }
+            }
+
+            console.log(`  🎯 Spatial (story): no button found in ${side} zone`);
+            return null;
+        }
+
+        // CAROUSEL/FEED MODE: Wider zone, pick furthest from center
+        const safeZoneStart = viewport.width * 0.15;  // Exclude left sidebar
+        const safeZoneEnd = viewport.width * 0.85;    // Exclude right sidebar
+
+        if (side === 'right') {
+            // Search right half of safe zone (50-85% of viewport)
+            const rightButtons = clickables
+                .filter(btn => {
+                    const box = btn.boundingBox!;
+                    const buttonCenterX = box.x + box.width / 2;
+                    // Must be in right portion of content area (center to 85%)
+                    return buttonCenterX > viewportCenterX && buttonCenterX < safeZoneEnd;
+                })
+                .sort((a, b) => (b.boundingBox!.x) - (a.boundingBox!.x));
+
+            if (rightButtons.length > 0) {
+                console.log(`  🎯 Spatial (fallback): found ${rightButtons.length} button(s), using "${rightButtons[0].name}" at x=${Math.round(rightButtons[0].boundingBox!.x)}`);
+                return rightButtons[0];
+            }
+        } else {
+            // Search left half of safe zone (15-50% of viewport)
+            const leftButtons = clickables
+                .filter(btn => {
+                    const box = btn.boundingBox!;
+                    const buttonCenterX = box.x + box.width / 2;
+                    return buttonCenterX > safeZoneStart && buttonCenterX < viewportCenterX;
+                })
+                .sort((a, b) => (a.boundingBox!.x) - (b.boundingBox!.x));
+
+            if (leftButtons.length > 0) {
+                console.log(`  🎯 Spatial (fallback): found ${leftButtons.length} button(s), using "${leftButtons[0].name}" at x=${Math.round(leftButtons[0].boundingBox!.x)}`);
+                return leftButtons[0];
+            }
+        }
+
+        console.log(`  🎯 Spatial: no button found in ${side} zone`);
+        return null;
+    }
+
+    /**
+     * Find navigation controls for carousel/gallery using spatial reasoning.
+     * Returns next/previous buttons based on position, not text patterns.
+     *
+     * Uses expanded image detection (img, figure, graphic roles) and passes
+     * contentArea to findEdgeButton which will use fallback if needed.
+     */
+    async findCarouselControls(): Promise<{
+        next: InteractiveElement | null;
+        previous: InteractiveElement | null;
+    }> {
+        const elements = await this.getAllInteractiveElements();
+
+        // Expanded image detection - include figure and graphic roles
+        const imageElements = elements.filter(el =>
+            (el.role === 'img' || el.role === 'figure' || el.role === 'graphic') &&
+            el.boundingBox && el.boundingBox.width > 100
+        );
+
+        // Get the largest image-like element
+        let mainImage: InteractiveElement | undefined;
+        let maxArea = 0;
+
+        for (const img of imageElements) {
+            const area = (img.boundingBox?.width || 0) * (img.boundingBox?.height || 0);
+            if (area > maxArea) {
+                maxArea = area;
+                mainImage = img;
+            }
+        }
+
+        // contentArea may be undefined - findEdgeButton will use fallback strategy
+        const contentArea = mainImage?.boundingBox;
+
+        // NEW: Find the container for this image using hierarchy
+        let containerNodeId: string | undefined;
+        if (mainImage?.backendNodeId) {
+            const tree = await this.buildAccessibilityTree();
+            if (tree) {
+                const imageNode = tree.backendMap.get(mainImage.backendNodeId);
+                if (imageNode) {
+                    // Find the article/figure/region containing this image
+                    const container = this.findAncestorByRole(tree, imageNode.nodeId, ['article', 'figure', 'region']);
+                    containerNodeId = container?.nodeId;
+                    if (containerNodeId) {
+                        console.log(`  🎯 Found carousel container: ${container?.role?.value}`);
+                    }
+                }
+            }
+        }
+
+        if (contentArea) {
+            console.log(`  🎯 Using image bounds: ${Math.round(contentArea.width)}x${Math.round(contentArea.height)} at (${Math.round(contentArea.x)}, ${Math.round(contentArea.y)})`);
+        } else {
+            console.log(`  🎯 No image found, using viewport-center fallback`);
+        }
+
+        // Pass both spatial hint AND container to findEdgeButton
+        const options: EdgeButtonOptions = { contentArea, containerNodeId };
+
+        return {
+            next: await this.findEdgeButton('right', options),
+            previous: await this.findEdgeButton('left', options)
+        };
     }
 
     /**
@@ -758,6 +1755,53 @@ export class A11yNavigator {
         });
 
         return hasLikeButton || hasCommentButton;
+    }
+
+    /**
+     * Detect if the current viewport shows an ad/sponsored content.
+     * Uses accessibility tree to find ad indicators without Vision API.
+     *
+     * Detection signals:
+     * - "Sponsored" label (below username in post header)
+     * - "Learn more" button (common in ads)
+     * - "Shop now" button
+     * - "Paid partnership" text
+     *
+     * @returns Object with isAd flag and reason
+     */
+    async detectAdContent(): Promise<{ isAd: boolean; reason?: string }> {
+        const nodes = await this.getAccessibilityTree();
+
+        for (const node of nodes) {
+            if (node.ignored) continue;
+            const nodeName = node.name?.value?.toLowerCase() || '';
+            const nodeRole = node.role?.value?.toLowerCase() || '';
+
+            // Check for "Sponsored" label (appears below username in post header)
+            // Instagram uses exact "Sponsored" text as a link
+            if (nodeName === 'sponsored') {
+                return { isAd: true, reason: 'Sponsored label detected' };
+            }
+
+            // Check for "Learn more" button/link (common in video/image ads)
+            if ((nodeRole === 'button' || nodeRole === 'link') &&
+                nodeName.includes('learn more')) {
+                return { isAd: true, reason: 'Learn more button detected' };
+            }
+
+            // Check for "Shop now" button (e-commerce ads)
+            if ((nodeRole === 'button' || nodeRole === 'link') &&
+                nodeName.includes('shop now')) {
+                return { isAd: true, reason: 'Shop now button detected' };
+            }
+
+            // Check for "Paid partnership" text (influencer sponsored content)
+            if (nodeName.includes('paid partnership')) {
+                return { isAd: true, reason: 'Paid partnership detected' };
+            }
+        }
+
+        return { isAd: false };
     }
 
     /**
@@ -1582,6 +2626,363 @@ export class A11yNavigator {
      */
     async getFullAccessibilityTree(): Promise<CDPAXNode[]> {
         return this.getAccessibilityTree();
+    }
+
+    // =========================================================================
+    // UNIVERSAL ACCESSIBILITY (Screen Reader-Like Capabilities)
+    // =========================================================================
+
+    /**
+     * Find ANY element by role and name pattern - NO size filters, NO limits.
+     * This is the screen reader equivalent - can find any element in the tree.
+     *
+     * @param role - Accessibility role (e.g., 'button', 'link', 'image', 'textbox')
+     * @param namePattern - Regex pattern to match against accessible name
+     * @returns First matching element with bounding box, or null
+     */
+    async findAnyElement(
+        role: string,
+        namePattern: RegExp | string
+    ): Promise<InteractiveElement | null> {
+        const pattern = typeof namePattern === 'string'
+            ? new RegExp(namePattern, 'i')
+            : namePattern;
+
+        const nodes = await this.getAccessibilityTree();
+
+        // Find first match - no size filter, no artificial limits
+        const match = nodes.find(node => {
+            if (node.ignored) return false;
+            const nodeRole = node.role?.value?.toLowerCase();
+            const nodeName = node.name?.value || '';
+            return nodeRole === role.toLowerCase() && pattern.test(nodeName);
+        });
+
+        if (!match?.backendDOMNodeId) return null;
+
+        // Get bounding box
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+            const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+            if (box && box.width > 0 && box.height > 0) {
+                return {
+                    role: match.role?.value || role,
+                    name: match.name?.value || '',
+                    selector: '',
+                    boundingBox: box,
+                    backendNodeId: match.backendDOMNodeId
+                };
+            }
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Find ALL elements matching role and pattern - NO limits.
+     * Returns every match in the accessibility tree.
+     *
+     * @param role - Accessibility role (e.g., 'button', 'link')
+     * @param namePattern - Regex pattern to match against accessible name
+     * @returns Array of all matching elements with bounding boxes
+     */
+    async findAllElements(
+        role: string,
+        namePattern: RegExp | string
+    ): Promise<InteractiveElement[]> {
+        const pattern = typeof namePattern === 'string'
+            ? new RegExp(namePattern, 'i')
+            : namePattern;
+
+        const nodes = await this.getAccessibilityTree();
+        const elements: InteractiveElement[] = [];
+
+        // Find ALL matches - no limit
+        const matches = nodes.filter(node => {
+            if (node.ignored) return false;
+            const nodeRole = node.role?.value?.toLowerCase();
+            const nodeName = node.name?.value || '';
+            return nodeRole === role.toLowerCase() && pattern.test(nodeName);
+        });
+
+        if (matches.length === 0) return elements;
+
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+
+            for (const match of matches) {
+                if (!match.backendDOMNodeId) continue;
+
+                const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+                if (box && box.width > 0 && box.height > 0) {
+                    elements.push({
+                        role: match.role?.value || role,
+                        name: match.name?.value || '',
+                        selector: '',
+                        boundingBox: box,
+                        backendNodeId: match.backendDOMNodeId
+                    });
+                }
+            }
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
+
+        return elements;
+    }
+
+    /**
+     * Find element WITHIN a specific container (e.g., find Like button inside a post).
+     * Uses childIds to traverse the tree contextually like a screen reader.
+     *
+     * @param containerNodeId - The backendNodeId of the container element
+     * @param role - Role to search for within container
+     * @param namePattern - Name pattern to match
+     * @returns Matching element within the container, or null
+     */
+    async findElementInContainer(
+        containerNodeId: number,
+        role: string,
+        namePattern: RegExp | string
+    ): Promise<InteractiveElement | null> {
+        const pattern = typeof namePattern === 'string'
+            ? new RegExp(namePattern, 'i')
+            : namePattern;
+
+        const nodes = await this.getAccessibilityTree();
+
+        // Build node map for traversal (nodeId -> node)
+        const nodeMap = new Map<string, CDPAXNode>();
+        for (const node of nodes) {
+            nodeMap.set(node.nodeId, node);
+        }
+
+        // Find container by backendDOMNodeId
+        const container = nodes.find(n => n.backendDOMNodeId === containerNodeId);
+        if (!container) return null;
+
+        // Recursive search within container's children
+        const searchChildren = (nodeId: string): CDPAXNode | null => {
+            const node = nodeMap.get(nodeId);
+            if (!node) return null;
+
+            // Check if this node matches
+            if (!node.ignored &&
+                node.role?.value?.toLowerCase() === role.toLowerCase() &&
+                pattern.test(node.name?.value || '')) {
+                return node;
+            }
+
+            // Recurse into children
+            for (const childId of node.childIds || []) {
+                const found = searchChildren(childId);
+                if (found) return found;
+            }
+
+            return null;
+        };
+
+        const match = searchChildren(container.nodeId);
+        if (!match?.backendDOMNodeId) return null;
+
+        // Get bounding box
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+            const box = await this.getNodeBoundingBox(cdpSession, match.backendDOMNodeId);
+            if (box && box.width > 0 && box.height > 0) {
+                return {
+                    role: match.role?.value || role,
+                    name: match.name?.value || '',
+                    selector: '',
+                    boundingBox: box,
+                    backendNodeId: match.backendDOMNodeId
+                };
+            }
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get all child elements of a node - enables tree traversal like screen readers.
+     *
+     * @param parentNodeId - The backendNodeId of the parent element
+     * @returns Array of child elements with their roles, names, and bounding boxes
+     */
+    async getChildElements(parentNodeId: number): Promise<InteractiveElement[]> {
+        const nodes = await this.getAccessibilityTree();
+        const children: InteractiveElement[] = [];
+
+        // Build node map for traversal
+        const nodeMap = new Map<string, CDPAXNode>();
+        for (const node of nodes) {
+            nodeMap.set(node.nodeId, node);
+        }
+
+        // Find parent by backendDOMNodeId
+        const parent = nodes.find(n => n.backendDOMNodeId === parentNodeId);
+        if (!parent || !parent.childIds) return children;
+
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+
+            for (const childId of parent.childIds) {
+                const child = nodeMap.get(childId);
+                if (!child || child.ignored || !child.backendDOMNodeId) continue;
+
+                const box = await this.getNodeBoundingBox(cdpSession, child.backendDOMNodeId);
+                if (box && box.width > 0 && box.height > 0) {
+                    children.push({
+                        role: child.role?.value || 'unknown',
+                        name: child.name?.value || '',
+                        selector: '',
+                        boundingBox: box,
+                        backendNodeId: child.backendDOMNodeId
+                    });
+                }
+            }
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
+
+        return children;
+    }
+
+    /**
+     * Extract metadata from a post container.
+     * Traverses the post's children to find username, timestamp, counts, etc.
+     *
+     * @param postNodeId - The backendNodeId of the post (article) element
+     * @returns PostMetadata object with extracted info, or null
+     */
+    async extractPostMetadata(postNodeId: number): Promise<{
+        username?: string;
+        timestamp?: string;
+        likeCount?: string;
+        commentCount?: string;
+    } | null> {
+        const nodes = await this.getAccessibilityTree();
+
+        // Build node map for traversal
+        const nodeMap = new Map<string, CDPAXNode>();
+        for (const node of nodes) {
+            nodeMap.set(node.nodeId, node);
+        }
+
+        // Find post container
+        const container = nodes.find(n => n.backendDOMNodeId === postNodeId);
+        if (!container) return null;
+
+        const metadata: {
+            username?: string;
+            timestamp?: string;
+            likeCount?: string;
+            commentCount?: string;
+        } = {};
+
+        // Recursive search for metadata patterns
+        const searchMetadata = (nodeId: string): void => {
+            const node = nodeMap.get(nodeId);
+            if (!node || node.ignored) return;
+
+            const name = node.name?.value || '';
+            const role = node.role?.value?.toLowerCase() || '';
+
+            // Timestamp patterns: "2 hours ago", "January 15", etc.
+            if (/\d+\s*(second|minute|hour|day|week|month)s?\s*ago/i.test(name) ||
+                /^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+/i.test(name)) {
+                metadata.timestamp = name;
+            }
+
+            // Like count: "42 likes", "1,234 likes"
+            if (/^[\d,]+\s*likes?$/i.test(name)) {
+                metadata.likeCount = name;
+            }
+
+            // Comment count: "View all 15 comments"
+            if (/view\s*(all\s*)?\d+\s*comments?/i.test(name)) {
+                metadata.commentCount = name;
+            }
+
+            // Username link (starts with @ or is a link in post header area)
+            if (role === 'link' && (name.startsWith('@') || /^[a-z0-9._]+$/i.test(name))) {
+                if (!metadata.username) {
+                    metadata.username = name.startsWith('@') ? name : `@${name}`;
+                }
+            }
+
+            // Recurse into children
+            for (const childId of node.childIds || []) {
+                searchMetadata(childId);
+            }
+        };
+
+        searchMetadata(container.nodeId);
+        return metadata;
+    }
+
+    /**
+     * Dump the full accessibility tree to console for debugging.
+     * Shows exactly what a screen reader would see.
+     */
+    async dumpAccessibilityTree(): Promise<void> {
+        const nodes = await this.getAccessibilityTree();
+
+        console.log('\n========== ACCESSIBILITY TREE DUMP ==========\n');
+        console.log(`Total nodes: ${nodes.length}\n`);
+
+        // Group by role for easier reading
+        const byRole = new Map<string, CDPAXNode[]>();
+        for (const node of nodes) {
+            if (node.ignored) continue;
+            const role = node.role?.value || 'unknown';
+            if (!byRole.has(role)) {
+                byRole.set(role, []);
+            }
+            byRole.get(role)!.push(node);
+        }
+
+        // Print summary by role
+        console.log('=== SUMMARY BY ROLE ===');
+        for (const [role, roleNodes] of byRole.entries()) {
+            console.log(`  ${role}: ${roleNodes.length} elements`);
+        }
+
+        // Print details for interactive elements
+        console.log('\n=== INTERACTIVE ELEMENTS ===');
+        const interactiveRoles = ['button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'menuitem'];
+        for (const role of interactiveRoles) {
+            const roleNodes = byRole.get(role) || [];
+            if (roleNodes.length > 0) {
+                console.log(`\n[${role.toUpperCase()}] (${roleNodes.length} found)`);
+                for (const node of roleNodes.slice(0, 20)) { // Limit to 20 for readability
+                    const name = node.name?.value || '[no name]';
+                    const hasBox = !!node.backendDOMNodeId;
+                    console.log(`  • "${name.slice(0, 50)}${name.length > 50 ? '...' : ''}" ${hasBox ? '✓' : '✗'}`);
+                }
+                if (roleNodes.length > 20) {
+                    console.log(`  ... and ${roleNodes.length - 20} more`);
+                }
+            }
+        }
+
+        console.log('\n========== END DUMP ==========\n');
     }
 
     // =========================================================================

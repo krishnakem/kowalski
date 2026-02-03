@@ -24,6 +24,8 @@ import { StrategicGaze } from './StrategicGaze.js';
 import { ScreenshotCollector } from './ScreenshotCollector.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { createHash } from 'crypto';
 import {
     ExtractedPost,
     ScrapedSession,
@@ -152,7 +154,10 @@ export class InstagramScraper {
         console.log(`📊 Session budget: max ${maxVisionCalls} Vision API calls`);
 
         const startTime = Date.now();
-        this.page = await this.context.newPage();
+
+        // Reuse existing page if available (launchPersistentContext creates one)
+        const existingPages = this.context.pages();
+        this.page = existingPages.length > 0 ? existingPages[0] : await this.context.newPage();
 
         // Initialize layer instances
         this.ghost = new GhostMouse(this.page);
@@ -302,9 +307,10 @@ export class InstagramScraper {
         this.vision = new ContentVision(this.apiKey);  // Keep for potential fallback
         this.strategicGaze = new StrategicGaze(this.apiKey);
         this.screenshotCollector = new ScreenshotCollector(this.page, {
-            maxCaptures: 50,
+            maxCaptures: 60,  // Capture more, ImageTagger will filter to best 25
             jpegQuality: 85,
-            minScrollDelta: 200
+            minScrollDelta: 200,
+            saveToDirectory: path.join(os.homedir(), 'Documents', 'Kowalski', 'debug-screenshots')
         });
 
         // Enable visible cursor in debug mode
@@ -451,113 +457,389 @@ export class InstagramScraper {
     /**
      * Watch stories and capture each one (no Vision API).
      */
-    private async watchAndCaptureStories(): Promise<void> {
+    private async watchAndCaptureStories(maxStories: number = 8): Promise<void> {
         console.log('🎬 Watching stories...');
 
+        // Find and enter stories
         const storyCircles = await this.navigator.findStoryCircles();
-        if (storyCircles.length === 0) {
+        if (storyCircles.length === 0 || !storyCircles[0].boundingBox) {
             console.log('  No stories found');
             return;
         }
 
-        // Click first story
-        const firstStory = storyCircles[0];
-        if (firstStory.boundingBox) {
-            await this.clickWithGaze(firstStory.boundingBox, 'button', 'watch_story');
-            await this.humanDelay(2000, 3000);
-        } else {
-            return;
+        await this.clickWithGaze(storyCircles[0].boundingBox, 'button', 'watch_story');
+        await this.humanDelay(2000, 3000);  // Wait for story viewer to load
+
+        // Debug: Discover story viewer buttons (helps learn Instagram's button names)
+        if (this.debugMode) {
+            console.log('  🔍 Discovering story viewer buttons...');
+            await this.navigator.dumpInteractiveElements();
         }
 
-        // Watch up to 8 stories
-        const maxStories = Math.min(8, storyCircles.length);
+        // Track what we've seen (for loop/change detection)
+        let lastStoryHash = '';
+        let stuckCount = 0;  // Track consecutive failed advances
         let storiesWatched = 0;
 
         for (let i = 0; i < maxStories; i++) {
+            // Check if still in story viewer
             if (!this.navigator.isInStoryViewer()) {
-                console.log('  Exited story viewer');
+                console.log('  📱 Exited story viewer');
                 break;
             }
 
-            // Capture this story
-            await this.screenshotCollector.captureCurrentPost('story');
-            storiesWatched++;
+            // Get hash of current view (for change detection)
+            const currentHash = await this.getQuickViewportHash();
 
-            // Human-like viewing time (randomized)
-            const viewTime = 2000 + Math.random() * 4000;  // 2-6 seconds
-            await this.humanDelay(viewTime, viewTime + 1000);
-
-            // Advance to next story
-            const viewportSize = this.page.viewportSize();
-            if (viewportSize) {
-                const rightZone = {
-                    x: viewportSize.width * 0.6,
-                    y: viewportSize.height * 0.2,
-                    width: viewportSize.width * 0.35,
-                    height: viewportSize.height * 0.6
-                };
-                await this.ghost.clickElement(rightZone, 0.2);
+            // Check if story changed from last iteration
+            if (currentHash === lastStoryHash) {
+                stuckCount++;
+                console.log(`  ⚠️ Same story as before (${stuckCount}/3)`);
+                if (stuckCount >= 3) {
+                    console.log('  📱 Stuck on same story, exiting');
+                    break;
+                }
+                // Try clicking next again
+                await this.advanceStory();
+                await this.humanDelay(800, 1200);
+                continue;  // Check again without capturing
             }
 
-            await this.humanDelay(1000, 2000);
+            // New story - reset stuck counter
+            stuckCount = 0;
+            lastStoryHash = currentHash;
+
+            // Check if this story is a video
+            const videoInfo = await this.navigator.detectVideoContent();
+
+            if (videoInfo.isVideo) {
+                // Video story: capture frames (shorter duration - 3-5 seconds)
+                console.log(`  🎬 Video story - capturing frames`);
+                const watchDuration = 3000 + Math.random() * 2000;  // 3-5 seconds
+                await this.screenshotCollector.captureVideoFrames('story', watchDuration, 1500);
+            } else {
+                // Photo story: single screenshot, minimal wait
+                await this.screenshotCollector.captureCurrentPost('story');
+                // Brief pause to seem human (but not the full story duration)
+                await this.humanDelay(500, 1000);
+            }
+            storiesWatched++;
+            console.log(`  📸 Story ${storiesWatched} captured`);
+
+            // ADVANCE: Click next to move to next story
+            const advanced = await this.advanceStory();
+            if (!advanced) {
+                console.log('  📱 Could not advance, may be at end of stories');
+                stuckCount++;
+            }
+
+            // Wait for story transition
+            await this.humanDelay(800, 1200);
         }
 
         // Exit stories
         await this.navigator.pressEscape();
-        await this.humanDelay(1000, 2000);
+        await this.humanDelay(500, 1000);
 
-        console.log(`✅ Stories complete. Captured ${storiesWatched} stories`);
+        console.log(`✅ Stories complete: ${storiesWatched} captured`);
     }
 
     /**
-     * Browse feed naturally and capture each post (no Vision API).
+     * Advance to next story by clicking the right arrow button.
+     * Falls back to keyboard if button not found.
+     *
+     * @returns true if advancement was attempted
+     */
+    private async advanceStory(): Promise<boolean> {
+        // Try hierarchy-first approach: find buttons inside the story viewer container
+        const storyContainer = await this.navigator.findStoryViewerContainer();
+
+        const nextBtn = await this.navigator.findEdgeButton('right', {
+            containerNodeId: storyContainer || undefined
+        });
+
+        if (nextBtn?.boundingBox) {
+            console.log(`  ➡️ Clicking next: "${nextBtn.name}" at x=${Math.round(nextBtn.boundingBox.x)}`);
+            await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
+            return true;
+        }
+
+        // Fallback: Try pressing right arrow key
+        console.log('  ➡️ Button not found, trying arrow key');
+        await this.page.keyboard.press('ArrowRight');
+        return true;  // Assume it worked
+    }
+
+    /**
+     * Quick viewport hash for change detection (low quality = fast).
+     * Used to detect if story/content actually changed after navigation.
+     */
+    private async getQuickViewportHash(): Promise<string> {
+        const screenshot = await this.page.screenshot({
+            type: 'jpeg',
+            quality: 20,  // Low quality for speed
+            fullPage: false
+        });
+        return createHash('md5').update(screenshot).digest('hex').slice(0, 12);
+    }
+
+    /**
+     * Explore a post deeply before capturing.
+     *
+     * This method implements "deep exploration" as requested:
+     * 1. Expand truncated captions (click "more" button)
+     * 2. Check for carousel posts and capture all slides
+     *
+     * @returns Object with number of slides captured (1 if not a carousel) and whether it's a carousel
+     */
+    private async explorePostDeeply(): Promise<{ capturedSlides: number; isCarousel: boolean; isVideo: boolean }> {
+        let capturedSlides = 0;
+        let isCarousel = false;
+        let isVideo = false;
+
+        // 1. Expand caption if truncated
+        const moreButton = await this.navigator.findMoreButton();
+        if (moreButton?.boundingBox) {
+            console.log('  📝 Expanding truncated caption...');
+            await this.ghost.clickElement(moreButton.boundingBox, 0.3);
+
+            // INCREASED wait time for Instagram's caption expansion animation
+            // Instagram uses a CSS transition that can take 500-1000ms
+            await this.humanDelay(800, 1200);
+
+            // Verify expansion by checking if "more" button is still visible
+            const stillTruncated = await this.navigator.findMoreButton();
+            if (stillTruncated?.boundingBox) {
+                console.log('  📝 Caption still truncated, trying again...');
+                await this.ghost.clickElement(stillTruncated.boundingBox, 0.3);
+                await this.humanDelay(500, 800);
+            }
+        }
+
+        // 2. Check for VIDEO content FIRST (reels, video posts)
+        const videoInfo = await this.navigator.detectVideoContent();
+        if (videoInfo.isVideo) {
+            isVideo = true;
+            console.log(`  🎬 Video post detected${videoInfo.hasAudio ? ' (with audio)' : ''}`);
+
+            // Human-like watch duration: 8-20 seconds
+            const watchDuration = 8000 + Math.random() * 12000;
+
+            // Capture frames during natural watch time
+            const frames = await this.screenshotCollector.captureVideoFrames('feed', watchDuration);
+            capturedSlides = frames;
+
+            return { capturedSlides, isCarousel, isVideo };
+        }
+
+        // 3. Check for carousel (multi-image post) - SPATIAL DISCOVERY
+        // Use position-based reasoning instead of pattern matching
+        const { next: carouselNext } = await this.navigator.findCarouselControls();
+
+        // Debug: log available buttons if no carousel found
+        if (!carouselNext) {
+            const elements = await this.navigator.getAllInteractiveElements();
+            const buttons = elements.filter(e => e.role === 'button').map(e => `"${e.name}"`).slice(0, 8);
+            if (buttons.length > 0) {
+                console.log(`  📋 Available buttons: ${buttons.join(', ')}`);
+            }
+        }
+
+        if (carouselNext?.boundingBox) {
+            isCarousel = true;
+            console.log(`  🎠 Carousel detected: "${carouselNext.name}" [${carouselNext.role}]`);
+
+            // Capture first slide
+            await this.screenshotCollector.captureCurrentPost('carousel');
+            capturedSlides++;
+
+            // Navigate through remaining slides with verification
+            const maxSlides = 10;
+            let slideCount = 1;
+
+            // Track slide indicator to verify navigation succeeded
+            let previousSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+            if (previousSlideIndicator) {
+                console.log(`  🎠 Starting at slide ${previousSlideIndicator.current} of ${previousSlideIndicator.total}`);
+            }
+
+            while (slideCount < maxSlides) {
+                // Re-discover using spatial reasoning after each slide transition
+                const { next: nextBtn } = await this.navigator.findCarouselControls();
+
+                if (!nextBtn?.boundingBox) {
+                    // No more slides - log for debugging
+                    console.log(`  🎠 No next button found via spatial discovery`);
+                    break;
+                }
+
+                // Click next slide
+                await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
+                await this.humanDelay(800, 1500); // Wait for slide transition
+
+                // VERIFY slide actually changed before capturing
+                const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+                if (currentSlideIndicator && previousSlideIndicator &&
+                    currentSlideIndicator.current === previousSlideIndicator.current) {
+                    console.log(`  🎠 Slide unchanged after click (still ${currentSlideIndicator.current}), stopping carousel`);
+                    break;  // Navigation failed
+                }
+                previousSlideIndicator = currentSlideIndicator;
+
+                // Capture this slide (ScreenshotCollector will dedupe via hash if needed)
+                await this.screenshotCollector.captureCurrentPost('carousel');
+                slideCount++;
+                capturedSlides++;
+            }
+
+            console.log(`  🎠 Captured ${capturedSlides} carousel slides`);
+        }
+
+        return { capturedSlides, isCarousel, isVideo };
+    }
+
+    /**
+     * Browse feed with POST-CENTERED capture and DEEP EXPLORATION (no Vision API).
+     *
+     * This method ensures each screenshot contains ONE post only by:
+     * 1. Detecting post elements via accessibility tree
+     * 2. Centering each post in the viewport before capturing
+     * 3. Tracking captured posts by ABSOLUTE position (scroll + element Y) to avoid duplicates
+     * 4. Deep exploration: expanding captions, exploring carousel slides
+     *
+     * FIXES APPLIED:
+     * - Uses absolute Y position (scrollY + element.y) for deduplication (stable across scrolls)
+     * - Single centering calculation (let scrollToElementByCDP handle it)
+     * - Scroll verification to detect stuck situations
      */
     private async browseFeedWithCapture(targetMinutes: number): Promise<void> {
         const startTime = Date.now();
         const endTime = startTime + (targetMinutes * 60 * 1000);
-        let scrollCount = 0;
+        const capturedPostAbsoluteYs = new Set<number>();  // Track by absolute Y position
+        let consecutiveEmpty = 0;
+        const maxConsecutiveEmpty = 3;
 
-        console.log(`🔄 Browsing feed for ${targetMinutes.toFixed(1)} minutes...`);
+        console.log(`🔄 Browsing feed (deep exploration mode) for ${targetMinutes.toFixed(1)} minutes...`);
 
         // Scroll to top to start fresh
         await this.scroll.scrollToTop();
         await this.humanDelay(1000, 2000);
 
+        // Get viewport dimensions
+        const viewportInfo = await this.scroll.getViewportInfo();
+        const viewportHeight = viewportInfo.height;
+
         while (Date.now() < endTime) {
             // Check capture limit
-            if (this.screenshotCollector.getCaptureCount() >= 50) {
+            if (this.screenshotCollector.getCaptureCount() >= 60) {
                 console.log('📸 Max captures reached, stopping browse');
                 break;
             }
 
-            // Scroll to next content
-            const scrollResult = await this.scroll.scrollWithIntent(this.navigator, {
-                variability: 0.25,
-                microAdjustProb: 0.2
-            });
+            // Get current scroll position for absolute Y calculation
+            const currentScrollY = await this.scroll.getScrollPosition();
 
-            scrollCount++;
+            // Find post elements in the current viewport (atomic to prevent staleness)
+            const posts = await this.navigator.findPostElementsAtomic();
 
-            // Human-like reading pause
-            await this.humanDelay(1500, 3500);
+            // Find the first uncaptured post that's visible
+            let targetPost: (typeof posts[0] & { absoluteY: number }) | null = null;
+            for (const post of posts) {
+                if (!post.boundingBox || !post.backendNodeId) continue;
 
-            // Capture current viewport
-            await this.screenshotCollector.captureCurrentPost('feed');
+                // Calculate ABSOLUTE Y position (scroll position + viewport-relative Y)
+                // This is stable across scrolls - the same post will have the same absoluteY
+                // Using 20px buckets for precision (was 50px, caused duplicates)
+                // Using 100px buckets to prevent same post being "discovered" multiple times
+                // due to DOM reflow or position drift (was 20px, too small)
+                const absoluteY = Math.round((currentScrollY + post.boundingBox.y) / 100);
 
-            // Log occasionally
-            if (scrollCount % 5 === 0) {
-                console.log(`  📊 Scroll #${scrollCount}, Content: ${scrollResult.contentType}, Captures: ${this.screenshotCollector.getCaptureCount()}`);
+                // Check if post is at least partially visible in viewport
+                const postTop = post.boundingBox.y;
+                const postBottom = postTop + post.boundingBox.height;
+                const isVisible = postTop < viewportHeight && postBottom > 0;
+
+                if (isVisible && !capturedPostAbsoluteYs.has(absoluteY)) {
+                    targetPost = { ...post, absoluteY };
+                    break;
+                }
             }
 
-            // Random longer pause (human behavior)
-            if (Math.random() < 0.15) {
-                const pauseTime = 3000 + Math.random() * 5000;
-                console.log(`  ☕ Reading pause (${(pauseTime / 1000).toFixed(1)}s)...`);
-                await this.humanDelay(pauseTime, pauseTime + 1000);
+            if (targetPost && targetPost.boundingBox && targetPost.backendNodeId) {
+                // Center this post in the viewport with verification and retry
+                const centerResult = await this.scroll.scrollToElementCentered(
+                    targetPost.backendNodeId,
+                    2  // max 2 retry attempts
+                );
+
+                if (!centerResult.success) {
+                    console.log(`  ⚠️ Centering incomplete (offset: ${Math.round(centerResult.finalOffset)}px), using fallback`);
+                    await this.scroll.scroll({ baseDistance: 350 });
+                }
+
+                await this.humanDelay(400, 800);
+
+                // Check for ad BEFORE any capture - skip sponsored content
+                const adCheck = await this.navigator.detectAdContent();
+                if (adCheck.isAd) {
+                    console.log(`  🚫 Skipping ad: ${adCheck.reason}`);
+                    capturedPostAbsoluteYs.add(targetPost.absoluteY);  // Mark as "seen"
+                    consecutiveEmpty = 0;
+                    continue;  // Skip to next post
+                }
+
+                // DEEP EXPLORATION: Expand caption, check for carousel
+                const exploration = await this.explorePostDeeply();
+
+                // Capture main post (only if not already captured as part of carousel)
+                if (!exploration.isCarousel) {
+                    await this.screenshotCollector.captureCurrentPost('feed');
+                }
+
+                capturedPostAbsoluteYs.add(targetPost.absoluteY);
+                consecutiveEmpty = 0;
+
+                // Human-like reading pause (varies by estimated content)
+                const postHeight = targetPost.boundingBox.height;
+                const readingTime = postHeight > 600
+                    ? 2500 + Math.random() * 3000   // 2.5-5.5s for tall posts
+                    : 1500 + Math.random() * 2000;  // 1.5-3.5s for shorter posts
+
+                await this.humanDelay(readingTime, readingTime + 500);
+
+                // Random longer pause (human behavior)
+                if (Math.random() < 0.12) {
+                    const pauseTime = 3000 + Math.random() * 4000;
+                    console.log(`  ☕ Reading pause (${(pauseTime / 1000).toFixed(1)}s)...`);
+                    await this.humanDelay(pauseTime, pauseTime + 500);
+                }
+
+                // Log progress occasionally
+                const captureCount = this.screenshotCollector.getCaptureCount();
+                if (captureCount % 5 === 0) {
+                    console.log(`  📊 Captured ${captureCount} screenshots, ${capturedPostAbsoluteYs.size} unique posts`);
+                }
+
+            } else {
+                // No uncaptured posts found in current view - scroll to load more
+                consecutiveEmpty++;
+
+                if (consecutiveEmpty >= maxConsecutiveEmpty) {
+                    console.log('  📜 No new posts found after multiple attempts, ending browse');
+                    break;
+                }
+
+                console.log(`  📜 No new posts visible, scrolling down (attempt ${consecutiveEmpty}/${maxConsecutiveEmpty})...`);
+                await this.scroll.scrollWithIntent(this.navigator, {
+                    baseDistance: 500,
+                    variability: 0.2,
+                    microAdjustProb: 0.15
+                });
+                await this.humanDelay(1500, 2500);
             }
         }
 
-        console.log(`✅ Feed browse complete. ${scrollCount} scrolls, ${this.screenshotCollector.getCaptureCount()} captures`);
+        console.log(`✅ Feed browse complete. Captured ${this.screenshotCollector.getCaptureCount()} screenshots (${capturedPostAbsoluteYs.size} unique posts)`);
     }
 
     // =========================================================================
@@ -820,17 +1102,24 @@ export class InstagramScraper {
                 await this.humanDelay(2000, 4000);
             }
 
-            // Advance to next story (click right side of screen)
-            const viewportSize = this.page.viewportSize();
-            if (viewportSize) {
-                // Define a "click zone" on the right side of the story
-                const rightZone = {
-                    x: viewportSize.width * 0.6,
-                    y: viewportSize.height * 0.2,
-                    width: viewportSize.width * 0.35,
-                    height: viewportSize.height * 0.6
-                };
-                await this.ghost.clickElement(rightZone, 0.2);  // Low center bias
+            // Advance to next story - SPATIAL DISCOVERY (position-based)
+            const nextStoryBtn = await this.navigator.findEdgeButton('right');
+
+            if (nextStoryBtn?.boundingBox) {
+                console.log(`  🎯 Found next via spatial: "${nextStoryBtn.name}" at x=${nextStoryBtn.boundingBox.x}`);
+                await this.ghost.clickElement(nextStoryBtn.boundingBox, 0.3);
+            } else {
+                // Fallback: blind click right zone (stories may not have visible buttons)
+                const viewportSize = this.page.viewportSize();
+                if (viewportSize) {
+                    const rightZone = {
+                        x: viewportSize.width * 0.6,
+                        y: viewportSize.height * 0.2,
+                        width: viewportSize.width * 0.35,
+                        height: viewportSize.height * 0.6
+                    };
+                    await this.ghost.clickElement(rightZone, 0.2);
+                }
             }
 
             await this.humanDelay(1000, 2000);
@@ -980,10 +1269,10 @@ export class InstagramScraper {
                         consecutiveDuplicates = 0;  // Reset on new content
                     }
 
-                    // === NEW: Check for carousel and explore all slides ===
-                    const carouselNext = await this.navigator.findCarouselNextButton();
+                    // === Check for carousel using SPATIAL DISCOVERY ===
+                    const { next: carouselNext } = await this.navigator.findCarouselControls();
                     if (carouselNext?.boundingBox) {
-                        console.log(`  🎠 Carousel detected, exploring slides...`);
+                        console.log(`  🎠 Carousel detected via spatial at x=${carouselNext.boundingBox.x}`);
                         const carouselSlides = await this.exploreCarousel('feed', 'feed_carousel');
                         for (const slide of carouselSlides) {
                             const slideKey = `${slide.username}-${slide.caption.slice(0, 50)}`;
@@ -1039,25 +1328,23 @@ export class InstagramScraper {
         }
 
         while (slideNumber <= maxSlides) {
-            // Check for Next button
-            const nextButton = await this.navigator.findCarouselNextButton();
+            // SPATIAL DISCOVERY: find Next button by position
+            const { next: nextButton } = await this.navigator.findCarouselControls();
 
             if (!nextButton?.boundingBox) {
-                // No more slides
-                console.log(`    🎠 Carousel complete (${slideNumber - 1} slides captured)`);
+                console.log(`    🎠 Carousel complete (${slideNumber - 1} slides) - no next button found`);
                 break;
             }
 
             // === ACTIONABILITY CHECK: Hover before clicking ===
-            // Hover for 0.8-1.5 seconds to verify element is interactable (randomized)
             const hoverDuration = 800 + Math.random() * 700;
-            console.log(`    🎠 Hovering over Next button...`);
+            console.log(`    🎠 Hovering over button at x=${nextButton.boundingBox.x}`);
             await this.ghost.hoverElement(nextButton.boundingBox, hoverDuration, 0.3);
 
-            // Re-check button is still there after hover (element may have moved)
-            const nextButtonAfterHover = await this.navigator.findCarouselNextButton();
+            // Re-discover after hover (element may have moved)
+            const { next: nextButtonAfterHover } = await this.navigator.findCarouselControls();
             if (!nextButtonAfterHover?.boundingBox) {
-                console.log(`    ⚠️ Next button disappeared after hover, skipping`);
+                console.log(`    ⚠️ Button disappeared after hover, skipping`);
                 break;
             }
 
@@ -1238,16 +1525,22 @@ export class InstagramScraper {
                     }
                 }
 
-                // Advance to next slide in highlight
-                const viewportSize = this.page.viewportSize();
-                if (viewportSize) {
-                    const rightZone = {
-                        x: viewportSize.width * 0.7,
-                        y: viewportSize.height * 0.3,
-                        width: viewportSize.width * 0.25,
-                        height: viewportSize.height * 0.4
-                    };
-                    await this.ghost.clickElement(rightZone, 0.2);
+                // Advance to next slide in highlight - SPATIAL DISCOVERY
+                const nextBtn = await this.navigator.findEdgeButton('right');
+                if (nextBtn?.boundingBox) {
+                    await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
+                } else {
+                    // Fallback: blind click right zone (highlights may not have visible buttons)
+                    const viewportSize = this.page.viewportSize();
+                    if (viewportSize) {
+                        const rightZone = {
+                            x: viewportSize.width * 0.7,
+                            y: viewportSize.height * 0.3,
+                            width: viewportSize.width * 0.25,
+                            height: viewportSize.height * 0.4
+                        };
+                        await this.ghost.clickElement(rightZone, 0.2);
+                    }
                 }
                 await this.humanDelay(5000, 8000);
             }

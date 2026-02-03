@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, session, globalShortcut, protocol, net } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -38,6 +38,20 @@ if (!app.getLoginItemSettings().openAtLogin) {
 if (require('electron-squirrel-startup')) {
   app.quit();
 }
+
+// Register custom protocol scheme for serving local images
+// MUST be called before app.on('ready')
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'kowalski-local',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true
+    }
+  }
+]);
 
 // Track quitting state so we can actually quit when Cmd+Q is pressed
 let isQuitting = false;
@@ -130,6 +144,60 @@ const createWindow = () => {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', () => {
+  // Register kowalski-local:// protocol handler for serving local images
+  // Maps: kowalski-local://{recordId}/images/{filename} -> {userData}/analysis_records/{recordId}/images/{filename}
+
+  // Define the protocol handler function (reused for both sessions)
+  const protocolHandler = (request: Electron.ProtocolRequest, callback: (response: Electron.ProtocolResponse) => void) => {
+    const url = new URL(request.url);
+    // URL format: kowalski-local://{recordId}/images/{filename}
+    // hostname = recordId, pathname = /images/{filename}
+    const recordId = url.hostname;
+    // Remove leading slash from pathname to avoid path.join issues
+    const filePath = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname;
+
+    const userDataPath = app.getPath('userData');
+    const fullPath = path.join(userDataPath, 'analysis_records', recordId, filePath);
+
+    console.log(`📷 Protocol request: ${request.url}`);
+    console.log(`📷 Resolved path: ${fullPath}`);
+
+    // Check if file exists
+    if (fs.existsSync(fullPath)) {
+      console.log(`📷 File exists, serving: ${fullPath}`);
+      callback({ path: fullPath });
+    } else {
+      console.error(`❌ Protocol error: File not found: ${fullPath}`);
+      console.error(`❌ RecordId: ${recordId}, FilePath: ${filePath}`);
+
+      // Debug: List directory contents
+      const recordsDir = path.join(userDataPath, 'analysis_records');
+      if (fs.existsSync(recordsDir)) {
+        console.log(`📂 Contents of analysis_records: ${fs.readdirSync(recordsDir).join(', ')}`);
+        const recordDir = path.join(recordsDir, recordId);
+        if (fs.existsSync(recordDir)) {
+          console.log(`📂 Contents of ${recordId}: ${fs.readdirSync(recordDir).join(', ')}`);
+          const imagesDir = path.join(recordDir, 'images');
+          if (fs.existsSync(imagesDir)) {
+            console.log(`📂 Contents of images: ${fs.readdirSync(imagesDir).join(', ')}`);
+          }
+        }
+      }
+
+      callback({ error: -6 }); // NET_ERR_FILE_NOT_FOUND
+    }
+  };
+
+  // Register on default session (for any windows not using custom partition)
+  protocol.registerFileProtocol('kowalski-local', protocolHandler);
+  console.log('✅ Registered kowalski-local protocol on default session');
+
+  // CRITICAL: Also register on the shared partition session (for main window)
+  // The main window uses partition: SHARED_PARTITION, which has its own isolated session
+  // Without this, protocol requests from the renderer never reach the handler
+  session.fromPartition(SHARED_PARTITION).protocol.registerFileProtocol('kowalski-local', protocolHandler);
+  console.log(`✅ Registered kowalski-local protocol on partition: ${SHARED_PARTITION}`);
+
   createWindow();
 
   // Fresh Start Logic - DISABLED
