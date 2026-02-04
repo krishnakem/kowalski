@@ -15,7 +15,7 @@ import { Page } from 'playwright';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { CapturedPost, CaptureSource } from '../../types/instagram.js';
+import { CapturedPost, CaptureSource, BoundingBox } from '../../types/instagram.js';
 
 /**
  * Configuration for screenshot collection.
@@ -121,13 +121,13 @@ export class ScreenshotCollector {
             return false;
         }
 
-        // POSITION-BASED DEDUP: Track by absolute scroll position (300px buckets)
+        // POSITION-BASED DEDUP: Track by absolute scroll position (150px buckets)
         // This catches the same viewport being captured multiple times even with different sources
         // Exception: carousel slides and stories share position but show different content (rely on hash dedup)
         // - Carousel: multiple slides at same scroll position
         // - Stories: modal overlay always at scrollPosition=0
-        // NOTE: 300px tolerance needed because post centering has 80-120px variance
-        const positionBucket = Math.round(scrollPosition / 300);
+        // NOTE: 150px buckets align better with centering tolerance (80-120px variance)
+        const positionBucket = Math.round(scrollPosition / 150);
         if (source !== 'carousel' && source !== 'story' && this.capturedPositions.has(positionBucket)) {
             console.log(`📸 Skipping duplicate position: bucket ${positionBucket} (scroll ~${scrollPosition}px)`);
             return false;
@@ -211,6 +211,125 @@ export class ScreenshotCollector {
     }
 
     /**
+     * Capture a specific element that the LLM focused on.
+     * Takes a cropped screenshot centered on the element for high-quality captures.
+     *
+     * @param elementBox - Bounding box of the focused element
+     * @param source - Where this content came from (feed, story, search, etc.)
+     * @param interest - For search results, which interest triggered this capture
+     * @param reason - Why the LLM decided to capture this (for logging)
+     * @returns The captured post, or null if capture failed/skipped
+     */
+    async captureFocusedElement(
+        elementBox: BoundingBox,
+        source: CaptureSource,
+        interest?: string,
+        reason?: string
+    ): Promise<CapturedPost | null> {
+        // Check memory limit
+        if (this.captures.length >= this.config.maxCaptures) {
+            console.log(`📸 Max captures (${this.config.maxCaptures}) reached, skipping focused capture`);
+            return null;
+        }
+
+        // Get viewport with retry logic (can be null briefly during page transitions)
+        let viewport = this.page.viewportSize();
+        if (!viewport) {
+            // Brief wait and retry
+            await new Promise(r => setTimeout(r, 100));
+            viewport = this.page.viewportSize();
+        }
+
+        if (!viewport) {
+            // Fallback: use reasonable default dimensions
+            console.log('📸 Viewport unavailable, using default dimensions (1080x1920)');
+            viewport = { width: 1080, height: 1920 };
+        }
+
+        try {
+            // Calculate capture region with padding for context
+            const padding = 30;  // 30px padding around element
+            const captureRegion = {
+                x: Math.max(0, elementBox.x - padding),
+                y: Math.max(0, elementBox.y - padding),
+                width: Math.min(elementBox.width + padding * 2, viewport.width),
+                height: Math.min(elementBox.height + padding * 2, viewport.height)
+            };
+
+            // Ensure region doesn't exceed viewport
+            if (captureRegion.x + captureRegion.width > viewport.width) {
+                captureRegion.width = viewport.width - captureRegion.x;
+            }
+            if (captureRegion.y + captureRegion.height > viewport.height) {
+                captureRegion.height = viewport.height - captureRegion.y;
+            }
+
+            // Ensure minimum dimensions
+            captureRegion.width = Math.max(captureRegion.width, 100);
+            captureRegion.height = Math.max(captureRegion.height, 100);
+
+            // Log capture intent
+            console.log(`\n📸 === INTENTIONAL CAPTURE ===`);
+            console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
+            console.log(`   Reason: ${reason || 'LLM focus'}`);
+            console.log(`   Crop: ${captureRegion.width}x${captureRegion.height}px`);
+
+            // Take cropped screenshot focused on the element
+            const screenshot = await this.page.screenshot({
+                type: 'jpeg',
+                quality: this.config.jpegQuality,
+                clip: captureRegion
+            });
+
+            // Hash-based deduplication
+            const hash = this.computeImageHash(screenshot);
+            if (this.capturedHashes.has(hash)) {
+                console.log(`   Status: Skipped (duplicate hash)`);
+                console.log(`==============================\n`);
+                return null;
+            }
+            this.capturedHashes.add(hash);
+
+            // Extract post ID from URL if available
+            const postId = this.extractPostId();
+            if (postId) {
+                if (this.capturedPostIds.has(postId)) {
+                    console.log(`   Status: Skipped (duplicate postId: ${postId})`);
+                    console.log(`==============================\n`);
+                    return null;
+                }
+                this.capturedPostIds.add(postId);
+            }
+
+            // Create captured post
+            const captured: CapturedPost = {
+                id: this.captures.length + 1,
+                screenshot,
+                source,
+                interest,
+                postId,
+                timestamp: Date.now(),
+                scrollPosition: elementBox.y  // Use element Y as position
+            };
+
+            // Store capture
+            this.captures.push(captured);
+
+            // Save to disk for debugging if configured
+            this.saveScreenshotToDisk(screenshot, source, captured.id);
+
+            console.log(`   Status: Captured #${captured.id} (${source}${interest ? `: ${interest}` : ''})`);
+            console.log(`==============================\n`);
+
+            return captured;
+
+        } catch (error) {
+            console.error('📸 Focused capture failed:', error);
+            return null;
+        }
+    }
+
+    /**
      * Get all captured screenshots for batch processing.
      */
     getCaptures(): CapturedPost[] {
@@ -285,21 +404,53 @@ export class ScreenshotCollector {
         frameIntervalMs: number = 2500     // Capture every 2.5 seconds
     ): Promise<number> {
         const videoId = this.extractPostId() || `video_${Date.now()}`;
-        const frameCount = Math.floor(watchDurationMs / frameIntervalMs);
+        const maxFrames = Math.floor(watchDurationMs / frameIntervalMs);
         let capturedFrames = 0;
+        let lastCapturedTime = -1;  // Track video playback time of last capture
+        const startTime = Date.now();
 
-        console.log(`🎬 Starting video frame capture: ${frameCount} frames over ${(watchDurationMs / 1000).toFixed(1)}s`);
+        console.log(`🎬 Starting video frame capture: up to ${maxFrames} frames over ${(watchDurationMs / 1000).toFixed(1)}s`);
 
-        for (let i = 0; i < frameCount; i++) {
+        while (Date.now() - startTime < watchDurationMs) {
             // Check memory limit
             if (this.captures.length >= this.config.maxCaptures) {
                 console.log(`📸 Max captures reached, stopping video frames`);
                 break;
             }
 
-            // Wait before capture (simulates watching)
-            if (i > 0) {
-                await this.delay(frameIntervalMs);
+            // Check if we've captured enough frames
+            if (capturedFrames >= maxFrames) {
+                break;
+            }
+
+            // STATE-BASED: Check video state before capture
+            const videoState = await this.getVideoState();
+
+            // Skip if video not found or not playing
+            if (!videoState?.found) {
+                console.log(`🎬 No video found, waiting...`);
+                await this.delay(500);
+                continue;
+            }
+
+            // Skip if video is paused or buffering
+            if (videoState.paused) {
+                console.log(`🎬 Video paused, waiting...`);
+                await this.delay(500);
+                continue;
+            }
+
+            if (videoState.buffering) {
+                console.log(`🎬 Video buffering, waiting...`);
+                await this.delay(300);
+                continue;
+            }
+
+            // Skip if playback time hasn't advanced enough (at least 2s since last capture)
+            const minTimeAdvance = 2.0;  // seconds
+            if (lastCapturedTime >= 0 && videoState.currentTime - lastCapturedTime < minTimeAdvance) {
+                await this.delay(200);
+                continue;
             }
 
             try {
@@ -309,10 +460,12 @@ export class ScreenshotCollector {
                     fullPage: false
                 });
 
-                // Hash-based dedup for identical frames (e.g., paused video)
+                // Hash-based dedup for identical frames
                 const hash = this.computeImageHash(screenshot);
                 if (this.capturedHashes.has(hash)) {
-                    console.log(`🎬 Frame ${i + 1}: duplicate, skipping`);
+                    console.log(`🎬 Frame at ${videoState.currentTime.toFixed(1)}s: duplicate, skipping`);
+                    lastCapturedTime = videoState.currentTime;  // Still advance to avoid re-checking same frame
+                    await this.delay(frameIntervalMs);
                     continue;
                 }
                 this.capturedHashes.add(hash);
@@ -324,21 +477,26 @@ export class ScreenshotCollector {
                     source,
                     postId: this.extractPostId(),
                     timestamp: Date.now(),
-                    scrollPosition: 0,  // Video frames don't need scroll tracking
+                    scrollPosition: 0,
                     isVideoFrame: true,
                     videoId,
                     frameIndex: capturedFrames + 1,
-                    totalFrames: frameCount  // Will be updated at end
+                    totalFrames: maxFrames
                 });
 
                 // Save to disk for debugging if configured
                 this.saveScreenshotToDisk(screenshot, source, this.captures.length);
 
                 capturedFrames++;
-                console.log(`🎬 Frame ${capturedFrames} captured`);
+                lastCapturedTime = videoState.currentTime;
+                console.log(`🎬 Frame ${capturedFrames} captured at ${videoState.currentTime.toFixed(1)}s`);
+
+                // Wait before next capture attempt
+                await this.delay(frameIntervalMs);
 
             } catch (error) {
                 console.error(`🎬 Frame capture failed:`, error);
+                await this.delay(500);
             }
         }
 
@@ -349,6 +507,14 @@ export class ScreenshotCollector {
 
         console.log(`🎬 Video complete: ${capturedFrames} unique frames captured`);
         return capturedFrames;
+    }
+
+    /**
+     * Get the current count of captured photos/screenshots.
+     * Used by LLM to track capture progress.
+     */
+    getPhotoCount(): number {
+        return this.captures.length;
     }
 
     /**
@@ -393,6 +559,42 @@ export class ScreenshotCollector {
         } catch {
             // Fallback to page.evaluate if CDP fails
             return await this.page.evaluate(() => window.scrollY);
+        }
+    }
+
+    /**
+     * Get video element state via CDP for synced frame capture.
+     * Returns null if no video found on page.
+     */
+    private async getVideoState(): Promise<{
+        found: boolean;
+        paused: boolean;
+        currentTime: number;
+        buffering: boolean;
+        duration: number;
+    } | null> {
+        try {
+            const client = await this.page.context().newCDPSession(this.page);
+            const result = await client.send('Runtime.evaluate', {
+                expression: `
+                    (() => {
+                        const v = document.querySelector('video');
+                        if (!v) return JSON.stringify({ found: false });
+                        return JSON.stringify({
+                            found: true,
+                            paused: v.paused,
+                            currentTime: v.currentTime,
+                            buffering: v.readyState < 3,
+                            duration: v.duration || 0
+                        });
+                    })()
+                `,
+                returnByValue: true
+            });
+            await client.detach();
+            return JSON.parse(result.result.value as string);
+        } catch {
+            return null;
         }
     }
 

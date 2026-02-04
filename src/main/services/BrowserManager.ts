@@ -93,6 +93,9 @@ export class BrowserManager {
                 extraArgs.push(`--app=https://www.instagram.com/accounts/login/`);
                 extraArgs.push(`--window-position=${config.bounds.x},${config.bounds.y}`);
                 extraArgs.push(`--window-size=${config.bounds.width},${config.bounds.height}`);
+            } else {
+                // Default window size for headless/no bounds - ensures consistent viewport
+                extraArgs.push('--window-size=1080,1920');
             }
 
             // 2. Launch Persistent Context

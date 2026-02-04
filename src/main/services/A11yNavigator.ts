@@ -23,15 +23,14 @@ import {
     InteractiveElement,
     ElementState,
     BoundingBox,
-    GazeTarget,
     ContentDensity,
     ContentType,
-    SpatialNode,
     CDPAXNode,
     AXTree,
     AXTreeNode,
     EdgeButtonOptions
 } from '../../types/instagram.js';
+import { NavigationElement, SemanticHint } from '../../types/navigation.js';
 import type { GhostMouse } from './GhostMouse.js';
 
 /**
@@ -49,6 +48,34 @@ export interface SearchInteractionResult {
     navigated: boolean;
     matchedResult?: string;
     fallbackUsed: boolean;
+}
+
+/**
+ * Container information for LLM reasoning.
+ */
+export interface ContainerInfo {
+    role: string;
+    name: string;
+    childCount: number;
+}
+
+/**
+ * Input field information with parent context for LLM reasoning.
+ */
+export interface InputInfo {
+    role: string;
+    name: string;
+    parentContainers: string[];  // Names of parent containers
+}
+
+/**
+ * Rich tree summary for LLM dynamic reasoning.
+ * Provides structured context without interpretation.
+ */
+export interface TreeSummary {
+    containers: ContainerInfo[];
+    inputs: InputInfo[];
+    landmarks: string[];  // Unique names found in tree
 }
 
 export class A11yNavigator {
@@ -142,6 +169,11 @@ export class A11yNavigator {
         if (url.includes('/stories/')) return 'story';
         if (url.includes('/explore')) return 'explore';
 
+        // Check for post detail page: instagram.com/p/xxx or /reel/xxx
+        if (url.includes('/p/') || url.includes('/reel/')) {
+            return 'post_detail';
+        }
+
         // Check for profile page pattern: instagram.com/username
         const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
         if (profileMatch && !['explore', 'reels', 'direct'].includes(profileMatch[1])) {
@@ -154,6 +186,123 @@ export class A11yNavigator {
         }
 
         return 'unknown';
+    }
+
+    // ============================================================================
+    // Deep Engagement Detection
+    // ============================================================================
+
+    /**
+     * Detect current engagement level for LLM context.
+     * Determines if we're in feed, post modal, comments, or profile view.
+     * Cost: $0 (URL analysis + optional accessibility tree check)
+     */
+    async detectEngagementLevel(): Promise<{
+        level: 'feed' | 'post_modal' | 'comments' | 'profile';
+        postUrl?: string;
+        username?: string;
+    }> {
+        const url = this.page.url();
+
+        // Check for post detail page
+        if (url.includes('/p/') || url.includes('/reel/')) {
+            const postMatch = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+            const postUrl = postMatch ? `https://www.instagram.com/p/${postMatch[2]}/` : undefined;
+
+            // Check if there's a dialog (modal overlay) in accessibility tree
+            const tree = await this.buildAccessibilityTree();
+            if (tree) {
+                const hasDialog = Array.from(tree.nodeMap.values()).some(
+                    node => node.role?.value?.toLowerCase() === 'dialog'
+                );
+
+                // If dialog present, we're in a modal on top of feed
+                // Otherwise we navigated directly to post page
+                return {
+                    level: 'post_modal',
+                    postUrl
+                };
+            }
+
+            return { level: 'post_modal', postUrl };
+        }
+
+        // Check for profile page
+        const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
+        if (profileMatch && !['explore', 'reels', 'direct', 'p'].includes(profileMatch[1])) {
+            return {
+                level: 'profile',
+                username: profileMatch[1]
+            };
+        }
+
+        // Default to feed
+        return { level: 'feed' };
+    }
+
+    /**
+     * Extract engagement metrics from visible post elements.
+     * Looks for like counts, comment counts, carousel indicators.
+     * Cost: $0 (accessibility tree analysis)
+     */
+    async extractPostEngagementMetrics(): Promise<{
+        likeCount?: string;
+        commentCount?: string;
+        carouselState?: { currentSlide: number; totalSlides: number };
+        hasVideo: boolean;
+        username?: string;
+    }> {
+        const tree = await this.buildAccessibilityTree();
+        if (!tree) return { hasVideo: false };
+
+        let likeCount: string | undefined;
+        let commentCount: string | undefined;
+        let hasVideo = false;
+        let username: string | undefined;
+
+        for (const node of tree.nodeMap.values()) {
+            if (node.ignored) continue;
+            const name = node.name?.value || '';
+            const role = node.role?.value?.toLowerCase() || '';
+
+            // Like count patterns: "1,234 likes", "1 like"
+            if (/^[\d,]+\s*likes?$/i.test(name)) {
+                likeCount = name;
+            }
+
+            // Comment count patterns: "View all 42 comments", "1 comment"
+            if (/view\s*(all\s*)?\d+\s*comments?/i.test(name) || /^\d+\s*comments?$/i.test(name)) {
+                commentCount = name;
+            }
+
+            // Video detection
+            if (role === 'video' || /video|play|pause|mute|unmute/i.test(name)) {
+                hasVideo = true;
+            }
+
+            // Username detection (link with @ pattern or alphanumeric in header area)
+            if (role === 'link' && /^@?\w+$/.test(name) && name.length > 2 && name.length < 30) {
+                // Prefer shorter usernames (actual usernames vs text fragments)
+                if (!username || name.length < username.length) {
+                    username = name.replace(/^@/, '');
+                }
+            }
+        }
+
+        // Get carousel state using existing method
+        const carouselIndicator = await this.getCarouselSlideIndicator();
+        const carouselState = carouselIndicator ? {
+            currentSlide: carouselIndicator.current,
+            totalSlides: carouselIndicator.total
+        } : undefined;
+
+        return {
+            likeCount,
+            commentCount,
+            carouselState,
+            hasVideo,
+            username
+        };
     }
 
     /**
@@ -604,6 +753,40 @@ export class A11yNavigator {
     }
 
     /**
+     * Find the primary post content area for capture.
+     * Returns the bounding box of the main article element.
+     * Works for both feed view and post detail modal.
+     *
+     * In modal view: returns the single main article
+     * In feed view: returns the article closest to viewport center
+     */
+    async findPostContentBounds(): Promise<BoundingBox | null> {
+        const articles = await this.findPostElementsAtomic();
+
+        if (articles.length === 0) return null;
+
+        // Get viewport info for centering calculation
+        const viewport = await this.getViewportInfo();
+        const viewportCenter = viewport.height / 2;
+
+        // Find article closest to viewport center
+        let bestArticle = articles[0];
+        let bestDistance = Infinity;
+
+        for (const article of articles) {
+            if (!article.boundingBox) continue;
+            const articleCenter = article.boundingBox.y + article.boundingBox.height / 2;
+            const distance = Math.abs(articleCenter - viewportCenter);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestArticle = article;
+            }
+        }
+
+        return bestArticle.boundingBox || null;
+    }
+
+    /**
      * Find carousel "Next" button for multi-image posts.
      * Instagram uses a button with name containing "Next" or arrow patterns.
      *
@@ -734,6 +917,86 @@ export class A11yNavigator {
 
             return { root, nodeMap, backendMap };
         });
+    }
+
+    // =========================================================================
+    // Tree Summary for LLM Dynamic Reasoning
+    // =========================================================================
+
+    /**
+     * Build a rich accessibility tree summary for LLM reasoning.
+     * Does NOT interpret the tree - just provides structured context.
+     * The LLM infers what page it's on and what's safe to do.
+     */
+    async buildTreeSummaryForLLM(): Promise<TreeSummary> {
+        const tree = await this.buildAccessibilityTree();
+        if (!tree) return { containers: [], inputs: [], landmarks: [] };
+
+        const containers: ContainerInfo[] = [];
+        const inputs: InputInfo[] = [];
+        const landmarkSet = new Set<string>();
+
+        for (const node of tree.nodeMap.values()) {
+            if (node.ignored) continue;
+            const role = node.role?.value?.toLowerCase() || '';
+            const name = node.name?.value || '';
+
+            // Collect container info (regions, dialogs, etc.)
+            if (['region', 'dialog', 'main', 'navigation', 'complementary', 'alertdialog'].includes(role)) {
+                if (name && name.length > 0) {
+                    containers.push({
+                        role,
+                        name,
+                        childCount: node.childIds?.length || 0
+                    });
+                }
+            }
+
+            // Collect input info with parent context
+            if (['textbox', 'searchbox', 'input', 'combobox'].includes(role)) {
+                const parentChain = this.getParentContainerChain(tree, node);
+                inputs.push({
+                    role,
+                    name: name || '[unnamed input]',
+                    parentContainers: parentChain
+                });
+            }
+
+            // Collect unique landmark names (for context)
+            if (name && name.length > 2 && name.length < 50) {
+                landmarkSet.add(name);
+            }
+        }
+
+        return {
+            containers,
+            inputs,
+            landmarks: Array.from(landmarkSet).slice(0, 20) // Limit to 20 most relevant
+        };
+    }
+
+    /**
+     * Get the chain of parent container names for an element.
+     * Used to give input fields context (e.g., "Search" inside "Direct Messages").
+     */
+    private getParentContainerChain(tree: AXTree, node: AXTreeNode): string[] {
+        const chain: string[] = [];
+        let current = node.parentId ? tree.nodeMap.get(node.parentId) : null;
+
+        while (current && chain.length < 5) {
+            const name = current.name?.value;
+            const role = current.role?.value?.toLowerCase();
+
+            // Only include named containers
+            if (name && name.length > 2 &&
+                ['region', 'dialog', 'main', 'navigation', 'complementary', 'alertdialog', 'article'].includes(role || '')) {
+                chain.push(name);
+            }
+
+            current = current.parentId ? tree.nodeMap.get(current.parentId) : null;
+        }
+
+        return chain;
     }
 
     /**
@@ -2397,111 +2660,6 @@ export class A11yNavigator {
     }
 
     /**
-     * Find visually interesting elements for gaze simulation.
-     * Returns elements sorted by visual salience (most interesting first).
-     *
-     * @param maxTargets - Maximum number of gaze targets to return (1-5)
-     * @returns Array of GazeTarget objects with coordinates and salience scores
-     */
-    async findGazeTargets(maxTargets: number = 3): Promise<GazeTarget[]> {
-        const targets: GazeTarget[] = [];
-        const nodes = await this.getAccessibilityTree();
-        const viewport = await this.getViewportInfo();
-
-        // Filter to visually interesting nodes
-        const visualNodes = nodes.filter(node => {
-            if (node.ignored) return false;
-            const role = node.role?.value?.toLowerCase() || '';
-
-            // Include visually prominent roles
-            const visualRoles = ['image', 'img', 'figure', 'button', 'link', 'heading'];
-            return visualRoles.includes(role) && node.backendDOMNodeId;
-        });
-
-        if (visualNodes.length === 0) {
-            return targets;
-        }
-
-        let cdpSession: CDPSession | null = null;
-        try {
-            cdpSession = await this.page.context().newCDPSession(this.page);
-
-            // Get bounding boxes and score salience
-            const scoredNodes: Array<{
-                node: CDPAXNode;
-                box: BoundingBox;
-                salience: number;
-            }> = [];
-
-            for (const node of visualNodes.slice(0, 30)) { // Limit to 30 candidates
-                if (!node.backendDOMNodeId) continue;
-
-                const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
-                if (!box || box.width <= 0 || box.height <= 0) continue;
-
-                // Skip elements outside viewport
-                if (box.y + box.height < 0 || box.y > viewport.height) continue;
-                if (box.x + box.width < 0 || box.x > viewport.width) continue;
-
-                const salience = this.scoreElementSalience(
-                    node,
-                    box,
-                    viewport.width,
-                    viewport.height
-                );
-
-                scoredNodes.push({ node, box, salience });
-            }
-
-            // Sort by salience (highest first)
-            scoredNodes.sort((a, b) => b.salience - a.salience);
-
-            // Deduplicate by position (avoid clusters of similar elements)
-            const usedPositions: Array<{ x: number; y: number }> = [];
-            const minDistance = 100; // Minimum pixels between gaze targets
-
-            for (const scored of scoredNodes) {
-                if (targets.length >= maxTargets) break;
-
-                const centerX = scored.box.x + scored.box.width / 2;
-                const centerY = scored.box.y + scored.box.height / 2;
-
-                // Check if too close to existing target
-                const tooClose = usedPositions.some(pos => {
-                    const dist = Math.hypot(pos.x - centerX, pos.y - centerY);
-                    return dist < minDistance;
-                });
-
-                if (!tooClose) {
-                    // Add randomized jitter to the gaze point (±10px)
-                    const jitterX = this.randomInRange(-10, 10);
-                    const jitterY = this.randomInRange(-10, 10);
-
-                    targets.push({
-                        point: {
-                            x: Math.round(centerX + jitterX),
-                            y: Math.round(centerY + jitterY)
-                        },
-                        role: scored.node.role?.value || 'unknown',
-                        label: (scored.node.name?.value || '').slice(0, 50),
-                        salience: scored.salience,
-                        boundingBox: scored.box
-                    });
-
-                    usedPositions.push({ x: centerX, y: centerY });
-                }
-            }
-
-        } finally {
-            if (cdpSession) {
-                await cdpSession.detach().catch(() => {});
-            }
-        }
-
-        return targets;
-    }
-
-    /**
      * Analyze content density for intent-driven scrolling.
      * Determines if viewport is text-heavy, image-heavy, or mixed.
      *
@@ -2552,72 +2710,6 @@ export class A11yNavigator {
             imageCount,
             textRatio
         };
-    }
-
-    /**
-     * Get spatial map of elements for LLM gaze planning.
-     * Returns a token-efficient representation with normalized coordinates.
-     *
-     * Coordinates are normalized to 0-1000 range for token efficiency.
-     *
-     * @param maxNodes - Maximum number of nodes to include
-     * @returns Array of SpatialNode objects
-     */
-    async getSpatialMap(maxNodes: number = 20): Promise<SpatialNode[]> {
-        const spatialNodes: SpatialNode[] = [];
-        const nodes = await this.getAccessibilityTree();
-        const viewport = await this.getViewportInfo();
-
-        // Filter to interactive/visual nodes
-        const relevantNodes = nodes.filter(node => {
-            if (node.ignored) return false;
-            const role = node.role?.value?.toLowerCase() || '';
-
-            const relevantRoles = [
-                'button', 'link', 'image', 'img', 'figure',
-                'heading', 'textbox', 'searchbox', 'menuitem'
-            ];
-            return relevantRoles.includes(role) && node.backendDOMNodeId;
-        });
-
-        if (relevantNodes.length === 0) {
-            return spatialNodes;
-        }
-
-        let cdpSession: CDPSession | null = null;
-        try {
-            cdpSession = await this.page.context().newCDPSession(this.page);
-
-            for (const node of relevantNodes.slice(0, maxNodes)) {
-                if (!node.backendDOMNodeId) continue;
-
-                const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
-                if (!box || box.width <= 0 || box.height <= 0) continue;
-
-                // Skip elements outside viewport
-                if (box.y + box.height < 0 || box.y > viewport.height) continue;
-
-                // Normalize coordinates to 0-1000 range
-                const normalizeX = (x: number) => Math.round((x / viewport.width) * 1000);
-                const normalizeY = (y: number) => Math.round((y / viewport.height) * 1000);
-
-                spatialNodes.push({
-                    role: node.role?.value || 'unknown',
-                    label: (node.name?.value || '').slice(0, 20), // Truncate for token efficiency
-                    x: normalizeX(box.x),
-                    y: normalizeY(box.y),
-                    w: normalizeX(box.width),
-                    h: normalizeY(box.height)
-                });
-            }
-
-        } finally {
-            if (cdpSession) {
-                await cdpSession.detach().catch(() => {});
-            }
-        }
-
-        return spatialNodes;
     }
 
     /**
@@ -2985,141 +3077,6 @@ export class A11yNavigator {
         console.log('\n========== END DUMP ==========\n');
     }
 
-    // =========================================================================
-    // DEBUG: GAZE OVERLAY VISUALIZATION
-    // =========================================================================
-
-    /**
-     * Draw temporary visual overlay showing gaze targets and primary target.
-     * Only works in headed mode. Uses page.evaluate (detectable) - DEBUG ONLY.
-     *
-     * Draws:
-     * - Red circles for gaze anchor points
-     * - Green circle for primary click target
-     * - Labels with role/salience info
-     *
-     * Overlays auto-remove after 2 seconds.
-     *
-     * @param gazeTargets - Gaze anchor points (red circles)
-     * @param primaryTarget - Primary click target (green circle)
-     * @param showLabels - Whether to show role/salience labels
-     */
-    async drawGazeOverlay(
-        gazeTargets: GazeTarget[],
-        primaryTarget?: { x: number; y: number },
-        showLabels: boolean = true
-    ): Promise<void> {
-        try {
-            await this.page.evaluate(({ targets, primary, labels }) => {
-                // Remove any existing overlay
-                const existingOverlay = document.getElementById('kowalski-gaze-overlay');
-                if (existingOverlay) {
-                    existingOverlay.remove();
-                }
-
-                // Create overlay container
-                const overlay = document.createElement('div');
-                overlay.id = 'kowalski-gaze-overlay';
-                overlay.style.cssText = `
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    pointer-events: none;
-                    z-index: 999999;
-                `;
-
-                // Draw gaze anchors (red circles)
-                targets.forEach((target: any, index: number) => {
-                    const circle = document.createElement('div');
-                    circle.style.cssText = `
-                        position: absolute;
-                        left: ${target.point.x - 15}px;
-                        top: ${target.point.y - 15}px;
-                        width: 30px;
-                        height: 30px;
-                        border: 3px solid red;
-                        border-radius: 50%;
-                        background: rgba(255, 0, 0, 0.2);
-                    `;
-                    overlay.appendChild(circle);
-
-                    // Add label if enabled
-                    if (labels) {
-                        const label = document.createElement('div');
-                        label.style.cssText = `
-                            position: absolute;
-                            left: ${target.point.x + 20}px;
-                            top: ${target.point.y - 10}px;
-                            background: rgba(0, 0, 0, 0.8);
-                            color: red;
-                            padding: 2px 6px;
-                            border-radius: 3px;
-                            font-size: 11px;
-                            font-family: monospace;
-                            white-space: nowrap;
-                        `;
-                        label.textContent = `👁️ ${index + 1}: ${target.role} (${(target.salience * 100).toFixed(0)}%)`;
-                        overlay.appendChild(label);
-                    }
-                });
-
-                // Draw primary target (green circle)
-                if (primary) {
-                    const primaryCircle = document.createElement('div');
-                    primaryCircle.style.cssText = `
-                        position: absolute;
-                        left: ${primary.x - 20}px;
-                        top: ${primary.y - 20}px;
-                        width: 40px;
-                        height: 40px;
-                        border: 4px solid lime;
-                        border-radius: 50%;
-                        background: rgba(0, 255, 0, 0.2);
-                    `;
-                    overlay.appendChild(primaryCircle);
-
-                    if (labels) {
-                        const primaryLabel = document.createElement('div');
-                        primaryLabel.style.cssText = `
-                            position: absolute;
-                            left: ${primary.x + 25}px;
-                            top: ${primary.y - 10}px;
-                            background: rgba(0, 0, 0, 0.8);
-                            color: lime;
-                            padding: 2px 6px;
-                            border-radius: 3px;
-                            font-size: 11px;
-                            font-family: monospace;
-                            white-space: nowrap;
-                        `;
-                        primaryLabel.textContent = '🎯 PRIMARY TARGET';
-                        overlay.appendChild(primaryLabel);
-                    }
-                }
-
-                document.body.appendChild(overlay);
-
-                // Auto-remove after 2 seconds
-                setTimeout(() => {
-                    overlay.remove();
-                }, 2000);
-
-            }, {
-                targets: gazeTargets,
-                primary: primaryTarget,
-                labels: showLabels
-            });
-
-            console.log(`  👁️ GAZE OVERLAY: Drew ${gazeTargets.length} anchor(s)${primaryTarget ? ' + primary target' : ''}`);
-
-        } catch (error) {
-            // Silently fail - overlay is for debugging only
-            console.log('  ⚠️ Gaze overlay failed (headed mode required)');
-        }
-    }
-
     /**
      * Draw a simple marker at a specific point (for debugging click locations).
      *
@@ -3177,5 +3134,327 @@ export class A11yNavigator {
         } catch {
             // Silently fail
         }
+    }
+
+    // =========================================================================
+    // AI NAVIGATION SUPPORT (NavigationLLM Integration)
+    // =========================================================================
+
+    /**
+     * Get elements formatted for NavigationLLM consumption.
+     *
+     * Returns elements with:
+     * - Unique IDs for action reference
+     * - Normalized coordinates (0-1000)
+     * - Container context from accessibility tree hierarchy
+     * - State information (expanded, selected, etc.)
+     *
+     * The LLM uses container context to discover layout patterns
+     * (e.g., "buttons inside 'Stories' region are story circles").
+     *
+     * @param maxElements - Maximum elements to return (for token efficiency)
+     * @returns Array of NavigationElement objects
+     */
+    async getNavigationElements(maxElements: number = 30): Promise<NavigationElement[]> {
+        const elements: NavigationElement[] = [];
+        const viewport = await this.getViewportInfo();
+
+        // Build hierarchical tree for container context
+        const tree = await this.buildAccessibilityTree();
+        if (!tree) {
+            return elements;
+        }
+
+        // Collect all interactive nodes from the tree
+        const interactiveNodes: AXTreeNode[] = [];
+        const relevantRoles = [
+            'button', 'link', 'image', 'img', 'figure', 'article',
+            'heading', 'textbox', 'searchbox', 'menuitem', 'listitem'
+        ];
+
+        for (const node of tree.nodeMap.values()) {
+            if (node.ignored) continue;
+            const role = node.role?.value?.toLowerCase() || '';
+            if (relevantRoles.includes(role) && node.backendDOMNodeId) {
+                interactiveNodes.push(node);
+            }
+        }
+
+        if (interactiveNodes.length === 0) {
+            return elements;
+        }
+
+        let cdpSession: CDPSession | null = null;
+        try {
+            cdpSession = await this.page.context().newCDPSession(this.page);
+            let idCounter = 1;
+
+            for (const node of interactiveNodes) {
+                if (elements.length >= maxElements) break;
+                if (!node.backendDOMNodeId) continue;
+
+                const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+                if (!box || box.width <= 0 || box.height <= 0) continue;
+
+                // Skip elements outside viewport
+                if (box.y + box.height < 0 || box.y > viewport.height) continue;
+
+                // Skip very small elements (probably not interactive)
+                if (box.width < 20 || box.height < 20) continue;
+
+                const role = node.role?.value || 'unknown';
+                const name = node.name?.value || '';
+
+                // Normalize coordinates to 0-1000 range
+                const normalizeX = (x: number) => Math.round((x / viewport.width) * 1000);
+                const normalizeY = (y: number) => Math.round((y / viewport.height) * 1000);
+
+                // Find container context from tree hierarchy
+                const container = this.findNearestContainer(tree, node);
+
+                // Get sibling count (elements in same container)
+                const siblingCount = container ? this.countSiblings(tree, node, container) : 0;
+
+                // Only detect forbidden actions (like, comment, share, save, follow)
+                const semanticHint = this.inferForbiddenActionHint(name);
+
+                // Extract state from properties
+                const state = this.extractElementState(node);
+
+                // Extract content preview for articles (for LLM value assessment)
+                // Also check if this element is inside an article container
+                const isArticle = role.toLowerCase() === 'article';
+                const isInArticle = container?.role?.value?.toLowerCase() === 'article';
+                let contentPreview: NavigationElement['contentPreview'] | undefined;
+
+                if (isArticle) {
+                    // Extract content from this article and its descendants
+                    contentPreview = this.extractContentPreviewFromNode(tree, node);
+                } else if (isInArticle && container) {
+                    // For elements inside an article, extract from the container
+                    // But only do this once per container to avoid duplication
+                    contentPreview = this.extractContentPreviewFromNode(tree, container);
+                }
+
+                elements.push({
+                    id: idCounter++,
+                    role: role.toLowerCase(),
+                    name: name.slice(0, 50), // Longer names for better context
+                    position: {
+                        x: normalizeX(box.x),
+                        y: normalizeY(box.y),
+                        w: normalizeX(box.width),
+                        h: normalizeY(box.height)
+                    },
+                    containerRole: container?.role?.value?.toLowerCase(),
+                    containerName: container?.name?.value?.slice(0, 30),
+                    depth: node.depth,
+                    siblingCount,
+                    semanticHint: semanticHint !== 'unknown' ? semanticHint : undefined,
+                    state: Object.keys(state).length > 0 ? state : undefined,
+                    backendNodeId: node.backendDOMNodeId,
+                    boundingBox: box,
+                    contentPreview
+                });
+            }
+
+        } finally {
+            if (cdpSession) {
+                await cdpSession.detach().catch(() => {});
+            }
+        }
+
+        return elements;
+    }
+
+    /**
+     * Find the nearest container ancestor in the accessibility tree.
+     * Containers are elements like region, navigation, list, article, dialog.
+     */
+    private findNearestContainer(tree: AXTree, node: AXTreeNode): AXTreeNode | null {
+        const containerRoles = [
+            'region', 'navigation', 'main', 'complementary',
+            'list', 'listbox', 'article', 'dialog', 'alertdialog',
+            'group', 'toolbar', 'menu', 'menubar', 'tablist'
+        ];
+
+        let current = node.parentId ? tree.nodeMap.get(node.parentId) : null;
+
+        while (current) {
+            const role = current.role?.value?.toLowerCase();
+            if (role && containerRoles.includes(role)) {
+                return current;
+            }
+            current = current.parentId ? tree.nodeMap.get(current.parentId) : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Count siblings within the same container.
+     * Helps LLM understand element clusters (e.g., "8 buttons in Stories").
+     */
+    private countSiblings(tree: AXTree, node: AXTreeNode, container: AXTreeNode): number {
+        if (!container.childIds) return 0;
+
+        let count = 0;
+        const nodeRole = node.role?.value?.toLowerCase();
+
+        // Count descendants of container that have the same role
+        const countInContainer = (parentNode: AXTreeNode): number => {
+            let total = 0;
+            if (!parentNode.childIds) return 0;
+
+            for (const childId of parentNode.childIds) {
+                const child = tree.nodeMap.get(childId);
+                if (!child) continue;
+
+                const childRole = child.role?.value?.toLowerCase();
+                if (childRole === nodeRole) {
+                    total++;
+                }
+                // Recurse into non-container children
+                const isContainer = ['region', 'list', 'article', 'dialog', 'group'].includes(childRole || '');
+                if (!isContainer) {
+                    total += countInContainer(child);
+                }
+            }
+            return total;
+        };
+
+        count = countInContainer(container);
+        return count;
+    }
+
+    /**
+     * Detect only forbidden action hints (like, comment, share, save, follow).
+     * No position-based detection - let the LLM discover patterns from container context.
+     */
+    private inferForbiddenActionHint(name: string): SemanticHint {
+        const nameLower = name.toLowerCase();
+
+        // Search input detection (useful for navigation)
+        if (/^search$/i.test(nameLower)) {
+            return 'search_input';
+        }
+
+        // Close button detection (useful for modal handling)
+        if (/^close$|^x$|dismiss/i.test(nameLower)) {
+            return 'close_button';
+        }
+
+        // Forbidden interaction buttons - LLM should NOT click these
+        if (/^like$/i.test(nameLower)) return 'like_button';
+        if (/^comment$/i.test(nameLower)) return 'comment_button';
+        if (/^share$/i.test(nameLower)) return 'share_button';
+        if (/^save$/i.test(nameLower)) return 'save_button';
+        if (/^follow$/i.test(nameLower)) return 'follow_button';
+
+        return 'unknown';
+    }
+
+    // =========================================================================
+    // Content Preview Extraction (for LLM value assessment)
+    // =========================================================================
+
+    /**
+     * Extract hashtags from text content.
+     * @param text - Text to search for hashtags
+     * @param max - Maximum hashtags to return
+     * @returns Array of hashtags (without # prefix)
+     */
+    private extractHashtags(text: string | undefined, max: number): string[] {
+        if (!text) return [];
+        const matches = text.match(/#\w+/g) || [];
+        return matches.slice(0, max).map(tag => tag.substring(1)); // Remove # prefix
+    }
+
+    /**
+     * Extract content preview from an article node and its descendants.
+     * Used to give NavigationLLM context about post value WITHOUT Vision API.
+     *
+     * @param tree - The accessibility tree
+     * @param articleNode - The article/container node to extract from
+     * @returns Content preview object or undefined if no content found
+     */
+    private extractContentPreviewFromNode(
+        tree: AXTree,
+        articleNode: AXTreeNode
+    ): NavigationElement['contentPreview'] | undefined {
+        let captionText: string | undefined;
+        let likes: string | undefined;
+        let comments: string | undefined;
+        let altText: string | undefined;
+
+        // Recursive function to collect content from descendants
+        const collectFromDescendants = (node: AXTreeNode): void => {
+            if (node.ignored) return;
+
+            const name = node.name?.value || '';
+            const role = node.role?.value?.toLowerCase() || '';
+            const description = node.description?.value;
+
+            // Collect alt text from images
+            if ((role === 'image' || role === 'img' || role === 'figure') && description) {
+                if (!altText && description.length > 5) {
+                    altText = description.slice(0, 50);
+                }
+            }
+
+            // Like count patterns: "1,234 likes", "1 like"
+            if (!likes && /^[\d,]+\s*likes?$/i.test(name)) {
+                likes = name;
+            }
+
+            // Comment count patterns: "View all 42 comments", "1 comment"
+            if (!comments && (/view\s*(all\s*)?\d+\s*comments?/i.test(name) || /^\d+\s*comments?$/i.test(name))) {
+                comments = name;
+            }
+
+            // Caption detection (same logic as findPostCaption but localized to this article)
+            if (!captionText && name.length >= 20) {
+                // Skip interactive elements
+                if (role !== 'button' && role !== 'link' && role !== 'textbox') {
+                    // Skip navigation patterns
+                    if (!/^(home|search|explore|reels|messages|notifications|create|profile)$/i.test(name)) {
+                        // Prefer text with hashtags or mentions
+                        if (name.includes('#') || name.includes('@')) {
+                            captionText = name;
+                        } else if (name.length > 50) {
+                            captionText = name;
+                        }
+                    }
+                }
+            }
+
+            // Recurse into children
+            if (node.childIds) {
+                for (const childId of node.childIds) {
+                    const child = tree.nodeMap.get(childId);
+                    if (child) {
+                        collectFromDescendants(child);
+                    }
+                }
+            }
+        };
+
+        // Start collection from the article node
+        collectFromDescendants(articleNode);
+
+        // Only return if we found something useful
+        if (!captionText && !likes && !comments && !altText) {
+            return undefined;
+        }
+
+        const hashtags = this.extractHashtags(captionText, 5);
+
+        return {
+            captionText: captionText?.slice(0, 100),
+            altText,
+            engagement: (likes || comments) ? { likes, comments } : undefined,
+            hasHashtags: hashtags.length > 0,
+            hashtags: hashtags.length > 0 ? hashtags : undefined
+        };
     }
 }

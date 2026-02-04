@@ -41,7 +41,8 @@ export interface ScrapedSession {
 export interface ContentState {
     hasStories: boolean;
     hasPosts: boolean;
-    currentView: 'feed' | 'story' | 'profile' | 'explore' | 'login' | 'unknown';
+    hasVideo?: boolean;
+    currentView: 'feed' | 'story' | 'profile' | 'explore' | 'login' | 'post_detail' | 'unknown';
 }
 
 /**
@@ -229,59 +230,6 @@ export interface ContentDensity {
     textRatio: number;
 }
 
-/**
- * Target for gaze simulation - an element worth "looking at".
- */
-export interface GazeTarget {
-    point: Point;
-    role: string;
-    label: string;
-    salience: number;  // 0-1 score of visual interest
-    boundingBox: BoundingBox;
-}
-
-/**
- * Configuration for gaze-lag execution.
- */
-export interface GazeConfig {
-    /** Enable/disable gaze simulation */
-    enabled?: boolean;
-    /** Saccadic latency range in ms [min, max] */
-    saccadicLatency?: [number, number];
-    /** Fixation pause range in ms [min, max] */
-    fixationPause?: [number, number];
-    /** Ballistic phase covers this % of distance [min, max] */
-    ballisticSplit?: [number, number];
-    /** Speed ranges for each phase [min, max] px/step */
-    scanningSpeed?: [number, number];
-    ballisticSpeed?: [number, number];
-    correctiveSpeed?: [number, number];
-    /** Jitter ranges for each phase [min, max] px */
-    scanningJitter?: [number, number];
-    ballisticJitter?: [number, number];
-    correctiveJitter?: [number, number];
-}
-
-/**
- * Strategy returned by StrategicGaze LLM service.
- */
-export interface GazeStrategy {
-    gazeAnchors: Point[];      // 1-2 "distractor" points to look at first
-    primaryTarget: Point;       // The actual click target
-    confidence: number;         // 0-1 confidence in strategy
-}
-
-/**
- * Spatial node for LLM gaze planning (token-efficient format).
- */
-export interface SpatialNode {
-    role: string;        // "button", "link", "image"
-    label: string;       // Truncated to 20 chars
-    x: number;           // Normalized 0-1000
-    y: number;           // Normalized 0-1000
-    w: number;           // Width normalized
-    h: number;           // Height normalized
-}
 
 /**
  * Configuration for analysis generation.

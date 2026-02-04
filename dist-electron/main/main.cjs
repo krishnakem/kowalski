@@ -265,6 +265,8 @@ var BrowserManager = class _BrowserManager {
         extraArgs.push(`--app=https://www.instagram.com/accounts/login/`);
         extraArgs.push(`--window-position=${config.bounds.x},${config.bounds.y}`);
         extraArgs.push(`--window-size=${config.bounds.width},${config.bounds.height}`);
+      } else {
+        extraArgs.push("--window-size=1080,1920");
       }
       const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
       console.log("\u{1F50D} DEBUG: Custom executable path:", customExecutablePath);
@@ -2611,32 +2613,6 @@ var GhostMouse = class {
     return min2 + Math.random() * (max2 - min2);
   }
   /**
-   * Default gaze configuration with all randomized ranges.
-   */
-  getDefaultGazeConfig() {
-    return {
-      enabled: true,
-      saccadicLatency: [280, 420],
-      // Human eye-to-hand reaction time
-      fixationPause: [200, 500],
-      // Visual fixation at gaze points
-      ballisticSplit: [0.75, 0.85],
-      // 75-85% of distance is ballistic
-      scanningSpeed: [2, 4],
-      // Slow, deliberate scanning
-      ballisticSpeed: [8, 12],
-      // Fast, committed movement
-      correctiveSpeed: [1, 3],
-      // Slow, precise final approach
-      scanningJitter: [1.5, 2.5],
-      // Relaxed hand
-      ballisticJitter: [0.5, 1.5],
-      // Minimal - focused movement
-      correctiveJitter: [2.5, 4.5]
-      // Increased - fine motor tension
-    };
-  }
-  /**
    * Get element-specific hover duration based on role.
    * Different element types require different amounts of visual processing.
    *
@@ -2712,119 +2688,6 @@ var GhostMouse = class {
       Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
     );
     await this.clickWithRole(clickPoint, role);
-  }
-  /**
-   * Investigate and click: Human-like "Look, then Move" sequence.
-   *
-   * This implements the Hybrid Gaze-Physics System:
-   * - Phase 0: Saccadic latency (280-420ms wait before movement)
-   * - Phase 1: Scanning (move to gaze anchors, pause at each)
-   * - Phase 2: Ballistic (fast movement covering 75-85% of distance)
-   * - Phase 3: Corrective (slow, jittery final approach with Fitts's Law)
-   *
-   * @param target - The final click target
-   * @param gazeAnchors - 1-2 "distractor" points to look at first
-   * @param role - Accessibility role for timing adjustment
-   * @param config - Optional gaze configuration overrides
-   */
-  async investigateAndClick(target, gazeAnchors, role = "button", config) {
-    const cfg = { ...this.getDefaultGazeConfig(), ...config };
-    if (!cfg.enabled || gazeAnchors.length === 0) {
-      await this.clickWithRole(target, role);
-      return;
-    }
-    const saccadicDelay = this.randomInRange(cfg.saccadicLatency[0], cfg.saccadicLatency[1]);
-    await new Promise((r) => setTimeout(r, saccadicDelay * this.sessionTimingMultiplier));
-    for (const anchor of gazeAnchors.slice(0, 2)) {
-      await this.moveToWithPhaseConfig(
-        anchor,
-        cfg.scanningSpeed,
-        cfg.scanningJitter
-      );
-      const fixationTime = this.randomInRange(cfg.fixationPause[0], cfg.fixationPause[1]);
-      await new Promise((r) => setTimeout(r, fixationTime * this.sessionTimingMultiplier));
-    }
-    const lastPosition = gazeAnchors.length > 0 ? gazeAnchors[gazeAnchors.length - 1] : this.currentPosition;
-    const ballisticRatio = this.randomInRange(cfg.ballisticSplit[0], cfg.ballisticSplit[1]);
-    const ballisticTarget = {
-      x: lastPosition.x + (target.x - lastPosition.x) * ballisticRatio,
-      y: lastPosition.y + (target.y - lastPosition.y) * ballisticRatio
-    };
-    await this.moveToWithPhaseConfig(
-      ballisticTarget,
-      cfg.ballisticSpeed,
-      cfg.ballisticJitter
-    );
-    await this.moveToWithPhaseConfig(
-      target,
-      cfg.correctiveSpeed,
-      cfg.correctiveJitter
-    );
-    const hoverDuration = this.getHoverDurationForRole(role);
-    await new Promise((r) => setTimeout(r, hoverDuration));
-    await this.page.mouse.down();
-    await this.microDelay(50, 150);
-    await this.page.mouse.up();
-    await this.microDelay(200, 500);
-    this.currentPosition = target;
-  }
-  /**
-   * Move to target with specific speed and jitter configuration.
-   * Used internally by investigateAndClick for phase-specific movement.
-   */
-  async moveToWithPhaseConfig(target, speedRange, jitterRange) {
-    const minSpeed = this.randomInRange(speedRange[0], speedRange[1] * 0.6);
-    const maxSpeed = this.randomInRange(speedRange[0] * 1.4, speedRange[1]);
-    const jitterAmount = this.randomInRange(jitterRange[0], jitterRange[1]);
-    const controlPoints = this.generateBezierControlPoints(this.currentPosition, target);
-    const curve = new Bezier(
-      controlPoints.start.x,
-      controlPoints.start.y,
-      controlPoints.cp1.x,
-      controlPoints.cp1.y,
-      controlPoints.cp2.x,
-      controlPoints.cp2.y,
-      controlPoints.end.x,
-      controlPoints.end.y
-    );
-    const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
-    const effectiveJitter = jitterAmount * this.sessionJitterMultiplier;
-    for (let i = 0; i < points.length; i++) {
-      const jitteredPoint = this.addJitter(points[i], effectiveJitter);
-      await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
-      await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
-      await this.microDelay(12, 45);
-    }
-    this.currentPosition = target;
-  }
-  /**
-   * Investigate and click an element using gaze targets.
-   * Convenience method that calculates click point from bounding box.
-   *
-   * @param boundingBox - Element's bounding box
-   * @param gazeTargets - Array of GazeTarget objects from A11yNavigator
-   * @param role - Accessibility role for timing adjustment
-   * @param centerBias - How much to favor center for click point. Randomized 0.2-0.4 if not specified.
-   * @param config - Optional gaze configuration overrides
-   */
-  async investigateAndClickElement(boundingBox, gazeTargets, role = "button", centerBias, config) {
-    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
-    const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
-    const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
-    let clickPoint = {
-      x: boundingBox.x + offsetX,
-      y: boundingBox.y + offsetY
-    };
-    clickPoint.x = Math.max(
-      boundingBox.x + 5,
-      Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
-    );
-    clickPoint.y = Math.max(
-      boundingBox.y + 5,
-      Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
-    );
-    const gazeAnchors = gazeTargets.map((t2) => t2.point);
-    await this.investigateAndClick(clickPoint, gazeAnchors, role, config);
   }
   /**
    * Get the session timing multiplier (for external coordination).
@@ -3334,6 +3197,9 @@ var A11yNavigator = class {
     if (url.includes("/accounts/login")) return "login";
     if (url.includes("/stories/")) return "story";
     if (url.includes("/explore")) return "explore";
+    if (url.includes("/p/") || url.includes("/reel/")) {
+      return "post_detail";
+    }
     const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
     if (profileMatch && !["explore", "reels", "direct"].includes(profileMatch[1])) {
       return "profile";
@@ -3342,6 +3208,84 @@ var A11yNavigator = class {
       return "feed";
     }
     return "unknown";
+  }
+  // ============================================================================
+  // Deep Engagement Detection
+  // ============================================================================
+  /**
+   * Detect current engagement level for LLM context.
+   * Determines if we're in feed, post modal, comments, or profile view.
+   * Cost: $0 (URL analysis + optional accessibility tree check)
+   */
+  async detectEngagementLevel() {
+    const url = this.page.url();
+    if (url.includes("/p/") || url.includes("/reel/")) {
+      const postMatch = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+      const postUrl = postMatch ? `https://www.instagram.com/p/${postMatch[2]}/` : void 0;
+      const tree = await this.buildAccessibilityTree();
+      if (tree) {
+        const hasDialog = Array.from(tree.nodeMap.values()).some(
+          (node) => node.role?.value?.toLowerCase() === "dialog"
+        );
+        return {
+          level: "post_modal",
+          postUrl
+        };
+      }
+      return { level: "post_modal", postUrl };
+    }
+    const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
+    if (profileMatch && !["explore", "reels", "direct", "p"].includes(profileMatch[1])) {
+      return {
+        level: "profile",
+        username: profileMatch[1]
+      };
+    }
+    return { level: "feed" };
+  }
+  /**
+   * Extract engagement metrics from visible post elements.
+   * Looks for like counts, comment counts, carousel indicators.
+   * Cost: $0 (accessibility tree analysis)
+   */
+  async extractPostEngagementMetrics() {
+    const tree = await this.buildAccessibilityTree();
+    if (!tree) return { hasVideo: false };
+    let likeCount;
+    let commentCount;
+    let hasVideo = false;
+    let username;
+    for (const node of tree.nodeMap.values()) {
+      if (node.ignored) continue;
+      const name = node.name?.value || "";
+      const role = node.role?.value?.toLowerCase() || "";
+      if (/^[\d,]+\s*likes?$/i.test(name)) {
+        likeCount = name;
+      }
+      if (/view\s*(all\s*)?\d+\s*comments?/i.test(name) || /^\d+\s*comments?$/i.test(name)) {
+        commentCount = name;
+      }
+      if (role === "video" || /video|play|pause|mute|unmute/i.test(name)) {
+        hasVideo = true;
+      }
+      if (role === "link" && /^@?\w+$/.test(name) && name.length > 2 && name.length < 30) {
+        if (!username || name.length < username.length) {
+          username = name.replace(/^@/, "");
+        }
+      }
+    }
+    const carouselIndicator = await this.getCarouselSlideIndicator();
+    const carouselState = carouselIndicator ? {
+      currentSlide: carouselIndicator.current,
+      totalSlides: carouselIndicator.total
+    } : void 0;
+    return {
+      likeCount,
+      commentCount,
+      carouselState,
+      hasVideo,
+      username
+    };
   }
   /**
    * Determine if we should stop browsing the feed.
@@ -3696,6 +3640,32 @@ var A11yNavigator = class {
     });
   }
   /**
+   * Find the primary post content area for capture.
+   * Returns the bounding box of the main article element.
+   * Works for both feed view and post detail modal.
+   *
+   * In modal view: returns the single main article
+   * In feed view: returns the article closest to viewport center
+   */
+  async findPostContentBounds() {
+    const articles = await this.findPostElementsAtomic();
+    if (articles.length === 0) return null;
+    const viewport = await this.getViewportInfo();
+    const viewportCenter = viewport.height / 2;
+    let bestArticle = articles[0];
+    let bestDistance = Infinity;
+    for (const article of articles) {
+      if (!article.boundingBox) continue;
+      const articleCenter = article.boundingBox.y + article.boundingBox.height / 2;
+      const distance = Math.abs(articleCenter - viewportCenter);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestArticle = article;
+      }
+    }
+    return bestArticle.boundingBox || null;
+  }
+  /**
    * Find carousel "Next" button for multi-image posts.
    * Instagram uses a button with name containing "Next" or arrow patterns.
    *
@@ -3749,6 +3719,274 @@ var A11yNavigator = class {
   // =========================================================================
   // SCREEN READER APPROACH - Generic Element Discovery
   // =========================================================================
+  // -------------------------------------------------------------------------
+  // Hierarchy-Aware Navigation (Screen Reader-Like Tree Traversal)
+  // -------------------------------------------------------------------------
+  /**
+   * Interactive roles that screen readers expose for navigation.
+   */
+  INTERACTIVE_ROLES = [
+    "button",
+    "link",
+    "menuitem",
+    "tab",
+    "checkbox",
+    "radio",
+    "switch",
+    "textbox",
+    "searchbox",
+    "slider",
+    "img"
+    // Include images (may be clickable)
+  ];
+  /**
+   * Build a navigable tree from the flat CDP accessibility response.
+   * Establishes parent-child relationships for hierarchy queries.
+   *
+   * This is the foundation for screen reader-like navigation:
+   * - Enables "find button inside THIS container" queries
+   * - Supports ancestor lookups (e.g., "what article contains this button?")
+   * - Provides O(1) lookup by nodeId or backendDOMNodeId
+   *
+   * @returns AXTree with nodeMap and backendMap for O(1) lookups, or null if failed
+   */
+  async buildAccessibilityTree() {
+    return this.withSession(async (cdpSession) => {
+      const response = await cdpSession.send("Accessibility.getFullAXTree");
+      const nodes = response.nodes || [];
+      if (nodes.length === 0) return null;
+      const nodeMap = /* @__PURE__ */ new Map();
+      const backendMap = /* @__PURE__ */ new Map();
+      for (const node of nodes) {
+        const treeNode = { ...node, depth: 0 };
+        nodeMap.set(node.nodeId, treeNode);
+        if (node.backendDOMNodeId) {
+          backendMap.set(node.backendDOMNodeId, treeNode);
+        }
+      }
+      for (const node of nodes) {
+        const parentNode = nodeMap.get(node.nodeId);
+        if (!parentNode || !node.childIds) continue;
+        for (const childId of node.childIds) {
+          const childNode = nodeMap.get(childId);
+          if (childNode) {
+            childNode.parentId = node.nodeId;
+            childNode.depth = parentNode.depth + 1;
+          }
+        }
+      }
+      const root = nodeMap.get(nodes[0].nodeId);
+      if (!root) return null;
+      return { root, nodeMap, backendMap };
+    });
+  }
+  // =========================================================================
+  // Tree Summary for LLM Dynamic Reasoning
+  // =========================================================================
+  /**
+   * Build a rich accessibility tree summary for LLM reasoning.
+   * Does NOT interpret the tree - just provides structured context.
+   * The LLM infers what page it's on and what's safe to do.
+   */
+  async buildTreeSummaryForLLM() {
+    const tree = await this.buildAccessibilityTree();
+    if (!tree) return { containers: [], inputs: [], landmarks: [] };
+    const containers = [];
+    const inputs = [];
+    const landmarkSet = /* @__PURE__ */ new Set();
+    for (const node of tree.nodeMap.values()) {
+      if (node.ignored) continue;
+      const role = node.role?.value?.toLowerCase() || "";
+      const name = node.name?.value || "";
+      if (["region", "dialog", "main", "navigation", "complementary", "alertdialog"].includes(role)) {
+        if (name && name.length > 0) {
+          containers.push({
+            role,
+            name,
+            childCount: node.childIds?.length || 0
+          });
+        }
+      }
+      if (["textbox", "searchbox", "input", "combobox"].includes(role)) {
+        const parentChain = this.getParentContainerChain(tree, node);
+        inputs.push({
+          role,
+          name: name || "[unnamed input]",
+          parentContainers: parentChain
+        });
+      }
+      if (name && name.length > 2 && name.length < 50) {
+        landmarkSet.add(name);
+      }
+    }
+    return {
+      containers,
+      inputs,
+      landmarks: Array.from(landmarkSet).slice(0, 20)
+      // Limit to 20 most relevant
+    };
+  }
+  /**
+   * Get the chain of parent container names for an element.
+   * Used to give input fields context (e.g., "Search" inside "Direct Messages").
+   */
+  getParentContainerChain(tree, node) {
+    const chain = [];
+    let current = node.parentId ? tree.nodeMap.get(node.parentId) : null;
+    while (current && chain.length < 5) {
+      const name = current.name?.value;
+      const role = current.role?.value?.toLowerCase();
+      if (name && name.length > 2 && ["region", "dialog", "main", "navigation", "complementary", "alertdialog", "article"].includes(role || "")) {
+        chain.push(name);
+      }
+      current = current.parentId ? tree.nodeMap.get(current.parentId) : null;
+    }
+    return chain;
+  }
+  /**
+   * Check if a node is a descendant of another node.
+   * Walks up the tree from child to ancestor.
+   *
+   * @param tree - The accessibility tree
+   * @param childNodeId - The potential descendant's nodeId
+   * @param ancestorNodeId - The potential ancestor's nodeId
+   * @returns true if childNodeId is a descendant of ancestorNodeId
+   */
+  isDescendantOf(tree, childNodeId, ancestorNodeId) {
+    let current = tree.nodeMap.get(childNodeId);
+    while (current?.parentId) {
+      if (current.parentId === ancestorNodeId) return true;
+      current = tree.nodeMap.get(current.parentId);
+    }
+    return false;
+  }
+  /**
+   * Find ancestor matching one of the given roles.
+   * Useful for finding "the article containing this button".
+   *
+   * @param tree - The accessibility tree
+   * @param nodeId - Starting node's nodeId
+   * @param roles - Array of roles to search for (e.g., ['article', 'region', 'dialog'])
+   * @returns First ancestor matching a role, or null
+   */
+  findAncestorByRole(tree, nodeId, roles) {
+    let current = tree.nodeMap.get(nodeId);
+    while (current?.parentId) {
+      current = tree.nodeMap.get(current.parentId);
+      if (current) {
+        const role = current.role?.value?.toLowerCase();
+        if (role && roles.includes(role)) return current;
+      }
+    }
+    return null;
+  }
+  /**
+   * Get all interactive descendants of a container.
+   * Returns elements that are hierarchically inside the container.
+   *
+   * This is the key method for scoped searches:
+   * - "Find all buttons inside this carousel"
+   * - "Find all links inside this article"
+   *
+   * @param tree - The accessibility tree
+   * @param ancestorNodeId - The container's nodeId
+   * @param roleFilter - Optional array of roles to filter (e.g., ['button', 'link'])
+   * @returns Array of InteractiveElements that are descendants of the container
+   */
+  async getDescendantElements(tree, ancestorNodeId, roleFilter) {
+    const elements = [];
+    const ancestorNode = tree.nodeMap.get(ancestorNodeId);
+    if (!ancestorNode) return elements;
+    const descendantNodeIds = [];
+    const collectDescendants = (nodeId) => {
+      const node = tree.nodeMap.get(nodeId);
+      if (!node || node.ignored) return;
+      const role = node.role?.value?.toLowerCase();
+      if (role && this.INTERACTIVE_ROLES.includes(role)) {
+        if (!roleFilter || roleFilter.includes(role)) {
+          descendantNodeIds.push(nodeId);
+        }
+      }
+      if (node.childIds) {
+        for (const childId of node.childIds) {
+          collectDescendants(childId);
+        }
+      }
+    };
+    if (ancestorNode.childIds) {
+      for (const childId of ancestorNode.childIds) {
+        collectDescendants(childId);
+      }
+    }
+    return this.withSession(async (cdpSession) => {
+      for (const nodeId of descendantNodeIds) {
+        const node = tree.nodeMap.get(nodeId);
+        if (!node?.backendDOMNodeId) continue;
+        try {
+          const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+          if (box && box.width > 0 && box.height > 0) {
+            elements.push({
+              role: node.role?.value?.toLowerCase() || "unknown",
+              name: node.name?.value || "[unnamed]",
+              selector: "",
+              boundingBox: box,
+              backendNodeId: node.backendDOMNodeId
+            });
+          }
+        } catch {
+        }
+      }
+      return elements;
+    });
+  }
+  /**
+   * Find the semantic container (article, region, dialog, figure) for an element.
+   * Essential for scoped searches - "find buttons inside THIS post".
+   *
+   * @param backendNodeId - The backendDOMNodeId of the element
+   * @returns Container info with nodeId and role, or null if no container found
+   */
+  async findContainerForElement(backendNodeId) {
+    const tree = await this.buildAccessibilityTree();
+    if (!tree) return null;
+    const elementNode = tree.backendMap.get(backendNodeId);
+    if (!elementNode) return null;
+    const containerRoles = ["article", "region", "dialog", "main", "navigation", "figure"];
+    const container = this.findAncestorByRole(tree, elementNode.nodeId, containerRoles);
+    if (!container) return null;
+    return {
+      containerNodeId: container.nodeId,
+      containerRole: container.role?.value || "unknown",
+      backendNodeId: container.backendDOMNodeId || 0
+    };
+  }
+  /**
+   * Find the story viewer container (dialog/modal).
+   * Stories open in a modal overlay with specific characteristics.
+   *
+   * @returns Container nodeId if found, or null
+   */
+  async findStoryViewerContainer() {
+    const tree = await this.buildAccessibilityTree();
+    if (!tree) return null;
+    for (const [nodeId, node] of tree.nodeMap) {
+      const role = node.role?.value?.toLowerCase();
+      if (role === "dialog" || role === "region") {
+        const descendants = await this.getDescendantElements(tree, nodeId, ["button"]);
+        const hasStoryNav = descendants.some(
+          (d) => /close|next|previous|pause|story/i.test(d.name)
+        );
+        if (hasStoryNav && descendants.length >= 2) {
+          console.log(`  \u{1F3AF} Found story container: ${role} with ${descendants.length} buttons`);
+          return nodeId;
+        }
+      }
+    }
+    return null;
+  }
+  // -------------------------------------------------------------------------
+  // End Hierarchy-Aware Navigation
+  // -------------------------------------------------------------------------
   /**
    * Get ALL interactive elements on the page with full semantic information.
    * This is how screen readers discover clickable content.
@@ -3759,20 +3997,6 @@ var A11yNavigator = class {
    * @returns Array of all interactive elements with semantic info
    */
   async getAllInteractiveElements() {
-    const INTERACTIVE_ROLES = [
-      "button",
-      "link",
-      "menuitem",
-      "tab",
-      "checkbox",
-      "radio",
-      "switch",
-      "textbox",
-      "searchbox",
-      "slider",
-      "img"
-      // Include images (may be clickable)
-    ];
     return this.withSession(async (cdpSession) => {
       const response = await cdpSession.send("Accessibility.getFullAXTree");
       const nodes = response.nodes || [];
@@ -3780,7 +4004,7 @@ var A11yNavigator = class {
       for (const node of nodes) {
         if (node.ignored) continue;
         const role = node.role?.value?.toLowerCase();
-        if (!INTERACTIVE_ROLES.includes(role || "")) continue;
+        if (!this.INTERACTIVE_ROLES.includes(role || "")) continue;
         const state = this.extractElementState(node);
         if (state.disabled) continue;
         if (!node.backendDOMNodeId) continue;
@@ -4037,17 +4261,50 @@ var A11yNavigator = class {
    * Key insight: Carousel buttons are ALWAYS in the content area (center of screen),
    * NEVER in sidebars. This allows safe fallback when image detection fails.
    *
+   * NEW: Supports hierarchy-first search when containerNodeId provided.
+   * Falls back to spatial search for backward compatibility.
+   *
    * @param side - 'right' for next, 'left' for previous
-   * @param contentArea - Optional bounding box of the content area
+   * @param options - Optional EdgeButtonOptions with contentArea and/or containerNodeId
    * @returns Button element positioned on the specified side, or null
    */
-  async findEdgeButton(side, contentArea) {
-    const elements = await this.getAllInteractiveElements();
+  async findEdgeButton(side, options) {
     const viewport = await this.getViewportInfo();
+    if (options?.containerNodeId) {
+      const tree = await this.buildAccessibilityTree();
+      if (tree) {
+        const descendants = await this.getDescendantElements(
+          tree,
+          options.containerNodeId,
+          ["button", "link"]
+        );
+        if (descendants.length > 0) {
+          const centerX = viewport.width / 2;
+          const sideButtons = descendants.filter((btn) => {
+            const box = btn.boundingBox;
+            const btnCenterX = box.x + box.width / 2;
+            return side === "right" ? btnCenterX > centerX : btnCenterX < centerX;
+          });
+          if (sideButtons.length > 0) {
+            const inStory = this.isInStoryViewer();
+            sideButtons.sort((a, b) => {
+              const aX = a.boundingBox.x;
+              const bX = b.boundingBox.x;
+              return inStory ? side === "right" ? aX - bX : bX - aX : side === "right" ? bX - aX : aX - bX;
+            });
+            console.log(`  \u{1F3AF} Hierarchy: found ${sideButtons.length} ${side} button(s) in container, using "${sideButtons[0].name}"`);
+            return sideButtons[0];
+          }
+        }
+        console.log(`  \u{1F3AF} Hierarchy: no ${side} buttons in container, falling back to spatial`);
+      }
+    }
+    const elements = await this.getAllInteractiveElements();
     const clickables = elements.filter(
       (el) => (el.role === "button" || el.role === "link") && el.boundingBox && el.boundingBox.width > 0
     );
     if (clickables.length === 0) return null;
+    const contentArea = options?.contentArea;
     if (contentArea) {
       const edgeMargin = contentArea.width * 0.3;
       const overflow = contentArea.width * 0.05;
@@ -4160,14 +4417,29 @@ var A11yNavigator = class {
       }
     }
     const contentArea = mainImage?.boundingBox;
+    let containerNodeId;
+    if (mainImage?.backendNodeId) {
+      const tree = await this.buildAccessibilityTree();
+      if (tree) {
+        const imageNode = tree.backendMap.get(mainImage.backendNodeId);
+        if (imageNode) {
+          const container = this.findAncestorByRole(tree, imageNode.nodeId, ["article", "figure", "region"]);
+          containerNodeId = container?.nodeId;
+          if (containerNodeId) {
+            console.log(`  \u{1F3AF} Found carousel container: ${container?.role?.value}`);
+          }
+        }
+      }
+    }
     if (contentArea) {
       console.log(`  \u{1F3AF} Using image bounds: ${Math.round(contentArea.width)}x${Math.round(contentArea.height)} at (${Math.round(contentArea.x)}, ${Math.round(contentArea.y)})`);
     } else {
       console.log(`  \u{1F3AF} No image found, using viewport-center fallback`);
     }
+    const options = { contentArea, containerNodeId };
     return {
-      next: await this.findEdgeButton("right", contentArea),
-      previous: await this.findEdgeButton("left", contentArea)
+      next: await this.findEdgeButton("right", options),
+      previous: await this.findEdgeButton("left", options)
     };
   }
   /**
@@ -4832,79 +5104,6 @@ var A11yNavigator = class {
     return Math.min(score, 1);
   }
   /**
-   * Find visually interesting elements for gaze simulation.
-   * Returns elements sorted by visual salience (most interesting first).
-   *
-   * @param maxTargets - Maximum number of gaze targets to return (1-5)
-   * @returns Array of GazeTarget objects with coordinates and salience scores
-   */
-  async findGazeTargets(maxTargets = 3) {
-    const targets = [];
-    const nodes = await this.getAccessibilityTree();
-    const viewport = await this.getViewportInfo();
-    const visualNodes = nodes.filter((node) => {
-      if (node.ignored) return false;
-      const role = node.role?.value?.toLowerCase() || "";
-      const visualRoles = ["image", "img", "figure", "button", "link", "heading"];
-      return visualRoles.includes(role) && node.backendDOMNodeId;
-    });
-    if (visualNodes.length === 0) {
-      return targets;
-    }
-    let cdpSession = null;
-    try {
-      cdpSession = await this.page.context().newCDPSession(this.page);
-      const scoredNodes = [];
-      for (const node of visualNodes.slice(0, 30)) {
-        if (!node.backendDOMNodeId) continue;
-        const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
-        if (!box || box.width <= 0 || box.height <= 0) continue;
-        if (box.y + box.height < 0 || box.y > viewport.height) continue;
-        if (box.x + box.width < 0 || box.x > viewport.width) continue;
-        const salience = this.scoreElementSalience(
-          node,
-          box,
-          viewport.width,
-          viewport.height
-        );
-        scoredNodes.push({ node, box, salience });
-      }
-      scoredNodes.sort((a, b) => b.salience - a.salience);
-      const usedPositions = [];
-      const minDistance = 100;
-      for (const scored of scoredNodes) {
-        if (targets.length >= maxTargets) break;
-        const centerX = scored.box.x + scored.box.width / 2;
-        const centerY = scored.box.y + scored.box.height / 2;
-        const tooClose = usedPositions.some((pos) => {
-          const dist = Math.hypot(pos.x - centerX, pos.y - centerY);
-          return dist < minDistance;
-        });
-        if (!tooClose) {
-          const jitterX = this.randomInRange(-10, 10);
-          const jitterY = this.randomInRange(-10, 10);
-          targets.push({
-            point: {
-              x: Math.round(centerX + jitterX),
-              y: Math.round(centerY + jitterY)
-            },
-            role: scored.node.role?.value || "unknown",
-            label: (scored.node.name?.value || "").slice(0, 50),
-            salience: scored.salience,
-            boundingBox: scored.box
-          });
-          usedPositions.push({ x: centerX, y: centerY });
-        }
-      }
-    } finally {
-      if (cdpSession) {
-        await cdpSession.detach().catch(() => {
-        });
-      }
-    }
-    return targets;
-  }
-  /**
    * Analyze content density for intent-driven scrolling.
    * Determines if viewport is text-heavy, image-heavy, or mixed.
    *
@@ -4944,66 +5143,6 @@ var A11yNavigator = class {
       imageCount,
       textRatio
     };
-  }
-  /**
-   * Get spatial map of elements for LLM gaze planning.
-   * Returns a token-efficient representation with normalized coordinates.
-   *
-   * Coordinates are normalized to 0-1000 range for token efficiency.
-   *
-   * @param maxNodes - Maximum number of nodes to include
-   * @returns Array of SpatialNode objects
-   */
-  async getSpatialMap(maxNodes = 20) {
-    const spatialNodes = [];
-    const nodes = await this.getAccessibilityTree();
-    const viewport = await this.getViewportInfo();
-    const relevantNodes = nodes.filter((node) => {
-      if (node.ignored) return false;
-      const role = node.role?.value?.toLowerCase() || "";
-      const relevantRoles = [
-        "button",
-        "link",
-        "image",
-        "img",
-        "figure",
-        "heading",
-        "textbox",
-        "searchbox",
-        "menuitem"
-      ];
-      return relevantRoles.includes(role) && node.backendDOMNodeId;
-    });
-    if (relevantNodes.length === 0) {
-      return spatialNodes;
-    }
-    let cdpSession = null;
-    try {
-      cdpSession = await this.page.context().newCDPSession(this.page);
-      for (const node of relevantNodes.slice(0, maxNodes)) {
-        if (!node.backendDOMNodeId) continue;
-        const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
-        if (!box || box.width <= 0 || box.height <= 0) continue;
-        if (box.y + box.height < 0 || box.y > viewport.height) continue;
-        const normalizeX = (x) => Math.round(x / viewport.width * 1e3);
-        const normalizeY = (y) => Math.round(y / viewport.height * 1e3);
-        spatialNodes.push({
-          role: node.role?.value || "unknown",
-          label: (node.name?.value || "").slice(0, 20),
-          // Truncate for token efficiency
-          x: normalizeX(box.x),
-          y: normalizeY(box.y),
-          w: normalizeX(box.width),
-          h: normalizeY(box.height)
-        });
-      }
-    } finally {
-      if (cdpSession) {
-        await cdpSession.detach().catch(() => {
-        });
-      }
-    }
-    return spatialNodes;
   }
   /**
    * Expose getAccessibilityTree for external use (e.g., by HumanScroll).
@@ -5273,118 +5412,6 @@ var A11yNavigator = class {
     }
     console.log("\n========== END DUMP ==========\n");
   }
-  // =========================================================================
-  // DEBUG: GAZE OVERLAY VISUALIZATION
-  // =========================================================================
-  /**
-   * Draw temporary visual overlay showing gaze targets and primary target.
-   * Only works in headed mode. Uses page.evaluate (detectable) - DEBUG ONLY.
-   *
-   * Draws:
-   * - Red circles for gaze anchor points
-   * - Green circle for primary click target
-   * - Labels with role/salience info
-   *
-   * Overlays auto-remove after 2 seconds.
-   *
-   * @param gazeTargets - Gaze anchor points (red circles)
-   * @param primaryTarget - Primary click target (green circle)
-   * @param showLabels - Whether to show role/salience labels
-   */
-  async drawGazeOverlay(gazeTargets, primaryTarget, showLabels = true) {
-    try {
-      await this.page.evaluate(({ targets, primary, labels }) => {
-        const existingOverlay = document.getElementById("kowalski-gaze-overlay");
-        if (existingOverlay) {
-          existingOverlay.remove();
-        }
-        const overlay = document.createElement("div");
-        overlay.id = "kowalski-gaze-overlay";
-        overlay.style.cssText = `
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    pointer-events: none;
-                    z-index: 999999;
-                `;
-        targets.forEach((target, index) => {
-          const circle = document.createElement("div");
-          circle.style.cssText = `
-                        position: absolute;
-                        left: ${target.point.x - 15}px;
-                        top: ${target.point.y - 15}px;
-                        width: 30px;
-                        height: 30px;
-                        border: 3px solid red;
-                        border-radius: 50%;
-                        background: rgba(255, 0, 0, 0.2);
-                    `;
-          overlay.appendChild(circle);
-          if (labels) {
-            const label = document.createElement("div");
-            label.style.cssText = `
-                            position: absolute;
-                            left: ${target.point.x + 20}px;
-                            top: ${target.point.y - 10}px;
-                            background: rgba(0, 0, 0, 0.8);
-                            color: red;
-                            padding: 2px 6px;
-                            border-radius: 3px;
-                            font-size: 11px;
-                            font-family: monospace;
-                            white-space: nowrap;
-                        `;
-            label.textContent = `\u{1F441}\uFE0F ${index + 1}: ${target.role} (${(target.salience * 100).toFixed(0)}%)`;
-            overlay.appendChild(label);
-          }
-        });
-        if (primary) {
-          const primaryCircle = document.createElement("div");
-          primaryCircle.style.cssText = `
-                        position: absolute;
-                        left: ${primary.x - 20}px;
-                        top: ${primary.y - 20}px;
-                        width: 40px;
-                        height: 40px;
-                        border: 4px solid lime;
-                        border-radius: 50%;
-                        background: rgba(0, 255, 0, 0.2);
-                    `;
-          overlay.appendChild(primaryCircle);
-          if (labels) {
-            const primaryLabel = document.createElement("div");
-            primaryLabel.style.cssText = `
-                            position: absolute;
-                            left: ${primary.x + 25}px;
-                            top: ${primary.y - 10}px;
-                            background: rgba(0, 0, 0, 0.8);
-                            color: lime;
-                            padding: 2px 6px;
-                            border-radius: 3px;
-                            font-size: 11px;
-                            font-family: monospace;
-                            white-space: nowrap;
-                        `;
-            primaryLabel.textContent = "\u{1F3AF} PRIMARY TARGET";
-            overlay.appendChild(primaryLabel);
-          }
-        }
-        document.body.appendChild(overlay);
-        setTimeout(() => {
-          overlay.remove();
-        }, 2e3);
-      }, {
-        targets: gazeTargets,
-        primary: primaryTarget,
-        labels: showLabels
-      });
-      console.log(`  \u{1F441}\uFE0F GAZE OVERLAY: Drew ${gazeTargets.length} anchor(s)${primaryTarget ? " + primary target" : ""}`);
-    } catch (error) {
-      console.log("  \u26A0\uFE0F Gaze overlay failed (headed mode required)");
-    }
-  }
   /**
    * Draw a simple marker at a specific point (for debugging click locations).
    *
@@ -5432,6 +5459,266 @@ var A11yNavigator = class {
       }, { x: point.x, y: point.y, markerColor: color, markerLabel: label });
     } catch {
     }
+  }
+  // =========================================================================
+  // AI NAVIGATION SUPPORT (NavigationLLM Integration)
+  // =========================================================================
+  /**
+   * Get elements formatted for NavigationLLM consumption.
+   *
+   * Returns elements with:
+   * - Unique IDs for action reference
+   * - Normalized coordinates (0-1000)
+   * - Container context from accessibility tree hierarchy
+   * - State information (expanded, selected, etc.)
+   *
+   * The LLM uses container context to discover layout patterns
+   * (e.g., "buttons inside 'Stories' region are story circles").
+   *
+   * @param maxElements - Maximum elements to return (for token efficiency)
+   * @returns Array of NavigationElement objects
+   */
+  async getNavigationElements(maxElements = 30) {
+    const elements = [];
+    const viewport = await this.getViewportInfo();
+    const tree = await this.buildAccessibilityTree();
+    if (!tree) {
+      return elements;
+    }
+    const interactiveNodes = [];
+    const relevantRoles = [
+      "button",
+      "link",
+      "image",
+      "img",
+      "figure",
+      "article",
+      "heading",
+      "textbox",
+      "searchbox",
+      "menuitem",
+      "listitem"
+    ];
+    for (const node of tree.nodeMap.values()) {
+      if (node.ignored) continue;
+      const role = node.role?.value?.toLowerCase() || "";
+      if (relevantRoles.includes(role) && node.backendDOMNodeId) {
+        interactiveNodes.push(node);
+      }
+    }
+    if (interactiveNodes.length === 0) {
+      return elements;
+    }
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      let idCounter = 1;
+      for (const node of interactiveNodes) {
+        if (elements.length >= maxElements) break;
+        if (!node.backendDOMNodeId) continue;
+        const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
+        if (!box || box.width <= 0 || box.height <= 0) continue;
+        if (box.y + box.height < 0 || box.y > viewport.height) continue;
+        if (box.width < 20 || box.height < 20) continue;
+        const role = node.role?.value || "unknown";
+        const name = node.name?.value || "";
+        const normalizeX = (x) => Math.round(x / viewport.width * 1e3);
+        const normalizeY = (y) => Math.round(y / viewport.height * 1e3);
+        const container = this.findNearestContainer(tree, node);
+        const siblingCount = container ? this.countSiblings(tree, node, container) : 0;
+        const semanticHint = this.inferForbiddenActionHint(name);
+        const state = this.extractElementState(node);
+        const isArticle = role.toLowerCase() === "article";
+        const isInArticle = container?.role?.value?.toLowerCase() === "article";
+        let contentPreview;
+        if (isArticle) {
+          contentPreview = this.extractContentPreviewFromNode(tree, node);
+        } else if (isInArticle && container) {
+          contentPreview = this.extractContentPreviewFromNode(tree, container);
+        }
+        elements.push({
+          id: idCounter++,
+          role: role.toLowerCase(),
+          name: name.slice(0, 50),
+          // Longer names for better context
+          position: {
+            x: normalizeX(box.x),
+            y: normalizeY(box.y),
+            w: normalizeX(box.width),
+            h: normalizeY(box.height)
+          },
+          containerRole: container?.role?.value?.toLowerCase(),
+          containerName: container?.name?.value?.slice(0, 30),
+          depth: node.depth,
+          siblingCount,
+          semanticHint: semanticHint !== "unknown" ? semanticHint : void 0,
+          state: Object.keys(state).length > 0 ? state : void 0,
+          backendNodeId: node.backendDOMNodeId,
+          boundingBox: box,
+          contentPreview
+        });
+      }
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+    return elements;
+  }
+  /**
+   * Find the nearest container ancestor in the accessibility tree.
+   * Containers are elements like region, navigation, list, article, dialog.
+   */
+  findNearestContainer(tree, node) {
+    const containerRoles = [
+      "region",
+      "navigation",
+      "main",
+      "complementary",
+      "list",
+      "listbox",
+      "article",
+      "dialog",
+      "alertdialog",
+      "group",
+      "toolbar",
+      "menu",
+      "menubar",
+      "tablist"
+    ];
+    let current = node.parentId ? tree.nodeMap.get(node.parentId) : null;
+    while (current) {
+      const role = current.role?.value?.toLowerCase();
+      if (role && containerRoles.includes(role)) {
+        return current;
+      }
+      current = current.parentId ? tree.nodeMap.get(current.parentId) : null;
+    }
+    return null;
+  }
+  /**
+   * Count siblings within the same container.
+   * Helps LLM understand element clusters (e.g., "8 buttons in Stories").
+   */
+  countSiblings(tree, node, container) {
+    if (!container.childIds) return 0;
+    let count = 0;
+    const nodeRole = node.role?.value?.toLowerCase();
+    const countInContainer = (parentNode) => {
+      let total = 0;
+      if (!parentNode.childIds) return 0;
+      for (const childId of parentNode.childIds) {
+        const child = tree.nodeMap.get(childId);
+        if (!child) continue;
+        const childRole = child.role?.value?.toLowerCase();
+        if (childRole === nodeRole) {
+          total++;
+        }
+        const isContainer = ["region", "list", "article", "dialog", "group"].includes(childRole || "");
+        if (!isContainer) {
+          total += countInContainer(child);
+        }
+      }
+      return total;
+    };
+    count = countInContainer(container);
+    return count;
+  }
+  /**
+   * Detect only forbidden action hints (like, comment, share, save, follow).
+   * No position-based detection - let the LLM discover patterns from container context.
+   */
+  inferForbiddenActionHint(name) {
+    const nameLower = name.toLowerCase();
+    if (/^search$/i.test(nameLower)) {
+      return "search_input";
+    }
+    if (/^close$|^x$|dismiss/i.test(nameLower)) {
+      return "close_button";
+    }
+    if (/^like$/i.test(nameLower)) return "like_button";
+    if (/^comment$/i.test(nameLower)) return "comment_button";
+    if (/^share$/i.test(nameLower)) return "share_button";
+    if (/^save$/i.test(nameLower)) return "save_button";
+    if (/^follow$/i.test(nameLower)) return "follow_button";
+    return "unknown";
+  }
+  // =========================================================================
+  // Content Preview Extraction (for LLM value assessment)
+  // =========================================================================
+  /**
+   * Extract hashtags from text content.
+   * @param text - Text to search for hashtags
+   * @param max - Maximum hashtags to return
+   * @returns Array of hashtags (without # prefix)
+   */
+  extractHashtags(text, max2) {
+    if (!text) return [];
+    const matches = text.match(/#\w+/g) || [];
+    return matches.slice(0, max2).map((tag) => tag.substring(1));
+  }
+  /**
+   * Extract content preview from an article node and its descendants.
+   * Used to give NavigationLLM context about post value WITHOUT Vision API.
+   *
+   * @param tree - The accessibility tree
+   * @param articleNode - The article/container node to extract from
+   * @returns Content preview object or undefined if no content found
+   */
+  extractContentPreviewFromNode(tree, articleNode) {
+    let captionText;
+    let likes;
+    let comments;
+    let altText;
+    const collectFromDescendants = (node) => {
+      if (node.ignored) return;
+      const name = node.name?.value || "";
+      const role = node.role?.value?.toLowerCase() || "";
+      const description = node.description?.value;
+      if ((role === "image" || role === "img" || role === "figure") && description) {
+        if (!altText && description.length > 5) {
+          altText = description.slice(0, 50);
+        }
+      }
+      if (!likes && /^[\d,]+\s*likes?$/i.test(name)) {
+        likes = name;
+      }
+      if (!comments && (/view\s*(all\s*)?\d+\s*comments?/i.test(name) || /^\d+\s*comments?$/i.test(name))) {
+        comments = name;
+      }
+      if (!captionText && name.length >= 20) {
+        if (role !== "button" && role !== "link" && role !== "textbox") {
+          if (!/^(home|search|explore|reels|messages|notifications|create|profile)$/i.test(name)) {
+            if (name.includes("#") || name.includes("@")) {
+              captionText = name;
+            } else if (name.length > 50) {
+              captionText = name;
+            }
+          }
+        }
+      }
+      if (node.childIds) {
+        for (const childId of node.childIds) {
+          const child = tree.nodeMap.get(childId);
+          if (child) {
+            collectFromDescendants(child);
+          }
+        }
+      }
+    };
+    collectFromDescendants(articleNode);
+    if (!captionText && !likes && !comments && !altText) {
+      return void 0;
+    }
+    const hashtags = this.extractHashtags(captionText, 5);
+    return {
+      captionText: captionText?.slice(0, 100),
+      altText,
+      engagement: likes || comments ? { likes, comments } : void 0,
+      hasHashtags: hashtags.length > 0,
+      hashtags: hashtags.length > 0 ? hashtags : void 0
+    };
   }
 };
 
@@ -5725,236 +6012,6 @@ Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}
   }
 };
 
-// src/main/services/StrategicGaze.ts
-var StrategicGaze = class {
-  apiKey;
-  // Track last view to avoid redundant LLM calls
-  lastView = null;
-  lastIntent = null;
-  // Session-level randomization
-  sessionVariance;
-  // Track gaze planning calls for logging
-  gazePlanningCalls = 0;
-  constructor(apiKey) {
-    this.apiKey = apiKey;
-    this.sessionVariance = 0.8 + Math.random() * 0.4;
-  }
-  /**
-   * Randomized value within a range - NO fixed values allowed.
-   */
-  randomInRange(min2, max2) {
-    return min2 + Math.random() * (max2 - min2);
-  }
-  /**
-   * Check if we should plan a new gaze strategy.
-   * Only plan on view changes to minimize LLM calls.
-   */
-  shouldPlanGaze(currentView, intent) {
-    if (currentView === this.lastView && intent === this.lastIntent) {
-      return false;
-    }
-    if (currentView === "unknown" || currentView === "login") {
-      return false;
-    }
-    return true;
-  }
-  /**
-   * Plan gaze strategy using LLM.
-   *
-   * @param currentView - Current page view type
-   * @param spatialMap - Token-efficient representation of visible elements
-   * @param intent - What the user is trying to accomplish
-   * @returns GazeStrategy with gaze anchors and primary target, or null if skipped
-   */
-  async planGazeStrategy(currentView, spatialMap, intent) {
-    if (!this.shouldPlanGaze(currentView, intent)) {
-      return null;
-    }
-    this.lastView = currentView;
-    this.lastIntent = intent;
-    if (spatialMap.length === 0) {
-      return null;
-    }
-    try {
-      const strategy = await this.callGazePlanningLLM(currentView, spatialMap, intent);
-      this.gazePlanningCalls++;
-      console.log(`  \u{1F441}\uFE0F StrategicGaze call #${this.gazePlanningCalls} (est. cost: $${(this.gazePlanningCalls * 1e-3).toFixed(4)})`);
-      return strategy;
-    } catch (error) {
-      console.warn("StrategicGaze LLM call failed, using fallback:", error);
-      return this.fallbackGazeStrategy(spatialMap);
-    }
-  }
-  /**
-   * Call the LLM to generate gaze strategy.
-   */
-  async callGazePlanningLLM(currentView, spatialMap, intent) {
-    const systemPrompt = `You are a human attention simulator. Given a spatial map of UI elements, identify 1-2 "gaze anchors" (visually interesting elements a human would glance at) before looking at the primary target.
-
-Rules:
-1. Gaze anchors should be visually prominent elements (images, buttons, headings)
-2. Anchors should be on the path toward or near the target (not opposite corners)
-3. Return 1-2 anchors maximum
-4. Coordinates are normalized 0-1000 (will be converted to screen pixels)
-5. Prefer elements with meaningful labels over generic ones
-
-Return JSON only:
-{
-  "gazeAnchors": [{"x": number, "y": number}],
-  "primaryTarget": {"x": number, "y": number},
-  "confidence": number (0-1)
-}`;
-    const userPrompt = `View: ${currentView}
-Intent: ${intent}
-Elements (${spatialMap.length} total):
-${JSON.stringify(spatialMap.slice(0, 15), null, 0)}`;
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.apiKey}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        // Fast, cheap model for this task
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        response_format: { type: "json_object" },
-        max_tokens: 200,
-        temperature: 0.3
-        // Low temperature for consistent behavior
-      })
-    });
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`LLM API error: ${response.status} - ${errorText}`);
-    }
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error("Empty LLM response");
-    }
-    const parsed = JSON.parse(content);
-    const jitterAmount = this.randomInRange(20, 40);
-    return {
-      gazeAnchors: parsed.gazeAnchors.map((anchor) => ({
-        x: anchor.x + this.randomInRange(-jitterAmount, jitterAmount),
-        y: anchor.y + this.randomInRange(-jitterAmount, jitterAmount)
-      })),
-      primaryTarget: {
-        x: parsed.primaryTarget.x + this.randomInRange(-jitterAmount / 2, jitterAmount / 2),
-        y: parsed.primaryTarget.y + this.randomInRange(-jitterAmount / 2, jitterAmount / 2)
-      },
-      confidence: parsed.confidence
-    };
-  }
-  /**
-   * Fallback gaze strategy when LLM is unavailable.
-   * Uses deterministic selection based on element salience.
-   */
-  fallbackGazeStrategy(spatialMap) {
-    if (spatialMap.length === 0) {
-      return {
-        gazeAnchors: [],
-        primaryTarget: { x: 500, y: 500 },
-        // Center fallback
-        confidence: 0.1
-      };
-    }
-    const scored = spatialMap.map((node) => {
-      let score = 0;
-      const roleScores = {
-        image: 0.8,
-        img: 0.8,
-        figure: 0.75,
-        button: 0.6,
-        link: 0.5,
-        heading: 0.4
-      };
-      score += roleScores[node.role] || 0.2;
-      const distFromCenter = Math.hypot(node.x - 500, node.y - 500) / 707;
-      score += (1 - distFromCenter) * 0.3;
-      const size = node.w * node.h;
-      score += Math.min(size / 1e5, 0.2);
-      return { node, score };
-    });
-    scored.sort((a, b) => b.score - a.score);
-    const anchorCount = Math.random() > 0.5 ? 2 : 1;
-    const anchors = scored.slice(0, anchorCount).map((s) => ({
-      x: s.node.x + s.node.w / 2 + this.randomInRange(-30, 30),
-      y: s.node.y + s.node.h / 2 + this.randomInRange(-30, 30)
-    }));
-    const targetNode = scored[Math.min(anchorCount, scored.length - 1)]?.node || scored[0].node;
-    const primaryTarget = {
-      x: targetNode.x + targetNode.w / 2 + this.randomInRange(-20, 20),
-      y: targetNode.y + targetNode.h / 2 + this.randomInRange(-20, 20)
-    };
-    return {
-      gazeAnchors: anchors,
-      primaryTarget,
-      confidence: 0.5
-      // Lower confidence for fallback
-    };
-  }
-  /**
-   * Convert normalized coordinates (0-1000) to screen pixels.
-   *
-   * @param normalized - Point in 0-1000 coordinate space
-   * @param viewportWidth - Actual viewport width in pixels
-   * @param viewportHeight - Actual viewport height in pixels
-   */
-  denormalizePoint(normalized, viewportWidth, viewportHeight) {
-    return {
-      x: Math.round(normalized.x / 1e3 * viewportWidth * this.sessionVariance),
-      y: Math.round(normalized.y / 1e3 * viewportHeight * this.sessionVariance)
-    };
-  }
-  /**
-   * Convert entire gaze strategy to screen coordinates.
-   */
-  denormalizeStrategy(strategy, viewportWidth, viewportHeight) {
-    return {
-      gazeAnchors: strategy.gazeAnchors.map(
-        (p) => this.denormalizePoint(p, viewportWidth, viewportHeight)
-      ),
-      primaryTarget: this.denormalizePoint(
-        strategy.primaryTarget,
-        viewportWidth,
-        viewportHeight
-      ),
-      confidence: strategy.confidence
-    };
-  }
-  /**
-   * Map view and action to intent for gaze planning.
-   */
-  static inferIntent(view, action) {
-    if (action === "search") return "find_search";
-    if (action === "click_result") return "view_search_results";
-    switch (view) {
-      case "feed":
-        return "explore_feed";
-      case "profile":
-        return "browse_profile";
-      case "story":
-        return "watch_story";
-      case "explore":
-        return "general_browse";
-      default:
-        return "general_browse";
-    }
-  }
-  /**
-   * Reset view tracking (call when starting new session).
-   */
-  reset() {
-    this.lastView = null;
-    this.lastIntent = null;
-  }
-};
-
 // src/main/services/ScreenshotCollector.ts
 var import_crypto = require("crypto");
 var fs3 = __toESM(require("fs"), 1);
@@ -6034,7 +6091,7 @@ var ScreenshotCollector = class {
       console.log(`\u{1F4F8} Skipping duplicate post: ${postId}`);
       return false;
     }
-    const positionBucket = Math.round(scrollPosition / 300);
+    const positionBucket = Math.round(scrollPosition / 150);
     if (source !== "carousel" && source !== "story" && this.capturedPositions.has(positionBucket)) {
       console.log(`\u{1F4F8} Skipping duplicate position: bucket ${positionBucket} (scroll ~${scrollPosition}px)`);
       return false;
@@ -6100,6 +6157,95 @@ var ScreenshotCollector = class {
     }
   }
   /**
+   * Capture a specific element that the LLM focused on.
+   * Takes a cropped screenshot centered on the element for high-quality captures.
+   *
+   * @param elementBox - Bounding box of the focused element
+   * @param source - Where this content came from (feed, story, search, etc.)
+   * @param interest - For search results, which interest triggered this capture
+   * @param reason - Why the LLM decided to capture this (for logging)
+   * @returns The captured post, or null if capture failed/skipped
+   */
+  async captureFocusedElement(elementBox, source, interest, reason) {
+    if (this.captures.length >= this.config.maxCaptures) {
+      console.log(`\u{1F4F8} Max captures (${this.config.maxCaptures}) reached, skipping focused capture`);
+      return null;
+    }
+    let viewport = this.page.viewportSize();
+    if (!viewport) {
+      await new Promise((r) => setTimeout(r, 100));
+      viewport = this.page.viewportSize();
+    }
+    if (!viewport) {
+      console.log("\u{1F4F8} Viewport unavailable, using default dimensions (1080x1920)");
+      viewport = { width: 1080, height: 1920 };
+    }
+    try {
+      const padding = 30;
+      const captureRegion = {
+        x: Math.max(0, elementBox.x - padding),
+        y: Math.max(0, elementBox.y - padding),
+        width: Math.min(elementBox.width + padding * 2, viewport.width),
+        height: Math.min(elementBox.height + padding * 2, viewport.height)
+      };
+      if (captureRegion.x + captureRegion.width > viewport.width) {
+        captureRegion.width = viewport.width - captureRegion.x;
+      }
+      if (captureRegion.y + captureRegion.height > viewport.height) {
+        captureRegion.height = viewport.height - captureRegion.y;
+      }
+      captureRegion.width = Math.max(captureRegion.width, 100);
+      captureRegion.height = Math.max(captureRegion.height, 100);
+      console.log(`
+\u{1F4F8} === INTENTIONAL CAPTURE ===`);
+      console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
+      console.log(`   Reason: ${reason || "LLM focus"}`);
+      console.log(`   Crop: ${captureRegion.width}x${captureRegion.height}px`);
+      const screenshot = await this.page.screenshot({
+        type: "jpeg",
+        quality: this.config.jpegQuality,
+        clip: captureRegion
+      });
+      const hash = this.computeImageHash(screenshot);
+      if (this.capturedHashes.has(hash)) {
+        console.log(`   Status: Skipped (duplicate hash)`);
+        console.log(`==============================
+`);
+        return null;
+      }
+      this.capturedHashes.add(hash);
+      const postId = this.extractPostId();
+      if (postId) {
+        if (this.capturedPostIds.has(postId)) {
+          console.log(`   Status: Skipped (duplicate postId: ${postId})`);
+          console.log(`==============================
+`);
+          return null;
+        }
+        this.capturedPostIds.add(postId);
+      }
+      const captured = {
+        id: this.captures.length + 1,
+        screenshot,
+        source,
+        interest,
+        postId,
+        timestamp: Date.now(),
+        scrollPosition: elementBox.y
+        // Use element Y as position
+      };
+      this.captures.push(captured);
+      this.saveScreenshotToDisk(screenshot, source, captured.id);
+      console.log(`   Status: Captured #${captured.id} (${source}${interest ? `: ${interest}` : ""})`);
+      console.log(`==============================
+`);
+      return captured;
+    } catch (error) {
+      console.error("\u{1F4F8} Focused capture failed:", error);
+      return null;
+    }
+  }
+  /**
    * Get all captured screenshots for batch processing.
    */
   getCaptures() {
@@ -6162,16 +6308,39 @@ var ScreenshotCollector = class {
    */
   async captureVideoFrames(source, watchDurationMs = 12e3, frameIntervalMs = 2500) {
     const videoId = this.extractPostId() || `video_${Date.now()}`;
-    const frameCount = Math.floor(watchDurationMs / frameIntervalMs);
+    const maxFrames = Math.floor(watchDurationMs / frameIntervalMs);
     let capturedFrames = 0;
-    console.log(`\u{1F3AC} Starting video frame capture: ${frameCount} frames over ${(watchDurationMs / 1e3).toFixed(1)}s`);
-    for (let i = 0; i < frameCount; i++) {
+    let lastCapturedTime = -1;
+    const startTime = Date.now();
+    console.log(`\u{1F3AC} Starting video frame capture: up to ${maxFrames} frames over ${(watchDurationMs / 1e3).toFixed(1)}s`);
+    while (Date.now() - startTime < watchDurationMs) {
       if (this.captures.length >= this.config.maxCaptures) {
         console.log(`\u{1F4F8} Max captures reached, stopping video frames`);
         break;
       }
-      if (i > 0) {
-        await this.delay(frameIntervalMs);
+      if (capturedFrames >= maxFrames) {
+        break;
+      }
+      const videoState = await this.getVideoState();
+      if (!videoState?.found) {
+        console.log(`\u{1F3AC} No video found, waiting...`);
+        await this.delay(500);
+        continue;
+      }
+      if (videoState.paused) {
+        console.log(`\u{1F3AC} Video paused, waiting...`);
+        await this.delay(500);
+        continue;
+      }
+      if (videoState.buffering) {
+        console.log(`\u{1F3AC} Video buffering, waiting...`);
+        await this.delay(300);
+        continue;
+      }
+      const minTimeAdvance = 2;
+      if (lastCapturedTime >= 0 && videoState.currentTime - lastCapturedTime < minTimeAdvance) {
+        await this.delay(200);
+        continue;
       }
       try {
         const screenshot = await this.page.screenshot({
@@ -6181,7 +6350,9 @@ var ScreenshotCollector = class {
         });
         const hash = this.computeImageHash(screenshot);
         if (this.capturedHashes.has(hash)) {
-          console.log(`\u{1F3AC} Frame ${i + 1}: duplicate, skipping`);
+          console.log(`\u{1F3AC} Frame at ${videoState.currentTime.toFixed(1)}s: duplicate, skipping`);
+          lastCapturedTime = videoState.currentTime;
+          await this.delay(frameIntervalMs);
           continue;
         }
         this.capturedHashes.add(hash);
@@ -6192,23 +6363,31 @@ var ScreenshotCollector = class {
           postId: this.extractPostId(),
           timestamp: Date.now(),
           scrollPosition: 0,
-          // Video frames don't need scroll tracking
           isVideoFrame: true,
           videoId,
           frameIndex: capturedFrames + 1,
-          totalFrames: frameCount
-          // Will be updated at end
+          totalFrames: maxFrames
         });
         this.saveScreenshotToDisk(screenshot, source, this.captures.length);
         capturedFrames++;
-        console.log(`\u{1F3AC} Frame ${capturedFrames} captured`);
+        lastCapturedTime = videoState.currentTime;
+        console.log(`\u{1F3AC} Frame ${capturedFrames} captured at ${videoState.currentTime.toFixed(1)}s`);
+        await this.delay(frameIntervalMs);
       } catch (error) {
         console.error(`\u{1F3AC} Frame capture failed:`, error);
+        await this.delay(500);
       }
     }
     this.captures.filter((c) => c.videoId === videoId).forEach((c) => c.totalFrames = capturedFrames);
     console.log(`\u{1F3AC} Video complete: ${capturedFrames} unique frames captured`);
     return capturedFrames;
+  }
+  /**
+   * Get the current count of captured photos/screenshots.
+   * Used by LLM to track capture progress.
+   */
+  getPhotoCount() {
+    return this.captures.length;
   }
   /**
    * Simple delay helper for video frame timing.
@@ -6250,6 +6429,35 @@ var ScreenshotCollector = class {
     }
   }
   /**
+   * Get video element state via CDP for synced frame capture.
+   * Returns null if no video found on page.
+   */
+  async getVideoState() {
+    try {
+      const client = await this.page.context().newCDPSession(this.page);
+      const result = await client.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        const v = document.querySelector('video');
+                        if (!v) return JSON.stringify({ found: false });
+                        return JSON.stringify({
+                            found: true,
+                            paused: v.paused,
+                            currentTime: v.currentTime,
+                            buffering: v.readyState < 3,
+                            duration: v.duration || 0
+                        });
+                    })()
+                `,
+        returnByValue: true
+      });
+      await client.detach();
+      return JSON.parse(result.result.value);
+    } catch {
+      return null;
+    }
+  }
+  /**
    * Log summary of captured content.
    */
   logSummary() {
@@ -6264,11 +6472,2243 @@ var ScreenshotCollector = class {
   }
 };
 
+// src/main/services/ContentReadiness.ts
+var DEFAULT_CONFIG2 = {
+  imageLoadTimeoutMs: 3e3,
+  networkIdleTimeoutMs: 2e3,
+  pollIntervalMs: 100
+};
+var ContentReadiness = class {
+  page;
+  config;
+  // CDP session management (following A11yNavigator pattern)
+  managedSession = null;
+  sessionLastUsed = 0;
+  SESSION_TIMEOUT_MS = 5e3;
+  constructor(page, config = {}) {
+    this.page = page;
+    this.config = { ...DEFAULT_CONFIG2, ...config };
+  }
+  // =========================================================================
+  // CDP Session Management
+  // =========================================================================
+  async withSession(operation) {
+    const now = Date.now();
+    if (this.managedSession && now - this.sessionLastUsed > this.SESSION_TIMEOUT_MS) {
+      await this.releaseSession();
+    }
+    if (!this.managedSession) {
+      this.managedSession = await this.page.context().newCDPSession(this.page);
+    }
+    this.sessionLastUsed = now;
+    try {
+      return await operation(this.managedSession);
+    } catch (error) {
+      await this.releaseSession();
+      throw error;
+    }
+  }
+  async releaseSession() {
+    if (this.managedSession) {
+      await this.managedSession.detach().catch(() => {
+      });
+      this.managedSession = null;
+    }
+  }
+  // =========================================================================
+  // Core Readiness Checks
+  // =========================================================================
+  /**
+   * Wait for images in the current viewport to be loaded.
+   * Uses CDP Runtime.evaluate to check img.complete status.
+   *
+   * @param timeoutMs - Maximum wait time (default: 3000ms)
+   * @returns ReadinessResult with status and timing info
+   */
+  async waitForImagesLoaded(timeoutMs) {
+    const timeout = timeoutMs ?? this.config.imageLoadTimeoutMs;
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+      const imagesReady = await this.checkImagesLoaded();
+      if (imagesReady.allLoaded) {
+        return {
+          ready: true,
+          waitedMs: Date.now() - startTime,
+          details: `${imagesReady.loadedCount}/${imagesReady.totalCount} images loaded`
+        };
+      }
+      await new Promise((r) => setTimeout(r, this.config.pollIntervalMs));
+    }
+    const finalState = await this.checkImagesLoaded();
+    return {
+      ready: false,
+      reason: "images_loading",
+      waitedMs: Date.now() - startTime,
+      details: `${finalState.loadedCount}/${finalState.totalCount} images loaded (timeout)`
+    };
+  }
+  /**
+   * Check if all images in viewport are loaded (single check, no wait).
+   */
+  async checkImagesLoaded() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        const viewportHeight = window.innerHeight;
+                        const images = Array.from(document.images);
+
+                        // Only check images in viewport (visible)
+                        const visibleImages = images.filter(img => {
+                            const rect = img.getBoundingClientRect();
+                            return rect.top < viewportHeight && rect.bottom > 0 && rect.width > 0;
+                        });
+
+                        const loadedImages = visibleImages.filter(img =>
+                            img.complete && img.naturalHeight > 0
+                        );
+
+                        return JSON.stringify({
+                            allLoaded: loadedImages.length === visibleImages.length,
+                            totalCount: visibleImages.length,
+                            loadedCount: loadedImages.length
+                        });
+                    })()
+                `,
+        returnByValue: true
+      });
+      try {
+        return JSON.parse(result.value);
+      } catch {
+        return { allLoaded: true, totalCount: 0, loadedCount: 0 };
+      }
+    });
+  }
+  /**
+   * Wait for CSS transitions and animations to complete.
+   * Checks for running animations in the viewport.
+   *
+   * @param timeoutMs - Maximum wait time (default: 1500ms)
+   */
+  async waitForTransitionsComplete(timeoutMs = 1500) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      const animating = await this.hasActiveAnimations();
+      if (!animating) {
+        return {
+          ready: true,
+          waitedMs: Date.now() - startTime
+        };
+      }
+      await new Promise((r) => setTimeout(r, this.config.pollIntervalMs));
+    }
+    return {
+      ready: false,
+      reason: "timeout",
+      waitedMs: Date.now() - startTime,
+      details: "Animations still running"
+    };
+  }
+  /**
+   * Check if there are active CSS animations/transitions.
+   */
+  async hasActiveAnimations() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        // Check for running animations via getAnimations API
+                        const animations = document.getAnimations ? document.getAnimations() : [];
+                        const runningAnimations = animations.filter(a =>
+                            a.playState === 'running' || a.playState === 'pending'
+                        );
+                        return runningAnimations.length > 0;
+                    })()
+                `,
+        returnByValue: true
+      });
+      return result.value === true;
+    });
+  }
+  /**
+   * Combined readiness check: overlays + images + transitions.
+   * This is the main method to call before taking a screenshot.
+   *
+   * @param timeoutMs - Maximum total wait time (default: 3000ms)
+   * @param dismissOverlays - Whether to dismiss blocking overlays (default: true)
+   * @returns ReadinessResult
+   */
+  async waitForContentReady(timeoutMs = 3e3, dismissOverlays = true) {
+    const startTime = Date.now();
+    const remainingTime = () => Math.max(0, timeoutMs - (Date.now() - startTime));
+    if (dismissOverlays) {
+      const viewportClear = await this.ensureViewportClear(2);
+      if (!viewportClear) {
+        return {
+          ready: false,
+          reason: "unknown",
+          waitedMs: Date.now() - startTime,
+          details: "Blocking overlay could not be dismissed"
+        };
+      }
+    }
+    const imageResult = await this.waitForImagesLoaded(Math.min(remainingTime(), 2500));
+    if (!imageResult.ready && remainingTime() <= 0) {
+      return {
+        ready: false,
+        reason: "images_loading",
+        waitedMs: Date.now() - startTime,
+        details: imageResult.details
+      };
+    }
+    if (remainingTime() > 200) {
+      const transitionResult = await this.waitForTransitionsComplete(Math.min(remainingTime(), 1e3));
+      if (!transitionResult.ready) {
+        console.log(`  \u23F3 Transitions still running, proceeding anyway`);
+      }
+    }
+    return {
+      ready: true,
+      waitedMs: Date.now() - startTime,
+      details: imageResult.details
+    };
+  }
+  /**
+   * Get element position by backend node ID.
+   * Used for position re-verification before capture.
+   *
+   * @param backendNodeId - CDP backend node ID
+   * @returns Bounding box or null if element not found
+   */
+  async getElementPosition(backendNodeId) {
+    return this.withSession(async (session2) => {
+      try {
+        const { model } = await session2.send("DOM.getBoxModel", {
+          backendNodeId
+        });
+        if (!model || !model.content) {
+          return null;
+        }
+        const [x1, y1, x2, , , y3] = model.content;
+        const width = x2 - x1;
+        const height = y3 - y1;
+        return {
+          x: x1,
+          y: y1,
+          width,
+          height,
+          centerY: y1 + height / 2
+        };
+      } catch {
+        return null;
+      }
+    });
+  }
+  /**
+   * Get current viewport center Y coordinate.
+   */
+  async getViewportCenterY() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: "window.innerHeight / 2",
+        returnByValue: true
+      });
+      return result.value;
+    });
+  }
+  /**
+   * Check if an element has drifted from expected center position.
+   *
+   * @param backendNodeId - CDP backend node ID
+   * @param tolerance - Acceptable drift in pixels (default: 50)
+   * @returns Drift info or null if element not found
+   */
+  async checkElementDrift(backendNodeId, tolerance = 50) {
+    const position = await this.getElementPosition(backendNodeId);
+    if (!position) return null;
+    const viewportCenterY = await this.getViewportCenterY();
+    const drift = Math.abs(position.centerY - viewportCenterY);
+    return {
+      drifted: drift > tolerance,
+      drift,
+      elementCenterY: position.centerY,
+      viewportCenterY
+    };
+  }
+  /**
+   * Check video element state for synced frame capture.
+   *
+   * @returns Video state or null if no video found
+   */
+  async getVideoState() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        const v = document.querySelector('video');
+                        if (!v) return JSON.stringify({ found: false });
+                        return JSON.stringify({
+                            found: true,
+                            paused: v.paused,
+                            currentTime: v.currentTime,
+                            buffering: v.readyState < 3,
+                            duration: v.duration || 0
+                        });
+                    })()
+                `,
+        returnByValue: true
+      });
+      try {
+        return JSON.parse(result.value);
+      } catch {
+        return null;
+      }
+    });
+  }
+  /**
+   * Detect if any overlay panels are blocking the main content.
+   * Looks for common Instagram overlays: Notifications, Messages, Search, etc.
+   *
+   * @returns Overlay info or null if no overlay detected
+   */
+  async detectBlockingOverlay() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        // Look for common overlay patterns
+                        const overlayPatterns = [
+                            { type: 'notifications', heading: 'Notifications' },
+                            { type: 'messages', heading: 'Messages' },
+                            { type: 'search', heading: 'Search' }
+                        ];
+
+                        // Check for overlay headings
+                        for (const pattern of overlayPatterns) {
+                            // Look for heading elements with exact text
+                            const headings = document.querySelectorAll('h1, h2, [role="heading"]');
+                            for (const h of headings) {
+                                if (h.textContent?.trim() === pattern.heading) {
+                                    // Found overlay - look for close button (X) nearby
+                                    // Close button is typically a sibling or nearby element
+                                    const container = h.closest('div[role="dialog"], div[style*="position"]') || h.parentElement?.parentElement;
+
+                                    if (container) {
+                                        // Look for close button by aria-label or SVG with specific path
+                                        const closeBtn = container.querySelector('[aria-label="Close"], [aria-label*="close"], button svg');
+
+                                        if (closeBtn) {
+                                            const rect = closeBtn.getBoundingClientRect();
+                                            return JSON.stringify({
+                                                found: true,
+                                                type: pattern.type,
+                                                closeButton: {
+                                                    x: rect.x + rect.width / 2,
+                                                    y: rect.y + rect.height / 2,
+                                                    width: rect.width,
+                                                    height: rect.height
+                                                }
+                                            });
+                                        }
+                                    }
+
+                                    // Overlay found but no close button
+                                    return JSON.stringify({ found: true, type: pattern.type });
+                                }
+                            }
+                        }
+
+                        // Check for generic dialog/modal overlays
+                        const dialogs = document.querySelectorAll('[role="dialog"], [aria-modal="true"]');
+                        for (const dialog of dialogs) {
+                            const rect = dialog.getBoundingClientRect();
+                            // Only consider it blocking if it covers significant viewport area
+                            if (rect.width > window.innerWidth * 0.3 || rect.height > window.innerHeight * 0.3) {
+                                const closeBtn = dialog.querySelector('[aria-label="Close"], [aria-label*="close"]');
+                                if (closeBtn) {
+                                    const btnRect = closeBtn.getBoundingClientRect();
+                                    return JSON.stringify({
+                                        found: true,
+                                        type: 'dialog',
+                                        closeButton: {
+                                            x: btnRect.x + btnRect.width / 2,
+                                            y: btnRect.y + btnRect.height / 2,
+                                            width: btnRect.width,
+                                            height: btnRect.height
+                                        }
+                                    });
+                                }
+                                return JSON.stringify({ found: true, type: 'dialog' });
+                            }
+                        }
+
+                        // No blocking overlay found
+                        return JSON.stringify({ found: false, type: 'unknown' });
+                    })()
+                `,
+        returnByValue: true
+      });
+      try {
+        return JSON.parse(result.value);
+      } catch {
+        return null;
+      }
+    });
+  }
+  /**
+   * Dismiss any blocking overlay by clicking its close button.
+   * Uses keyboard shortcut (Escape) as fallback.
+   *
+   * @returns true if overlay was dismissed, false if none found or dismissal failed
+   */
+  async dismissOverlay() {
+    const overlay = await this.detectBlockingOverlay();
+    if (!overlay?.found) {
+      return false;
+    }
+    console.log(`  \u{1F533} Detected blocking overlay: ${overlay.type}`);
+    if (overlay.closeButton) {
+      try {
+        await this.withSession(async (session2) => {
+          await session2.send("Input.dispatchMouseEvent", {
+            type: "mousePressed",
+            x: overlay.closeButton.x,
+            y: overlay.closeButton.y,
+            button: "left",
+            clickCount: 1
+          });
+          await session2.send("Input.dispatchMouseEvent", {
+            type: "mouseReleased",
+            x: overlay.closeButton.x,
+            y: overlay.closeButton.y,
+            button: "left",
+            clickCount: 1
+          });
+        });
+        await new Promise((r) => setTimeout(r, 300));
+        const stillOpen = await this.detectBlockingOverlay();
+        if (!stillOpen?.found) {
+          console.log(`  \u2713 Dismissed ${overlay.type} overlay via close button`);
+          return true;
+        }
+      } catch (error) {
+        console.log(`  \u26A0\uFE0F Failed to click close button: ${error}`);
+      }
+    }
+    try {
+      await this.withSession(async (session2) => {
+        await session2.send("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: "Escape",
+          code: "Escape",
+          windowsVirtualKeyCode: 27,
+          nativeVirtualKeyCode: 27
+        });
+        await session2.send("Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key: "Escape",
+          code: "Escape",
+          windowsVirtualKeyCode: 27,
+          nativeVirtualKeyCode: 27
+        });
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      const stillOpen = await this.detectBlockingOverlay();
+      if (!stillOpen?.found) {
+        console.log(`  \u2713 Dismissed ${overlay.type} overlay via Escape key`);
+        return true;
+      }
+    } catch (error) {
+      console.log(`  \u26A0\uFE0F Failed to press Escape: ${error}`);
+    }
+    console.log(`  \u26A0\uFE0F Could not dismiss ${overlay.type} overlay`);
+    return false;
+  }
+  /**
+   * Ensure viewport is clear for capture by dismissing any blocking overlays.
+   * This should be called before any screenshot capture.
+   *
+   * @param maxAttempts - Maximum dismissal attempts (default: 3)
+   * @returns true if viewport is clear, false if overlays persist
+   */
+  async ensureViewportClear(maxAttempts = 3) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const overlay = await this.detectBlockingOverlay();
+      if (!overlay?.found) {
+        return true;
+      }
+      const dismissed = await this.dismissOverlay();
+      if (!dismissed) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    const finalCheck = await this.detectBlockingOverlay();
+    return !finalCheck?.found;
+  }
+  /**
+   * Release managed CDP session.
+   * Call this when done with the service.
+   */
+  async cleanup() {
+    await this.releaseSession();
+  }
+};
+
 // src/main/services/InstagramScraper.ts
 var fs4 = __toESM(require("fs"), 1);
 var path4 = __toESM(require("path"), 1);
 var os = __toESM(require("os"), 1);
 var import_crypto2 = require("crypto");
+
+// src/main/services/NavigationLLM.ts
+var DEFAULT_CONFIG3 = {
+  model: "gpt-4o-mini",
+  maxTokens: 400,
+  // Increased for richer context
+  temperature: 0.3
+};
+var NavigationLLM = class {
+  apiKey;
+  model;
+  maxTokens;
+  temperature;
+  debug;
+  // Track calls for cost logging
+  decisionCount = 0;
+  // Session-level randomization for gaze jitter
+  sessionJitter;
+  constructor(config) {
+    this.apiKey = config.apiKey;
+    this.model = config.model || DEFAULT_CONFIG3.model;
+    this.maxTokens = config.maxTokens || DEFAULT_CONFIG3.maxTokens;
+    this.temperature = config.temperature || DEFAULT_CONFIG3.temperature;
+    this.debug = config.debug ?? true;
+    this.sessionJitter = 0.85 + Math.random() * 0.3;
+  }
+  /**
+   * Get the system prompt for navigation decisions.
+   */
+  getSystemPrompt() {
+    return `You are a FULLY AUTONOMOUS navigation agent for an Instagram browser session. You have COMPLETE STRATEGIC CONTROL over the session - you decide what to do, when to switch activities, and when to end.
+
+YOU CONTROL:
+1. TACTICAL: What action to take next (click, scroll, type, press, wait)
+2. STRATEGIC: When to switch phases, when to capture, when to terminate
+
+UNDERSTANDING THE ACCESSIBILITY TREE:
+Elements are grouped by their container from the accessibility tree:
+- "Stories" region near top = story circles to watch
+- "article" container = parts of a post (images, text, buttons)
+- "navigation" container = nav links (Home, Explore, Messages, etc.)
+- "dialog" container = modal/popup content
+
+PATTERN RECOGNITION:
+- Multiple small buttons with usernames = carousel (stories, suggestions)
+- Buttons inside "article" containers = post interaction buttons
+- textbox inside "dialog" = input field in modal/popup
+- Use siblingCount to understand clusters
+
+DYNAMIC PAGE AWARENESS (infer from tree context):
+YOU must infer where you are from the accessibility tree. Look at:
+1. TREE CONTEXT section - shows containers, inputs, and their parent chains
+2. Container names reveal your location:
+   \u2022 "Direct Messages", "Inbox", "Chat" \u2192 You're in messaging!
+   \u2022 "Stories", "Story" \u2192 You're viewing stories
+   \u2022 "Search", "Explore" \u2192 You're in search/explore
+   \u2022 "Posts", "Followers", "Following" \u2192 You're on a profile
+   \u2022 Multiple "article" containers \u2192 You're in the feed
+
+INPUT FIELD SAFETY (critical!):
+Before typing, ALWAYS check the input's parent containers:
+- If parents include "message", "direct", "inbox", "chat" \u2192 DO NOT TYPE (sends DMs!)
+- If parents include "comment", "reply" \u2192 DO NOT TYPE (posts comments!)
+- If parents include "Search" in navigation context \u2192 Safe to type search queries
+
+EXAMPLE REASONING:
+"I see textbox 'Search' with parents [Message thread \u2192 Direct Messages].
+This is a search within messaging, NOT the main search bar.
+Typing here could send a message. I'll press Escape to exit first."
+
+CONTENT ASSESSMENT (from accessibility tree):
+Elements may include contentPreview data extracted directly from the page:
+- Caption: Post caption text (first 100 chars) - USE THIS to match content
+- Engagement: Like counts, comment counts - higher = more interesting
+- Tags: Extracted hashtags - MATCH THESE to user interests
+- Alt: Image description/alt text
+
+USE CONTENT TO MAKE SMART DECISIONS:
+\u2705 Caption/hashtags match user interests \u2192 engage deeply, capture
+\u2705 High engagement (thousands of likes) + relevant \u2192 priority capture
+\u2705 Hashtags like #photography when user likes photography \u2192 explore
+\u274C No relevance to user interests \u2192 scroll past quickly
+\u274C Sponsored/ad content \u2192 skip immediately
+\u274C Generic content with low engagement \u2192 don't capture
+
+EXAMPLE: User interests: ["coffee", "travel", "photography"]
+- Post with Caption: "Morning espresso \u2615 #coffee #barista" \u2192 HIGH RELEVANCE, capture!
+- Post with Caption: "New workout routine \u{1F4AA} #fitness" \u2192 LOW RELEVANCE, scroll past
+- Post with Tags: #travel, #wanderlust \u2192 MATCHES, engage deeper
+
+AVAILABLE TACTICAL ACTIONS:
+- click(id): Click element by ID
+- hover(id): Hover over element (reveals hidden menus, tooltips, preview content)
+- scroll(direction, amount): direction='up'|'down'|'left'|'right', amount='small'|'medium'|'large'
+- type(text): Type text into focused input
+- press(key): Press any key - Escape, Enter, Backspace, Delete, Space, ArrowRight, ArrowLeft, ArrowUp, ArrowDown, Tab, Home, End, PageUp, PageDown
+- clear(): Clear the currently focused input field (select all + delete)
+- back(): Go back to the previous page (browser back button)
+- wait(seconds): Wait 1-5 seconds
+
+USE CASES:
+- hover: Reveal hidden UI, preview content, trigger dropdowns, see tooltips
+- back: Return to feed after visiting a profile, exit search results page
+- clear: Clear search input to type a new search term (instead of manual backspacing)
+- scroll(left/right): Scroll stories carousel, navigate horizontal content
+- press(Backspace): Delete last character in input
+- press(Space): Play/pause video
+- press(Home/End): Jump to top/bottom of page
+
+STRATEGIC DECISIONS (YOU CONTROL THESE):
+Include a "strategic" field to make session-level decisions:
+
+1. PHASE SWITCHING - You decide when to change activities:
+   - "switchPhase": "search" \u2192 go search for user interests
+   - "switchPhase": "stories" \u2192 go watch stories
+   - "switchPhase": "feed" \u2192 go browse the feed
+   - Leave null to stay in current phase
+
+2. SESSION TERMINATION - You decide when you're done:
+   - "terminateSession": true \u2192 end the session (content exhausted, time's up, goal achieved)
+
+3. CAPTURE CONTROL - You decide what's worth screenshotting:
+   - "captureNow": true \u2192 take a screenshot of current view
+
+4. PACING CONTROL - You decide how long to linger:
+   - "lingerDuration": "short" (1s) | "medium" (3s) | "long" (6s)
+   - Use "long" for interesting content, "short" for navigation
+
+WHEN TO SWITCH PHASES:
+- Switch to "search" when: you have unsearched interests AND time permits
+- Switch to "stories" when: you see story circles AND haven't watched many stories
+- Switch to "feed" when: search/stories are done OR you want to explore organic content
+- DON'T switch constantly - spend quality time in each phase
+
+WHEN TO TERMINATE:
+- \u2705 Time is almost up (< 30 seconds remaining)
+- \u2705 Content is exhausted (seeing lots of duplicates)
+- \u2705 Collected enough content (good variety of captures)
+- \u2705 Stuck and can't recover
+
+WHEN TO CAPTURE:
+- \u2705 Interesting post visible that matches user interests
+- \u2705 Story content visible (before advancing)
+- \u2705 Search results showing relevant content
+- \u274C Don't capture: navigation screens, loading states, empty feeds
+
+VIDEO HANDLING:
+When you see a video playing (videoState in context):
+- Decide how long to watch based on content type
+- Use lingerDuration: "long" for interesting videos, "short" for ads
+- Capture multiple frames by staying on video (system auto-captures)
+
+ALWAYS SKIP ADS:
+- If you detect sponsored content ("Sponsored", "Paid partnership", "Shop now", "Learn more")
+- Scroll past ads quickly - use lingerDuration: "short" and scroll
+- Don't capture ads
+
+FORBIDDEN ACTIONS:
+- NEVER click: like_button, comment_button, share_button, save_button, follow_button
+- Read-only browsing only
+
+DEEP ENGAGEMENT:
+You can engage deeply with posts to understand them better. This is OPTIONAL but encouraged for interesting content.
+
+ENGAGEMENT LEVELS:
+1. FEED LEVEL (default): Scrolling through posts in main feed
+2. POST MODAL LEVEL: Clicked on a post, viewing full content with comments visible
+3. COMMENTS LEVEL: Scrolled down in modal to read more comments
+4. PROFILE LEVEL: Clicked on username to explore their content
+
+HOW TO ENGAGE DEEPLY:
+1. Click on a post image/video to open the post modal (detail view)
+2. In the modal, you can:
+   - Navigate carousel slides using ArrowRight/ArrowLeft keys
+   - Scroll down to see comments
+   - Click username to visit their profile
+3. Close modal by pressing Escape key
+
+WHEN TO ENGAGE DEEPLY (signals):
+\u2705 High engagement visible (many likes/comments like "1,234 likes", "View all 42 comments")
+\u2705 Content relevant to user interests (keywords in caption/username match)
+\u2705 Carousel post detected (slide indicators like "1 of 4")
+\u2705 Interesting caption snippet visible
+\u2705 Good visual content (nature, photography, etc.)
+\u274C Already explored this post (check deeplyExploredPosts count)
+\u274C Low engagement / not relevant
+\u274C Ad or sponsored content
+\u274C Time pressure (need to cover more ground)
+
+ENGAGEMENT DEPTH LEVELS:
+- QUICK LOOK: Open modal, view main image/video, close (10-15s total)
+- MODERATE: Open, navigate all carousel slides, skim comments (30-60s)
+- DEEP DIVE: Full carousel, read comments thoroughly, maybe visit profile (60-120s)
+
+Include engagement decisions in your strategic field:
+- "engageDepth": "quick" | "moderate" | "deep" | null
+- "closeEngagement": true  // Signal to exit current modal and return to feed
+
+CAROUSEL NAVIGATION IN MODAL:
+- Use press(ArrowRight) to go to next slide
+- Use press(ArrowLeft) to go to previous slide
+- The engagementState.carouselState tells you current position (e.g., "Slide 2/5")
+- Capture each interesting slide before moving on
+
+DIFFERENTIATING OVERLAYS FROM NORMAL CONTENT:
+
+Not everything with avatars is an overlay! Read the structural differences:
+
+STORIES ROW (NOT an overlay - this is normal feed content):
+- Buttons at TOP of screen (Y position < 200)
+- SHORT names - just usernames or "[name]'s story"
+- Part of the main feed, don't close it
+- Example: id:5 button "johndoe's story" Y=80
+
+MESSAGES PANEL (IS an overlay - close it before doing anything else):
+- Buttons with LONG names (>50 chars) that include message preview text
+- Names like "User avatar [name] [message preview snippet]..."
+- Usually in a sidebar position or list container
+- Has "Close", "Expand", "New message" buttons nearby
+- Example: id:19 button "User avatar neel And 2) motherfuckers be taking yo" Y=507
+- Action: Press Escape to close, THEN proceed with your goal
+
+SEARCH RESULTS (IS a dropdown - CLICK one to navigate):
+- LINKS (role=link, NOT buttons!)
+- Names include follower counts, "Verified", profile descriptions
+- Pattern: "username Info \u2022 297K followers"
+- Appear AFTER you typed something (check RECENT ACTIONS)
+- Example: id:26 link "umichathletics Michigan Athletics \u2022 297K followers" Y=466
+- Action: CLICK the most relevant link to navigate to that profile
+
+HOW TO REASON:
+1. Check the ROLE: link vs button
+2. Check the POSITION: top (stories) vs middle (dropdown) vs sidebar (messages)
+3. Check the NAME LENGTH: short (stories) vs long with preview text (messages)
+4. Check RECENT ACTIONS: did you just type? \u2192 links are probably search results
+5. Check for CLOSE/EXPAND buttons nearby \u2192 something is open as overlay
+
+EXAMPLE REASONING:
+"I see buttons with 'User avatar' prefix and very long names including
+message text like '...And 2) motherfuckers be taking yo'. These are message
+thread previews, not stories. Stories would have short names at the top
+of the screen. I should press Escape to close this messages panel."
+
+EXAMPLE REASONING 2:
+"I see links like 'umichathletics Michigan Athletics \u2022 297K followers'.
+These are LINKS (not buttons) with follower counts. I just typed 'michigan
+athletics' in my recent actions. These are my search results!
+I should click one to navigate to that profile."
+
+SEARCH WORKFLOW (complete the flow!):
+1. Type search term \u2713
+2. Look for LINKS appearing (not buttons!) with profile info and follower counts
+3. CLICK a relevant link \u2192 This navigates to that profile
+4. THEN browse that profile's content and capture screenshots
+
+COMMON SEARCH FAILURE:
+Typing \u2192 seeing result links \u2192 scrolling away or typing again
+WHY: You never clicked a result, so you never navigated anywhere!
+FIX: After typing, look for links with follower counts and CLICK one.
+
+OUTPUT FORMAT (JSON only):
+{
+  "reasoning": "Explain your decision",
+  "action": "click|hover|scroll|type|press|clear|back|wait",
+  "params": { ... },
+  "expectedOutcome": "What should happen",
+  "confidence": 0.0-1.0,
+  "capture": {
+    "shouldCapture": true,
+    "targetId": <element ID>,
+    "reason": "Why this is worth capturing"
+  },
+  "strategic": {
+    "switchPhase": "search"|"stories"|"feed"|null,
+    "terminateSession": false,
+    "captureNow": true,
+    "lingerDuration": "short"|"medium"|"long",
+    "engageDepth": "quick"|"moderate"|"deep"|null,
+    "closeEngagement": false,
+    "reason": "Strategic reasoning"
+  }
+}
+
+STRATEGIC DECISION EXAMPLES:
+
+1. Starting a session, want to search first:
+{
+  "reasoning": "Session just started, will search for user interests first",
+  "action": "click",
+  "params": {"id": 3},
+  "expectedOutcome": "Search panel opens",
+  "strategic": {
+    "switchPhase": "search",
+    "lingerDuration": "short",
+    "reason": "Beginning with search phase to find targeted content"
+  }
+}
+
+2. Found good content, want to capture and linger:
+{
+  "reasoning": "Found a beautiful nature photo matching user interests",
+  "action": "scroll",
+  "params": {"direction": "down", "amount": "small"},
+  "expectedOutcome": "Center the post in view",
+  "strategic": {
+    "captureNow": true,
+    "lingerDuration": "long",
+    "reason": "High-quality content worth studying"
+  }
+}
+
+3. Content exhausted, switching phases:
+{
+  "reasoning": "Seeing repeated posts, time to watch stories",
+  "action": "scroll",
+  "params": {"direction": "up", "amount": "large"},
+  "expectedOutcome": "Return to top to find stories",
+  "strategic": {
+    "switchPhase": "stories",
+    "reason": "Feed content exhausted, trying stories"
+  }
+}
+
+4. Session complete:
+{
+  "reasoning": "Collected 15 posts, watched 5 stories, time running low",
+  "action": "wait",
+  "params": {"seconds": 1},
+  "expectedOutcome": "Session ends",
+  "strategic": {
+    "terminateSession": true,
+    "reason": "Session goals achieved, time nearly up"
+  }
+}
+
+5. Engaging deeply with an interesting post:
+{
+  "reasoning": "Post has 5,234 likes and is a carousel with 4 slides - worth exploring",
+  "action": "click",
+  "params": {"id": 12},
+  "expectedOutcome": "Post modal opens for detailed view",
+  "strategic": {
+    "engageDepth": "moderate",
+    "lingerDuration": "medium",
+    "reason": "High engagement carousel, will navigate all slides"
+  }
+}
+
+6. Navigating carousel in post modal:
+{
+  "reasoning": "On slide 2/4, interesting content continues",
+  "action": "press",
+  "params": {"key": "ArrowRight"},
+  "expectedOutcome": "Move to slide 3",
+  "strategic": {
+    "captureNow": true,
+    "lingerDuration": "short",
+    "reason": "Capturing each carousel slide"
+  }
+}
+
+7. Closing engagement and returning to feed:
+{
+  "reasoning": "Explored all 4 slides and read comments, done with this post",
+  "action": "press",
+  "params": {"key": "Escape"},
+  "expectedOutcome": "Modal closes, return to feed",
+  "strategic": {
+    "closeEngagement": true,
+    "reason": "Fully explored this post"
+  }
+}
+
+Remember: YOU are in control. Make intelligent decisions about the entire session, not just individual actions. Engage deeply with interesting content - don't just scroll past everything!`;
+  }
+  /**
+   * Build the user prompt with current context and elements.
+   */
+  buildUserPrompt(context, elements) {
+    const recentActionsStr = context.recentActions.slice(-5).map((a, i) => `${i + 1}. ${a.action}(${JSON.stringify(a.params)}) \u2192 ${a.success ? "success" : "failed"}`).join("\n") || "None yet";
+    let goalDesc = "";
+    switch (context.currentGoal.type) {
+      case "search_interest":
+        goalDesc = `Search for posts about "${context.currentGoal.target}"`;
+        break;
+      case "watch_stories":
+        goalDesc = "Watch stories from followed accounts";
+        break;
+      case "browse_feed":
+        goalDesc = "Browse the home feed and collect interesting posts";
+        break;
+      case "explore_profile":
+        goalDesc = `Explore profile: ${context.currentGoal.target}`;
+        break;
+      default:
+        goalDesc = "General browsing - YOU decide what to do";
+    }
+    const elementsByContainer = this.groupElementsByContainer(elements.slice(0, 30));
+    const overlays = this.detectActiveOverlays(elements);
+    const overlayInfo = overlays.length > 0 ? `- Active dialogs: ${overlays.join(", ")}
+` : "";
+    const elapsedSec = Math.round((Date.now() - context.startTime) / 1e3);
+    const targetSec = Math.round(context.targetDurationMs / 1e3);
+    const remainingSec = Math.max(0, targetSec - elapsedSec);
+    const interestsStr = context.userInterests.length > 0 ? context.userInterests.join(", ") : "None specified";
+    const searchedStr = context.interestsSearched.length > 0 ? context.interestsSearched.join(", ") : "None yet";
+    const unsearchedInterests = context.userInterests.filter(
+      (i) => !context.interestsSearched.includes(i)
+    );
+    let phaseHistoryStr = "None yet";
+    if (context.phaseHistory && context.phaseHistory.length > 0) {
+      phaseHistoryStr = context.phaseHistory.map((p) => `${p.phase}: ${Math.round(p.durationMs / 1e3)}s, ${p.itemsCollected} items`).join("; ");
+    }
+    let videoStr = "No video playing";
+    if (context.videoState) {
+      const vs = context.videoState;
+      videoStr = vs.isPlaying ? `Playing: ${vs.currentTime.toFixed(1)}s / ${vs.duration.toFixed(1)}s` : "Video paused";
+    }
+    let contentStatsStr = "No stats yet";
+    if (context.contentStats) {
+      const cs = context.contentStats;
+      contentStatsStr = `Unique: ${(cs.uniquePostsRatio * 100).toFixed(0)}%, Ads: ${(cs.adRatio * 100).toFixed(0)}%, Quality: ${cs.engagementLevel}`;
+    }
+    return `YOU HAVE FULL STRATEGIC CONTROL. Decide what to do next.
+
+USER INTERESTS: ${interestsStr}
+- Searched: ${searchedStr}
+- Not yet searched: ${unsearchedInterests.length > 0 ? unsearchedInterests.join(", ") : "All searched"}
+
+SESSION STATUS:
+- Current phase: ${context.currentPhase || "not set"}
+- Time: ${elapsedSec}s elapsed, ${remainingSec}s remaining (of ${targetSec}s total)
+- Collected: ${context.postsCollected} posts, ${context.storiesWatched} stories
+- Captures: ${context.captureCount || 0} screenshots taken
+
+PHASE HISTORY: ${phaseHistoryStr}
+
+CURRENT STATE:
+- URL: ${context.url}
+- View: ${context.view}
+- Video: ${videoStr}
+- Content: ${contentStatsStr}
+${overlayInfo}
+${this.formatTreeContext(context)}
+
+ENGAGEMENT STATE:
+${this.formatEngagementState(context)}
+
+ACCESSIBILITY TREE (${elements.length} elements, grouped by container):
+${elementsByContainer}
+
+RECENT ACTIONS:
+${recentActionsStr}
+
+Make your decision. Include strategic decisions if you want to switch phases, terminate, or adjust pacing.`;
+  }
+  /**
+   * Detect active overlays from container roles in the accessibility tree.
+   * Returns descriptions of any dialogs/overlays that might intercept scrolls.
+   */
+  detectActiveOverlays(elements) {
+    const overlays = [];
+    const seenContainers = /* @__PURE__ */ new Set();
+    for (const elem of elements) {
+      if (!elem.containerRole) continue;
+      const key = `${elem.containerRole}:${elem.containerName || ""}`;
+      if (seenContainers.has(key)) continue;
+      seenContainers.add(key);
+      if (elem.containerRole === "dialog" || elem.containerRole === "alertdialog") {
+        overlays.push(`${elem.containerRole}: "${elem.containerName || "unnamed"}"`);
+      }
+      if (elem.containerRole === "region" && elem.containerName) {
+        const name = elem.containerName.toLowerCase();
+        if (name.includes("message") || name.includes("inbox") || name.includes("chat") || name.includes("direct")) {
+          overlays.push(`messaging panel: "${elem.containerName}"`);
+        }
+      }
+    }
+    return overlays;
+  }
+  /**
+   * Format engagement state for LLM context.
+   */
+  formatEngagementState(context) {
+    if (!context.engagementState) {
+      return "- Level: feed (not in deep engagement)\n- Posts explored: 0";
+    }
+    const es = context.engagementState;
+    const lines = [];
+    lines.push(`- Level: ${es.level}`);
+    if (es.currentPost) {
+      const postInfo = [];
+      if (es.currentPost.username) postInfo.push(`by @${es.currentPost.username}`);
+      if (es.currentPost.postUrl) postInfo.push(`(${es.currentPost.postUrl})`);
+      if (postInfo.length > 0) {
+        lines.push(`- Current post: ${postInfo.join(" ")}`);
+      }
+    }
+    if (es.carouselState) {
+      const cs = es.carouselState;
+      lines.push(`- Carousel: Slide ${cs.currentSlide}/${cs.totalSlides}${cs.fullyExplored ? " (fully explored)" : ""}`);
+    }
+    if (es.postMetrics) {
+      const pm = es.postMetrics;
+      const metrics = [];
+      if (pm.likeCount) metrics.push(pm.likeCount);
+      if (pm.commentCount) metrics.push(pm.commentCount);
+      if (pm.hasVideo) metrics.push("has video");
+      if (metrics.length > 0) {
+        lines.push(`- Metrics: ${metrics.join(", ")}`);
+      }
+    }
+    const levelDuration = Math.round((Date.now() - es.levelEnteredAt) / 1e3);
+    lines.push(`- Time in ${es.level}: ${levelDuration}s`);
+    const exploredCount = es.deeplyExploredPostUrls?.length || 0;
+    lines.push(`- Posts already explored: ${exploredCount}`);
+    return lines.join("\n");
+  }
+  /**
+   * Format tree context for LLM dynamic reasoning.
+   * Shows containers, inputs with parent chains, and landmarks.
+   */
+  formatTreeContext(context) {
+    if (!context.treeSummary) {
+      return "TREE CONTEXT: Not available";
+    }
+    const ts = context.treeSummary;
+    const lines = [];
+    lines.push("TREE CONTEXT (use this to infer where you are):");
+    if (ts.containers.length > 0) {
+      lines.push("\nContainers found:");
+      for (const c of ts.containers.slice(0, 10)) {
+        lines.push(`- ${c.role}: "${c.name}" (${c.childCount} children)`);
+      }
+    }
+    if (ts.inputs.length > 0) {
+      lines.push("\nInput fields (CHECK PARENTS BEFORE TYPING!):");
+      for (const inp of ts.inputs) {
+        lines.push(`- ${inp.role}: "${inp.name}"`);
+        if (inp.parentContainers.length > 0) {
+          lines.push(`  Parents: [${inp.parentContainers.join(" \u2192 ")}]`);
+        }
+      }
+    }
+    if (ts.landmarks.length > 0) {
+      lines.push(`
+Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
+    }
+    return lines.join("\n");
+  }
+  /**
+   * Group elements by their container from the accessibility tree.
+   * This lets the LLM discover patterns like "buttons in Stories region".
+   * Now includes content preview for interest matching.
+   */
+  groupElementsByContainer(elements) {
+    const containers = /* @__PURE__ */ new Map();
+    for (const elem of elements) {
+      const containerKey = elem.containerRole ? `${elem.containerRole}${elem.containerName ? ` "${elem.containerName}"` : ""}` : "root";
+      if (!containers.has(containerKey)) {
+        containers.set(containerKey, []);
+      }
+      containers.get(containerKey).push(elem);
+    }
+    const parts = [];
+    const shownContentForContainer = /* @__PURE__ */ new Set();
+    for (const [containerKey, elems] of containers) {
+      const siblingInfo = elems[0]?.siblingCount ? ` (${elems[0].siblingCount} siblings)` : "";
+      parts.push(`[${containerKey}${siblingInfo}]`);
+      for (const e of elems) {
+        const hint = e.semanticHint ? ` \u26A0\uFE0F${e.semanticHint}` : "";
+        const depth = e.depth !== void 0 ? ` depth=${e.depth}` : "";
+        parts.push(`  id:${e.id} ${e.role} "${e.name}" Y=${e.position.y}${hint}${depth}`);
+        if (e.contentPreview && !shownContentForContainer.has(containerKey)) {
+          const cp = e.contentPreview;
+          if (cp.captionText) {
+            parts.push(`    Caption: "${cp.captionText}${cp.captionText.length >= 100 ? "..." : ""}"`);
+          }
+          if (cp.engagement) {
+            const engParts = [];
+            if (cp.engagement.likes) engParts.push(cp.engagement.likes);
+            if (cp.engagement.comments) engParts.push(cp.engagement.comments);
+            if (engParts.length > 0) {
+              parts.push(`    Engagement: ${engParts.join(", ")}`);
+            }
+          }
+          if (cp.hashtags && cp.hashtags.length > 0) {
+            parts.push(`    Tags: #${cp.hashtags.join(", #")}`);
+          }
+          if (cp.altText) {
+            parts.push(`    Alt: "${cp.altText}"`);
+          }
+          shownContentForContainer.add(containerKey);
+        }
+      }
+      parts.push("");
+    }
+    return parts.join("\n").trim();
+  }
+  /**
+   * Make a navigation decision using the LLM.
+   *
+   * @param context - Current navigation context
+   * @param elements - Visible elements from accessibility tree
+   * @returns Navigation decision or fallback if LLM fails
+   */
+  async decideAction(context, elements) {
+    if (elements.length === 0) {
+      return this.fallbackDecision(context, elements, "No elements visible");
+    }
+    try {
+      const decision = await this.callLLM(context, elements);
+      this.decisionCount++;
+      const estimatedCost = this.decisionCount * 1e-3;
+      if (this.debug) {
+        console.log("\n\u{1F9E0} === LLM REASONING ===");
+        console.log(`Decision #${this.decisionCount} (est. cost: $${estimatedCost.toFixed(4)})`);
+        console.log(`Action: ${decision.action}`);
+        console.log(`Reasoning: ${decision.reasoning}`);
+        console.log(`Expected: ${decision.expectedOutcome}`);
+        console.log(`Confidence: ${decision.confidence ?? "N/A"}`);
+        if (decision.capture) {
+          console.log(`\u{1F4F8} Capture: ${decision.capture.shouldCapture ? "YES" : "NO"} - ${decision.capture.reason || "no reason"}`);
+        } else {
+          console.log(`\u{1F4F8} Capture: NOT SIGNALED`);
+        }
+        if (decision.strategic) {
+          console.log("\u{1F3AF} === STRATEGIC DECISIONS ===");
+          if (decision.strategic.switchPhase) {
+            console.log(`  Phase: SWITCH TO ${decision.strategic.switchPhase}`);
+          }
+          if (decision.strategic.terminateSession) {
+            console.log(`  \u23F9\uFE0F TERMINATE SESSION`);
+          }
+          if (decision.strategic.captureNow) {
+            console.log(`  \u{1F4F8} Capture viewport NOW`);
+          }
+          if (decision.strategic.lingerDuration) {
+            console.log(`  \u23F1\uFE0F Linger: ${decision.strategic.lingerDuration}`);
+          }
+          if (decision.strategic.reason) {
+            console.log(`  Reason: ${decision.strategic.reason}`);
+          }
+        }
+        console.log("========================\n");
+      }
+      const validated = this.validateDecision(decision, elements);
+      return validated;
+    } catch (error) {
+      console.warn("NavigationLLM call failed, using fallback:", error);
+      return this.fallbackDecision(context, elements, String(error));
+    }
+  }
+  /**
+   * Call the LLM API.
+   */
+  async callLLM(context, elements) {
+    const userPrompt = this.buildUserPrompt(context, elements);
+    if (this.debug) {
+      console.log("\n\u{1F4CA} === ACCESSIBILITY CONTEXT FOR LLM ===");
+      console.log(userPrompt);
+      console.log("========================================\n");
+    }
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages: [
+          { role: "system", content: this.getSystemPrompt() },
+          { role: "user", content: userPrompt }
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: this.maxTokens,
+        temperature: this.temperature
+      })
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`LLM API error: ${response.status} - ${errorText}`);
+    }
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error("Empty LLM response");
+    }
+    const parsed = JSON.parse(content);
+    return parsed;
+  }
+  /**
+   * Validate and sanitize the LLM decision.
+   */
+  validateDecision(decision, elements) {
+    const validActions = ["click", "scroll", "type", "press", "wait", "hover", "back", "clear"];
+    if (!validActions.includes(decision.action)) {
+      return {
+        ...decision,
+        action: "wait",
+        params: { seconds: 2 },
+        reasoning: `Invalid action "${decision.action}", defaulting to wait`
+      };
+    }
+    if (decision.action === "click") {
+      const clickParams = decision.params;
+      const targetElement = elements.find((e) => e.id === clickParams.id);
+      if (!targetElement) {
+        return {
+          ...decision,
+          action: "scroll",
+          params: { direction: "down", amount: "medium" },
+          reasoning: `Click target id=${clickParams.id} not found, scrolling instead`
+        };
+      }
+      const forbiddenHints = [
+        "like_button",
+        "comment_button",
+        "share_button",
+        "save_button",
+        "follow_button"
+      ];
+      if (targetElement.semanticHint && forbiddenHints.includes(targetElement.semanticHint)) {
+        console.warn(`[Safety Net] Blocked click on ${targetElement.semanticHint}`);
+        return {
+          ...decision,
+          action: "scroll",
+          params: { direction: "down", amount: "small" },
+          reasoning: `SAFETY: Blocked interaction with ${targetElement.semanticHint}, scrolling instead`
+        };
+      }
+      const name = targetElement.name?.toLowerCase() || "";
+      const interactivePatterns = [
+        "like",
+        "love",
+        "heart",
+        "comment",
+        "reply",
+        "share",
+        "send",
+        "save",
+        "bookmark",
+        "follow",
+        "unfollow",
+        "accept",
+        "decline",
+        "confirm",
+        "post",
+        "submit"
+      ];
+      for (const pattern of interactivePatterns) {
+        if (name === pattern || name.startsWith(pattern + " ")) {
+          console.warn(`[Safety Net] Blocked click on interactive element: "${name}"`);
+          return {
+            ...decision,
+            action: "scroll",
+            params: { direction: "down", amount: "small" },
+            reasoning: `SAFETY: Blocked interactive action "${name}", scrolling instead`
+          };
+        }
+      }
+      if (!decision.capture) {
+        const nameLower = targetElement.name.toLowerCase();
+        const isPostLike = nameLower.includes("photo") || nameLower.includes("video") || nameLower.includes("shared by") || targetElement.containerRole === "article";
+        if (isPostLike) {
+          decision.capture = {
+            shouldCapture: true,
+            targetId: clickParams.id,
+            reason: `Auto-capture: clicked post element "${targetElement.name.slice(0, 30)}..."`
+          };
+          console.log(`\u{1F4F8} Auto-added capture for post click: id=${clickParams.id}`);
+        }
+      }
+    }
+    if (decision.action === "type") {
+      for (const elem of elements) {
+        if (elem.role === "textbox" || elem.role === "searchbox") {
+          const containerName = elem.containerName?.toLowerCase() || "";
+          const inputName = elem.name?.toLowerCase() || "";
+          if (containerName.includes("message") || containerName.includes("direct") || containerName.includes("inbox") || containerName.includes("chat")) {
+            console.warn(`[Safety Net] Blocked typing in message context: "${elem.containerName}"`);
+            return {
+              ...decision,
+              action: "press",
+              params: { key: "Escape" },
+              reasoning: `SAFETY: Blocked typing in message context "${elem.containerName}", pressing Escape to exit`
+            };
+          }
+          if (containerName.includes("comment") || inputName.includes("comment") || inputName.includes("reply") || inputName.includes("add a comment")) {
+            console.warn(`[Safety Net] Blocked typing in comment context: "${inputName}"`);
+            return {
+              ...decision,
+              action: "press",
+              params: { key: "Escape" },
+              reasoning: `SAFETY: Blocked typing in comment context "${inputName}", pressing Escape to exit`
+            };
+          }
+        }
+      }
+    }
+    if (decision.action === "scroll") {
+      const scrollParams = decision.params;
+      if (!["up", "down", "left", "right"].includes(scrollParams.direction)) {
+        scrollParams.direction = "down";
+      }
+      if (!["small", "medium", "large"].includes(scrollParams.amount)) {
+        scrollParams.amount = "medium";
+      }
+    }
+    if (decision.action === "press") {
+      const pressParams = decision.params;
+      const validKeys = [
+        "Escape",
+        "Enter",
+        "Backspace",
+        "Delete",
+        "Space",
+        "ArrowRight",
+        "ArrowLeft",
+        "ArrowUp",
+        "ArrowDown",
+        "Tab",
+        "Home",
+        "End",
+        "PageUp",
+        "PageDown"
+      ];
+      if (!validKeys.includes(pressParams.key)) {
+        return {
+          ...decision,
+          action: "wait",
+          params: { seconds: 1 },
+          reasoning: `Invalid key "${pressParams.key}", defaulting to wait`
+        };
+      }
+    }
+    if (decision.action === "hover") {
+      const hoverParams = decision.params;
+      const targetElement = elements.find((e) => e.id === hoverParams.id);
+      if (!targetElement) {
+        return {
+          ...decision,
+          action: "wait",
+          params: { seconds: 1 },
+          reasoning: `Hover target id=${hoverParams.id} not found, defaulting to wait`
+        };
+      }
+    }
+    if (decision.action === "wait") {
+      const waitParams = decision.params;
+      waitParams.seconds = Math.max(1, Math.min(5, waitParams.seconds || 2));
+    }
+    return decision;
+  }
+  /**
+   * Fallback decision when LLM fails or is unavailable.
+   */
+  fallbackDecision(context, elements, reason) {
+    const recentScrollFails = context.recentActions.slice(-3).filter((a) => a.action === "scroll" && !a.success).length;
+    if (recentScrollFails >= 2) {
+      return {
+        reasoning: `Fallback: ${reason}. Recent scrolls failed, trying escape.`,
+        action: "press",
+        params: { key: "Escape" },
+        expectedOutcome: "Close any modal or overlay",
+        confidence: 0.3
+      };
+    }
+    return {
+      reasoning: `Fallback: ${reason}. Scrolling to find more content.`,
+      action: "scroll",
+      params: { direction: "down", amount: "medium" },
+      expectedOutcome: "More content should become visible",
+      confidence: 0.3
+    };
+  }
+  /**
+   * Get the number of decisions made this session.
+   */
+  getDecisionCount() {
+    return this.decisionCount;
+  }
+  /**
+   * Get estimated cost based on decisions made.
+   */
+  getEstimatedCost() {
+    return this.decisionCount * 1e-3;
+  }
+  /**
+   * Reset decision count (for new session).
+   */
+  reset() {
+    this.decisionCount = 0;
+    this.sessionJitter = 0.85 + Math.random() * 0.3;
+  }
+};
+
+// src/main/services/NavigationExecutor.ts
+var SCROLL_AMOUNTS = {
+  small: 200,
+  medium: 500,
+  large: 800
+};
+var LINGER_DURATIONS = {
+  short: 1e3,
+  // 1 second - for navigation, skipping
+  medium: 3e3,
+  // 3 seconds - normal engagement
+  long: 6e3
+  // 6 seconds - deep engagement, videos
+};
+var NavigationExecutor = class {
+  page;
+  ghost;
+  scroll;
+  navigator;
+  // Action history for loop detection
+  actionHistory = [];
+  maxHistorySize = 50;
+  // Session-level timing randomization
+  sessionDelayMultiplier;
+  constructor(page, ghost, scroll, navigator) {
+    this.page = page;
+    this.ghost = ghost;
+    this.scroll = scroll;
+    this.navigator = navigator;
+    this.sessionDelayMultiplier = 0.75 + Math.random() * 0.5;
+  }
+  /**
+   * Execute a navigation decision.
+   *
+   * @param decision - The LLM's navigation decision
+   * @param elements - Current visible elements (for click target lookup)
+   * @returns Execution result with success status and details
+   */
+  async execute(decision, elements) {
+    const startTime = Date.now();
+    try {
+      switch (decision.action) {
+        case "click":
+          return await this.executeClick(decision, elements, startTime);
+        case "scroll":
+          return await this.executeScroll(decision, startTime);
+        case "type":
+          return await this.executeType(decision, startTime);
+        case "press":
+          return await this.executePress(decision, startTime);
+        case "wait":
+          return await this.executeWait(decision, startTime);
+        case "hover":
+          return await this.executeHover(decision, elements, startTime);
+        case "back":
+          return await this.executeBack(decision, startTime);
+        case "clear":
+          return await this.executeClear(decision, startTime);
+        default:
+          return this.failureResult(
+            decision,
+            startTime,
+            `Unknown action: ${decision.action}`
+          );
+      }
+    } catch (error) {
+      return this.failureResult(
+        decision,
+        startTime,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+  /**
+   * Execute a click action with optional gaze anchors.
+   * Returns the clicked element info for potential capture.
+   */
+  async executeClick(decision, elements, startTime) {
+    const params = decision.params;
+    const target = elements.find((e) => e.id === params.id);
+    if (!target) {
+      return this.failureResult(decision, startTime, `Element id=${params.id} not found`);
+    }
+    const boundingBox = target.boundingBox;
+    if (!boundingBox) {
+      return this.failureResult(decision, startTime, `Element id=${params.id} has no bounding box`);
+    }
+    await this.ghost.clickElement(boundingBox);
+    await this.humanDelay(200, 500);
+    const record = this.recordAction(decision, true);
+    return {
+      success: true,
+      actionTaken: "click",
+      params,
+      resultingUrl: this.page.url(),
+      durationMs: Date.now() - startTime,
+      // Return the clicked element info for capture
+      focusedElement: {
+        id: target.id,
+        boundingBox,
+        name: target.name
+      }
+    };
+  }
+  /**
+   * Execute a scroll action.
+   */
+  async executeScroll(decision, startTime) {
+    const params = decision.params;
+    const baseDistance = SCROLL_AMOUNTS[params.amount] || SCROLL_AMOUNTS.medium;
+    if (params.direction === "left" || params.direction === "right") {
+      const deltaX = params.direction === "right" ? baseDistance : -baseDistance;
+      await this.page.mouse.wheel(deltaX, 0);
+      await this.humanDelay(300, 600);
+    } else {
+      const direction = params.direction === "up" ? -1 : 1;
+      await this.scroll.scroll({
+        baseDistance: baseDistance * direction,
+        variability: 0.3,
+        readingPauseMs: [500, 1500]
+        // Shorter pause for navigation
+      });
+    }
+    this.recordAction(decision, true);
+    return {
+      success: true,
+      actionTaken: "scroll",
+      params,
+      resultingUrl: this.page.url(),
+      durationMs: Date.now() - startTime
+    };
+  }
+  /**
+   * Execute a type action.
+   */
+  async executeType(decision, startTime) {
+    const params = decision.params;
+    for (const char of params.text) {
+      await this.page.keyboard.type(char);
+      await this.humanDelay(50, 150);
+    }
+    await this.humanDelay(300, 600);
+    this.recordAction(decision, true);
+    return {
+      success: true,
+      actionTaken: "type",
+      params,
+      resultingUrl: this.page.url(),
+      durationMs: Date.now() - startTime
+    };
+  }
+  /**
+   * Execute a key press action.
+   */
+  async executePress(decision, startTime) {
+    const params = decision.params;
+    await this.page.keyboard.press(params.key);
+    await this.humanDelay(200, 400);
+    this.recordAction(decision, true);
+    return {
+      success: true,
+      actionTaken: "press",
+      params,
+      resultingUrl: this.page.url(),
+      durationMs: Date.now() - startTime
+    };
+  }
+  /**
+   * Execute a wait action.
+   */
+  async executeWait(decision, startTime) {
+    const params = decision.params;
+    const waitMs = params.seconds * 1e3 * this.sessionDelayMultiplier;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    this.recordAction(decision, true);
+    return {
+      success: true,
+      actionTaken: "wait",
+      params,
+      resultingUrl: this.page.url(),
+      durationMs: Date.now() - startTime
+    };
+  }
+  /**
+   * Execute a hover action using GhostMouse.
+   */
+  async executeHover(decision, elements, startTime) {
+    const params = decision.params;
+    const target = elements.find((e) => e.id === params.id);
+    if (!target) {
+      return this.failureResult(decision, startTime, `Element id=${params.id} not found`);
+    }
+    const boundingBox = target.boundingBox;
+    if (!boundingBox) {
+      return this.failureResult(decision, startTime, `Element id=${params.id} has no bounding box`);
+    }
+    await this.ghost.hoverElement(boundingBox);
+    this.recordAction(decision, true);
+    return {
+      success: true,
+      actionTaken: "hover",
+      params,
+      resultingUrl: this.page.url(),
+      durationMs: Date.now() - startTime,
+      focusedElement: {
+        id: target.id,
+        boundingBox,
+        name: target.name
+      }
+    };
+  }
+  /**
+   * Execute a browser back navigation.
+   */
+  async executeBack(decision, startTime) {
+    await this.page.goBack({ waitUntil: "domcontentloaded" });
+    await this.humanDelay(500, 1e3);
+    this.recordAction(decision, true);
+    return {
+      success: true,
+      actionTaken: "back",
+      params: {},
+      resultingUrl: this.page.url(),
+      durationMs: Date.now() - startTime
+    };
+  }
+  /**
+   * Execute a clear action (select all + delete on currently focused input).
+   */
+  async executeClear(decision, startTime) {
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await this.page.keyboard.press(`${modifier}+a`);
+    await this.humanDelay(50, 150);
+    await this.page.keyboard.press("Backspace");
+    await this.humanDelay(200, 400);
+    this.recordAction(decision, true);
+    return {
+      success: true,
+      actionTaken: "clear",
+      params: {},
+      resultingUrl: this.page.url(),
+      durationMs: Date.now() - startTime
+    };
+  }
+  /**
+   * Create a failure result.
+   */
+  failureResult(decision, startTime, errorMessage) {
+    this.recordAction(decision, false, errorMessage);
+    return {
+      success: false,
+      actionTaken: decision.action,
+      params: decision.params,
+      errorMessage,
+      durationMs: Date.now() - startTime
+    };
+  }
+  /**
+   * Record an action to history.
+   */
+  recordAction(decision, success, errorMessage) {
+    const record = {
+      timestamp: Date.now(),
+      action: decision.action,
+      params: decision.params,
+      success,
+      errorMessage
+    };
+    this.actionHistory.push(record);
+    if (this.actionHistory.length > this.maxHistorySize) {
+      this.actionHistory = this.actionHistory.slice(-this.maxHistorySize);
+    }
+    return record;
+  }
+  /**
+   * Get recent action history.
+   */
+  getRecentActions(count = 10) {
+    return this.actionHistory.slice(-count);
+  }
+  /**
+   * Check if we're in a loop (repeating same actions).
+   */
+  isInLoop(lookback = 6) {
+    if (this.actionHistory.length < lookback) return false;
+    const recent = this.actionHistory.slice(-lookback);
+    const allSameAction = recent.every((a) => a.action === recent[0].action);
+    if (allSameAction && recent[0].action === "scroll") {
+      const failureRate = recent.filter((a) => !a.success).length / recent.length;
+      return failureRate > 0.5;
+    }
+    const clickFailures = recent.filter((a) => a.action === "click" && !a.success);
+    return clickFailures.length >= 3;
+  }
+  /**
+   * Human-like delay with session variance.
+   */
+  humanDelay(minMs, maxMs) {
+    const baseDelay = minMs + Math.random() * (maxMs - minMs);
+    const adjustedDelay = baseDelay * this.sessionDelayMultiplier;
+    return new Promise((resolve) => setTimeout(resolve, adjustedDelay));
+  }
+  /**
+   * Reset executor state (for new session).
+   */
+  reset() {
+    this.actionHistory = [];
+    this.sessionDelayMultiplier = 0.75 + Math.random() * 0.5;
+  }
+  /**
+   * Get action history for debugging.
+   */
+  getActionHistory() {
+    return [...this.actionHistory];
+  }
+  /**
+   * Execute linger duration from strategic decision.
+   * This is the LLM-controlled pacing mechanism.
+   *
+   * @param strategic - The strategic decision containing linger duration
+   */
+  async executeLinger(strategic) {
+    if (!strategic?.lingerDuration) {
+      return;
+    }
+    const baseDuration = LINGER_DURATIONS[strategic.lingerDuration] || LINGER_DURATIONS.medium;
+    const duration = baseDuration * this.sessionDelayMultiplier;
+    console.log(`  \u23F1\uFE0F Lingering for ${(duration / 1e3).toFixed(1)}s (${strategic.lingerDuration})`);
+    await new Promise((resolve) => setTimeout(resolve, duration));
+  }
+  /**
+   * Get the linger duration in milliseconds for a given level.
+   *
+   * @param level - 'short' | 'medium' | 'long'
+   * @returns Duration in milliseconds with session variance
+   */
+  getLingerDurationMs(level) {
+    const baseDuration = LINGER_DURATIONS[level] || LINGER_DURATIONS.medium;
+    return baseDuration * this.sessionDelayMultiplier;
+  }
+};
+
+// src/main/services/DebugOverlay.ts
+var DEFAULT_CONFIG4 = {
+  showElementHighlights: false,
+  highlightDurationMs: 500,
+  panelPosition: "top-right"
+};
+var DEBUG_PANEL_CSS = `
+#kowalski-debug-panel {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    width: 320px;
+    max-height: 90vh;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.92);
+    color: #00ffff;
+    font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 12px;
+    border: 2px solid #00ffff;
+    border-radius: 8px;
+    z-index: 99999;
+    pointer-events: none;
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+}
+
+#kowalski-debug-panel .debug-header {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #00ffff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#kowalski-debug-panel .debug-section {
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(0, 255, 255, 0.3);
+}
+
+#kowalski-debug-panel .debug-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+#kowalski-debug-panel .debug-label {
+    color: #888;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+
+#kowalski-debug-panel .debug-value {
+    color: #fff;
+    font-size: 12px;
+}
+
+#kowalski-debug-panel .debug-value.highlight {
+    color: #00ff00;
+}
+
+#kowalski-debug-panel .debug-value.warning {
+    color: #ffff00;
+}
+
+#kowalski-debug-panel .debug-value.error {
+    color: #ff4444;
+}
+
+#kowalski-debug-panel .debug-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+#kowalski-debug-panel .debug-reasoning {
+    color: #aaa;
+    font-style: italic;
+    font-size: 10px;
+    word-wrap: break-word;
+    max-height: 60px;
+    overflow-y: auto;
+}
+
+#kowalski-debug-panel .debug-target-box {
+    background: rgba(0, 255, 255, 0.1);
+    border: 1px solid rgba(0, 255, 255, 0.5);
+    border-radius: 4px;
+    padding: 6px;
+    margin-top: 6px;
+}
+
+#kowalski-debug-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 99998;
+    pointer-events: none;
+}
+`;
+var DebugOverlay = class {
+  page;
+  enabled = false;
+  config;
+  constructor(page, config) {
+    this.page = page;
+    this.config = { ...DEFAULT_CONFIG4, ...config };
+  }
+  /**
+   * Enable the debug overlay by injecting CSS and canvas.
+   */
+  async enable() {
+    if (this.enabled) return;
+    try {
+      await this.page.addStyleTag({ content: DEBUG_PANEL_CSS });
+      await this.page.evaluate(() => {
+        const existing = document.getElementById("kowalski-debug-panel");
+        if (existing) existing.remove();
+        const panel = document.createElement("div");
+        panel.id = "kowalski-debug-panel";
+        panel.innerHTML = `
+                    <div class="debug-header">
+                        \u{1F50D} KOWALSKI DEBUG
+                    </div>
+                    <div class="debug-content">
+                        <div class="debug-section">
+                            <div class="debug-label">Status</div>
+                            <div class="debug-value">Initializing...</div>
+                        </div>
+                    </div>
+                `;
+        document.body.appendChild(panel);
+      });
+      await this.page.evaluate(() => {
+        const existing = document.getElementById("kowalski-debug-canvas");
+        if (existing) existing.remove();
+        const canvas = document.createElement("canvas");
+        canvas.id = "kowalski-debug-canvas";
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        document.body.appendChild(canvas);
+        window.addEventListener("resize", () => {
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+        });
+      });
+      this.enabled = true;
+      console.log("  \u{1F50D} Debug overlay enabled");
+    } catch (error) {
+      console.error("  \u274C Failed to enable debug overlay:", error);
+    }
+  }
+  /**
+   * Disable and remove the debug overlay.
+   */
+  async disable() {
+    if (!this.enabled) return;
+    try {
+      await this.page.evaluate(() => {
+        const panel = document.getElementById("kowalski-debug-panel");
+        if (panel) panel.remove();
+        const canvas = document.getElementById("kowalski-debug-canvas");
+        if (canvas) canvas.remove();
+      });
+      this.enabled = false;
+      console.log("  \u{1F50D} Debug overlay disabled");
+    } catch (error) {
+    }
+  }
+  /**
+   * Update the debug panel with current state.
+   */
+  async updateState(state) {
+    if (!this.enabled) return;
+    const html = this.formatStateHtml(state);
+    try {
+      await this.page.evaluate((htmlContent) => {
+        const panel = document.getElementById("kowalski-debug-panel");
+        if (panel) {
+          const content = panel.querySelector(".debug-content");
+          if (content) {
+            content.innerHTML = htmlContent;
+          }
+        }
+      }, html);
+    } catch (error) {
+    }
+  }
+  /**
+   * Format state into HTML for the debug panel.
+   */
+  formatStateHtml(state) {
+    const timeRemaining = Math.max(0, Math.floor(state.timeRemainingMs / 1e3));
+    const minutes = Math.floor(timeRemaining / 60);
+    const seconds = timeRemaining % 60;
+    const timeStr = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+    const timeClass = timeRemaining < 60 ? "warning" : timeRemaining < 30 ? "error" : "";
+    const engagementEmoji = {
+      "feed": "\u{1F4DC}",
+      "post_modal": "\u{1F5BC}\uFE0F",
+      "comments": "\u{1F4AC}",
+      "profile": "\u{1F464}"
+    }[state.engagementLevel] || "\u2753";
+    const phaseEmoji = {
+      "search": "\u{1F50D}",
+      "stories": "\u{1F4D6}",
+      "feed": "\u{1F4DC}",
+      "complete": "\u2705"
+    }[state.phase] || "\u2753";
+    const actionEmoji = {
+      "click": "\u{1F446}",
+      "scroll": "\u{1F4DC}",
+      "type": "\u2328\uFE0F",
+      "press": "\u23CE",
+      "wait": "\u23F3"
+    }[state.action] || "\u2753";
+    const confidence = state.confidence ?? 0;
+    const confidencePercent = Math.round(confidence * 100);
+    const confidenceClass = confidence >= 0.8 ? "highlight" : confidence >= 0.5 ? "" : "warning";
+    let carouselStr = "";
+    if (state.carouselState) {
+      carouselStr = `Slide ${state.carouselState.currentSlide}/${state.carouselState.totalSlides}`;
+    }
+    return `
+            <!-- Session Section -->
+            <div class="debug-section">
+                <div class="debug-row">
+                    <span><span class="debug-label">Phase</span> ${phaseEmoji} ${state.phase.toUpperCase()}</span>
+                    <span class="${timeClass}">${timeStr}</span>
+                </div>
+                <div class="debug-row">
+                    <span><span class="debug-label">Captures</span> ${state.captureCount}</span>
+                    <span><span class="debug-label">Posts</span> ${state.postsCollected}</span>
+                </div>
+                <div class="debug-row">
+                    <span><span class="debug-label">Actions left</span> ${state.actionsRemaining}</span>
+                </div>
+            </div>
+
+            <!-- Engagement Section -->
+            <div class="debug-section">
+                <div class="debug-label">Engagement</div>
+                <div class="debug-value">${engagementEmoji} ${state.engagementLevel}</div>
+                ${carouselStr ? `<div class="debug-value">\u{1F3A0} ${carouselStr}</div>` : ""}
+                ${state.currentPostUsername ? `<div class="debug-value">\u{1F464} @${state.currentPostUsername}</div>` : ""}
+            </div>
+
+            <!-- Action Section -->
+            <div class="debug-section">
+                <div class="debug-label">Action</div>
+                <div class="debug-value highlight">${actionEmoji} ${state.action.toUpperCase()}</div>
+                ${state.targetId !== void 0 ? `
+                    <div class="debug-target-box">
+                        <div class="debug-row">
+                            <span class="debug-label">Target ID</span>
+                            <span class="debug-value">#${state.targetId}</span>
+                        </div>
+                        ${state.targetRole ? `
+                            <div class="debug-row">
+                                <span class="debug-label">Role</span>
+                                <span class="debug-value">${state.targetRole}</span>
+                            </div>
+                        ` : ""}
+                        ${state.targetName ? `
+                            <div class="debug-row">
+                                <span class="debug-label">Name</span>
+                                <span class="debug-value" style="word-break: break-word;">"${this.truncate(state.targetName, 40)}"</span>
+                            </div>
+                        ` : ""}
+                    </div>
+                ` : ""}
+                <div class="debug-row" style="margin-top: 6px;">
+                    <span class="debug-label">Confidence</span>
+                    <span class="debug-value ${confidenceClass}">${confidencePercent}%</span>
+                </div>
+            </div>
+
+            <!-- Reasoning Section -->
+            <div class="debug-section">
+                <div class="debug-label">Reasoning</div>
+                <div class="debug-reasoning">${this.escapeHtml(state.reasoning)}</div>
+            </div>
+        `;
+  }
+  /**
+   * Highlight a specific element with a colored rectangle.
+   */
+  async highlightElement(bounds, label, color = "#00ffff") {
+    if (!this.enabled) return;
+    try {
+      await this.page.evaluate(({ bounds: bounds2, label: label2, color: color2 }) => {
+        const canvas = document.getElementById("kowalski-debug-canvas");
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = color2;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(bounds2.x, bounds2.y, bounds2.width, bounds2.height);
+        ctx.font = "bold 12px monospace";
+        const textMetrics = ctx.measureText(label2);
+        const textHeight = 16;
+        const padding = 4;
+        const labelX = bounds2.x;
+        const labelY = bounds2.y - textHeight - padding * 2;
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+        ctx.fillRect(
+          labelX - padding,
+          labelY - padding,
+          textMetrics.width + padding * 2,
+          textHeight + padding * 2
+        );
+        ctx.fillStyle = color2;
+        ctx.fillText(label2, labelX, labelY + textHeight - 2);
+      }, { bounds, label, color });
+    } catch (error) {
+    }
+  }
+  /**
+   * Show a crosshair at the click target point.
+   */
+  async showClickTarget(point, label) {
+    if (!this.enabled) return;
+    try {
+      await this.page.evaluate(({ x, y, label: label2 }) => {
+        const canvas = document.getElementById("kowalski-debug-canvas");
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const crosshairSize = 20;
+        const color = "#ff0000";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(x - crosshairSize, y);
+        ctx.lineTo(x + crosshairSize, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y - crosshairSize);
+        ctx.lineTo(x, y + crosshairSize);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.stroke();
+        if (label2) {
+          ctx.font = "bold 11px monospace";
+          ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+          ctx.fillRect(x + 15, y - 8, ctx.measureText(label2).width + 8, 18);
+          ctx.fillStyle = color;
+          ctx.fillText(label2, x + 19, y + 5);
+        }
+      }, { x: point.x, y: point.y, label });
+    } catch (error) {
+    }
+  }
+  /**
+   * Draw trajectory arrow from current position to target.
+   */
+  async showTrajectory(from, to) {
+    if (!this.enabled) return;
+    try {
+      await this.page.evaluate(({ from: from2, to: to2 }) => {
+        const canvas = document.getElementById("kowalski-debug-canvas");
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.strokeStyle = "rgba(255, 255, 0, 0.6)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 4]);
+        ctx.beginPath();
+        ctx.moveTo(from2.x, from2.y);
+        ctx.lineTo(to2.x, to2.y);
+        ctx.stroke();
+        const angle = Math.atan2(to2.y - from2.y, to2.x - from2.x);
+        const arrowSize = 12;
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(255, 255, 0, 0.8)";
+        ctx.beginPath();
+        ctx.moveTo(to2.x, to2.y);
+        ctx.lineTo(
+          to2.x - arrowSize * Math.cos(angle - Math.PI / 6),
+          to2.y - arrowSize * Math.sin(angle - Math.PI / 6)
+        );
+        ctx.lineTo(
+          to2.x - arrowSize * Math.cos(angle + Math.PI / 6),
+          to2.y - arrowSize * Math.sin(angle + Math.PI / 6)
+        );
+        ctx.closePath();
+        ctx.fill();
+      }, { from, to });
+    } catch (error) {
+    }
+  }
+  /**
+   * Highlight multiple elements (for showing all visible elements).
+   */
+  async highlightAllElements(elements) {
+    if (!this.enabled || !this.config.showElementHighlights) return;
+    try {
+      await this.page.evaluate((els) => {
+        const canvas = document.getElementById("kowalski-debug-canvas");
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (const el of els) {
+          if (!el.boundingBox) continue;
+          let color = "rgba(100, 100, 100, 0.3)";
+          if (el.role === "button") color = "rgba(0, 255, 255, 0.3)";
+          else if (el.role === "link") color = "rgba(255, 255, 0, 0.3)";
+          else if (el.role === "textbox") color = "rgba(255, 100, 100, 0.3)";
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([]);
+          ctx.strokeRect(
+            el.boundingBox.x,
+            el.boundingBox.y,
+            el.boundingBox.width,
+            el.boundingBox.height
+          );
+          ctx.font = "9px monospace";
+          ctx.fillStyle = color;
+          ctx.fillText(`#${el.id}`, el.boundingBox.x + 2, el.boundingBox.y + 10);
+        }
+      }, elements);
+    } catch (error) {
+    }
+  }
+  /**
+   * Clear all highlights from the canvas.
+   */
+  async clearHighlights() {
+    if (!this.enabled) return;
+    try {
+      await this.page.evaluate(() => {
+        const canvas = document.getElementById("kowalski-debug-canvas");
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      });
+    } catch (error) {
+    }
+  }
+  /**
+   * Show a temporary message on the canvas.
+   */
+  async showMessage(message, type = "info") {
+    if (!this.enabled) return;
+    const colors = {
+      info: "#00ffff",
+      success: "#00ff00",
+      warning: "#ffff00",
+      error: "#ff4444"
+    };
+    try {
+      await this.page.evaluate(({ message: message2, color }) => {
+        const canvas = document.getElementById("kowalski-debug-canvas");
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.font = "bold 14px monospace";
+        const textWidth = ctx.measureText(message2).width;
+        const x = (canvas.width - textWidth) / 2;
+        const y = canvas.height - 40;
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+        ctx.fillRect(x - 12, y - 18, textWidth + 24, 28);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - 12, y - 18, textWidth + 24, 28);
+        ctx.fillStyle = color;
+        ctx.fillText(message2, x, y);
+      }, { message, color: colors[type] });
+      setTimeout(() => this.clearHighlights(), 2e3);
+    } catch (error) {
+    }
+  }
+  /**
+   * Check if overlay is enabled.
+   */
+  isEnabled() {
+    return this.enabled;
+  }
+  /**
+   * Truncate string for display.
+   */
+  truncate(str, maxLen) {
+    if (str.length <= maxLen) return str;
+    return str.substring(0, maxLen - 3) + "...";
+  }
+  /**
+   * Escape HTML for safe insertion.
+   */
+  escapeHtml(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+};
+
+// src/main/services/InstagramScraper.ts
 var InstagramScraper = class {
   context;
   apiKey;
@@ -6280,9 +8720,13 @@ var InstagramScraper = class {
   scroll;
   navigator;
   vision;
-  strategicGaze;
   screenshotCollector;
+  contentReadiness;
   page;
+  // AI Navigation
+  navigationLLM;
+  navigationExecutor;
+  debugOverlay;
   // Track current view for gaze planning
   lastKnownView = "unknown";
   // Metrics
@@ -6333,7 +8777,6 @@ var InstagramScraper = class {
     this.scroll = new HumanScroll(this.page);
     this.navigator = new A11yNavigator(this.page);
     this.vision = new ContentVision(this.apiKey);
-    this.strategicGaze = new StrategicGaze(this.apiKey);
     if (this.debugMode) {
       await this.ghost.enableVisibleCursor();
     }
@@ -6406,32 +8849,35 @@ var InstagramScraper = class {
   /**
    * Screenshot-First Browsing Session.
    *
-   * This is the new architecture that:
-   * 1. Browses Instagram naturally (like a human would)
-   * 2. Screenshots each post/story as encountered
-   * 3. Returns all screenshots for batch LLM processing
-   *
-   * NO Vision API calls during browsing - all analysis happens at the end.
+   * Now delegates to AI-driven navigation for intelligent browsing.
+   * The AI decides what to click, scroll, and type based on the
+   * accessibility tree and current goals.
    *
    * @param targetMinutes - Total browsing time
    * @param userInterests - Topics to search for
    * @returns BrowsingSession with all captured screenshots
    */
   async browseAndCapture(targetMinutes, userInterests) {
+    return this.browseWithAINavigation(targetMinutes, userInterests);
+  }
+  /**
+   * [DEPRECATED] Original hardcoded browsing session.
+   * Kept for reference but no longer used.
+   */
+  async browseAndCaptureHardcoded(targetMinutes, userInterests) {
     const startTime = Date.now();
     this.page = await this.context.newPage();
     this.ghost = new GhostMouse(this.page);
     this.scroll = new HumanScroll(this.page);
     this.navigator = new A11yNavigator(this.page);
     this.vision = new ContentVision(this.apiKey);
-    this.strategicGaze = new StrategicGaze(this.apiKey);
     this.screenshotCollector = new ScreenshotCollector(this.page, {
       maxCaptures: 60,
-      // Capture more, ImageTagger will filter to best 25
       jpegQuality: 85,
       minScrollDelta: 200,
       saveToDirectory: path4.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
     });
+    this.contentReadiness = new ContentReadiness(this.page);
     if (this.debugMode) {
       await this.ghost.enableVisibleCursor();
     }
@@ -6510,6 +8956,7 @@ var InstagramScraper = class {
         console.log(`  \u2705 Clicked dropdown result: "${searchResult.matchedResult}"`);
       }
       await this.humanDelay(3e3, 5e3);
+      await this.contentReadiness.ensureViewportClear();
       const currentView = await this.navigator.getContentState();
       if (currentView.currentView === "profile") {
         console.log(`  \u{1F4CD} On profile page, capturing...`);
@@ -6572,6 +9019,7 @@ var InstagramScraper = class {
       }
       stuckCount = 0;
       lastStoryHash = currentHash;
+      await this.contentReadiness.ensureViewportClear();
       const videoInfo = await this.navigator.detectVideoContent();
       if (videoInfo.isVideo) {
         console.log(`  \u{1F3AC} Video story - capturing frames`);
@@ -6601,7 +9049,10 @@ var InstagramScraper = class {
    * @returns true if advancement was attempted
    */
   async advanceStory() {
-    const nextBtn = await this.navigator.findEdgeButton("right");
+    const storyContainer = await this.navigator.findStoryViewerContainer();
+    const nextBtn = await this.navigator.findEdgeButton("right", {
+      containerNodeId: storyContainer || void 0
+    });
     if (nextBtn?.boundingBox) {
       console.log(`  \u27A1\uFE0F Clicking next: "${nextBtn.name}" at x=${Math.round(nextBtn.boundingBox.x)}`);
       await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
@@ -6684,13 +9135,27 @@ var InstagramScraper = class {
           break;
         }
         await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
-        await this.humanDelay(800, 1500);
-        const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
-        if (currentSlideIndicator && previousSlideIndicator && currentSlideIndicator.current === previousSlideIndicator.current) {
-          console.log(`  \u{1F3A0} Slide unchanged after click (still ${currentSlideIndicator.current}), stopping carousel`);
+        const transitionStart = Date.now();
+        const maxTransitionWait = 3e3;
+        let slideTransitioned = false;
+        while (Date.now() - transitionStart < maxTransitionWait) {
+          const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+          if (currentSlideIndicator && previousSlideIndicator && currentSlideIndicator.current !== previousSlideIndicator.current) {
+            const readiness = await this.contentReadiness.waitForImagesLoaded(2e3);
+            if (!readiness.ready) {
+              console.log(`  \u{1F3A0} Slide image not fully loaded (${readiness.details})`);
+            }
+            previousSlideIndicator = currentSlideIndicator;
+            slideTransitioned = true;
+            break;
+          }
+          await this.humanDelay(100, 200);
+        }
+        if (!slideTransitioned) {
+          console.log(`  \u{1F3A0} Slide unchanged after ${maxTransitionWait}ms, stopping carousel`);
           break;
         }
-        previousSlideIndicator = currentSlideIndicator;
+        await this.humanDelay(200, 400);
         await this.screenshotCollector.captureCurrentPost("carousel");
         slideCount++;
         capturedSlides++;
@@ -6729,6 +9194,10 @@ var InstagramScraper = class {
         console.log("\u{1F4F8} Max captures reached, stopping browse");
         break;
       }
+      const viewportClear = await this.contentReadiness.ensureViewportClear();
+      if (!viewportClear) {
+        console.log("  \u26A0\uFE0F Could not clear blocking overlay, attempting to continue...");
+      }
       const currentScrollY = await this.scroll.getScrollPosition();
       const posts = await this.navigator.findPostElementsAtomic();
       let targetPost = null;
@@ -6753,7 +9222,11 @@ var InstagramScraper = class {
           console.log(`  \u26A0\uFE0F Centering incomplete (offset: ${Math.round(centerResult.finalOffset)}px), using fallback`);
           await this.scroll.scroll({ baseDistance: 350 });
         }
-        await this.humanDelay(400, 800);
+        const readiness = await this.contentReadiness.waitForContentReady(2500);
+        if (!readiness.ready) {
+          console.log(`  \u23F3 Content not fully ready: ${readiness.reason} (waited ${readiness.waitedMs}ms)`);
+        }
+        await this.humanDelay(200, 400);
         const adCheck = await this.navigator.detectAdContent();
         if (adCheck.isAd) {
           console.log(`  \u{1F6AB} Skipping ad: ${adCheck.reason}`);
@@ -6762,6 +9235,16 @@ var InstagramScraper = class {
           continue;
         }
         const exploration = await this.explorePostDeeply();
+        const driftCheck = await this.contentReadiness.checkElementDrift(
+          targetPost.backendNodeId,
+          80
+          // tolerance: 80px (matches centering tolerance)
+        );
+        if (driftCheck?.drifted) {
+          console.log(`  \u{1F4CD} Element drifted ${Math.round(driftCheck.drift)}px, re-centering...`);
+          await this.scroll.scrollToElementCentered(targetPost.backendNodeId, 1);
+          await this.contentReadiness.waitForImagesLoaded(1e3);
+        }
         if (!exploration.isCarousel) {
           await this.screenshotCollector.captureCurrentPost("feed");
         }
@@ -6987,16 +9470,8 @@ var InstagramScraper = class {
         console.log(`  \u{1F3AF} Found next via spatial: "${nextStoryBtn.name}" at x=${nextStoryBtn.boundingBox.x}`);
         await this.ghost.clickElement(nextStoryBtn.boundingBox, 0.3);
       } else {
-        const viewportSize = this.page.viewportSize();
-        if (viewportSize) {
-          const rightZone = {
-            x: viewportSize.width * 0.6,
-            y: viewportSize.height * 0.2,
-            width: viewportSize.width * 0.35,
-            height: viewportSize.height * 0.6
-          };
-          await this.ghost.clickElement(rightZone, 0.2);
-        }
+        console.log("  \u27A1\uFE0F No button found, using keyboard to advance");
+        await this.page.keyboard.press("ArrowRight");
       }
       await this.humanDelay(1e3, 2e3);
     }
@@ -7290,16 +9765,8 @@ var InstagramScraper = class {
         if (nextBtn?.boundingBox) {
           await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
         } else {
-          const viewportSize = this.page.viewportSize();
-          if (viewportSize) {
-            const rightZone = {
-              x: viewportSize.width * 0.7,
-              y: viewportSize.height * 0.3,
-              width: viewportSize.width * 0.25,
-              height: viewportSize.height * 0.4
-            };
-            await this.ghost.clickElement(rightZone, 0.2);
-          }
+          console.log("  \u27A1\uFE0F No button found, using keyboard to advance");
+          await this.page.keyboard.press("ArrowRight");
         }
         await this.humanDelay(5e3, 8e3);
       }
@@ -7418,13 +9885,12 @@ var InstagramScraper = class {
       const contentState = await this.navigator.getContentState();
       const scrollPos = await this.scroll.getScrollPosition();
       const contentDensity = await this.navigator.analyzeContentDensity();
-      const gazeTargets = await this.navigator.findGazeTargets(5);
-      const visibleElements = gazeTargets.map((t2) => `${t2.role}:${t2.label.slice(0, 20)}`);
       return {
         view: contentState.currentView,
         scrollPosition: scrollPos,
         contentType: contentDensity.type,
-        visibleElements
+        visibleElements: []
+        // Simplified - no longer tracking gaze targets
       };
     } catch {
       return { view: "unknown" };
@@ -7443,7 +9909,6 @@ var InstagramScraper = class {
         waitUntil: "domcontentloaded"
       });
       await this.humanDelay(2e3, 3e3);
-      this.strategicGaze.reset();
       this.lastKnownView = "feed";
     }
   }
@@ -7455,79 +9920,21 @@ var InstagramScraper = class {
     return new Promise((resolve) => setTimeout(resolve, delay));
   }
   // =========================================================================
-  // GAZE-AWARE INTERACTION METHODS
+  // HUMAN-LIKE INTERACTION METHODS
   // =========================================================================
   /**
-   * Click an element with human-like gaze simulation.
+   * Click an element with human-like behavior.
    *
-   * This implements the "Look, then Move" pattern:
-   * 1. Check if view changed (triggers LLM gaze planning)
-   * 2. Find nearby visually interesting elements (gaze anchors)
-   * 3. Execute gaze-lag movement: scan anchors → ballistic → corrective → click
-   *
-   * Falls back to normal clicking if gaze planning fails.
+   * Uses Bezier curve movement, Gaussian click positioning, and role-specific
+   * timing for natural interaction.
    *
    * @param boundingBox - Element to click
    * @param role - Accessibility role for timing adjustment
-   * @param action - Optional action description for intent inference
+   * @param _action - Optional action description (unused, kept for compatibility)
    */
-  async clickWithGaze(boundingBox, role = "button", action) {
+  async clickWithGaze(boundingBox, role = "button", _action) {
     try {
-      const currentState = await this.navigator.getContentState();
-      const currentView = currentState.currentView;
-      let gazeTargets = [];
-      if (currentView !== this.lastKnownView) {
-        this.lastKnownView = currentView;
-        const intent = StrategicGaze.inferIntent(currentView, action);
-        const spatialMap = await this.navigator.getSpatialMap(15);
-        if (spatialMap.length > 0) {
-          const strategy = await this.strategicGaze.planGazeStrategy(
-            currentView,
-            spatialMap,
-            intent
-          );
-          if (strategy && strategy.gazeAnchors.length > 0) {
-            const viewport = await this.navigator.getViewportInfo();
-            const denormalized = this.strategicGaze.denormalizeStrategy(
-              strategy,
-              viewport.width,
-              viewport.height
-            );
-            gazeTargets = denormalized.gazeAnchors.map((point) => ({
-              point,
-              role: "unknown",
-              label: "LLM anchor",
-              salience: strategy.confidence,
-              boundingBox: { x: point.x - 10, y: point.y - 10, width: 20, height: 20 }
-            }));
-            console.log(`  \u{1F441}\uFE0F Gaze strategy: ${gazeTargets.length} anchors (LLM confidence: ${strategy.confidence.toFixed(2)})`);
-          }
-        }
-      }
-      if (gazeTargets.length === 0) {
-        gazeTargets = await this.navigator.findGazeTargets(2);
-        if (gazeTargets.length > 0) {
-          console.log(`  \u{1F441}\uFE0F Gaze targets: ${gazeTargets.length} (deterministic)`);
-        }
-      }
-      const primaryTarget = {
-        x: boundingBox.x + boundingBox.width / 2,
-        y: boundingBox.y + boundingBox.height / 2
-      };
-      if (this.debugMode && gazeTargets.length > 0) {
-        await this.navigator.drawGazeOverlay(gazeTargets, primaryTarget, true);
-      }
-      if (gazeTargets.length > 0) {
-        await this.ghost.investigateAndClickElement(
-          boundingBox,
-          gazeTargets,
-          role,
-          0.3
-          // centerBias
-        );
-      } else {
-        await this.ghost.clickElementWithRole(boundingBox, role, 0.3);
-      }
+      await this.ghost.clickElementWithRole(boundingBox, role, 0.3);
     } catch (error) {
       console.warn("  \u26A0\uFE0F Gaze-aware click failed, using fallback:", error);
       await this.ghost.clickElement(boundingBox, 0.3);
@@ -7542,6 +9949,422 @@ var InstagramScraper = class {
   async scrollWithIntent(config) {
     return this.scroll.scrollWithIntent(this.navigator, config);
   }
+  // =========================================================================
+  // AI-DRIVEN NAVIGATION (Replaces hardcoded phase logic)
+  // =========================================================================
+  /**
+   * Browse Instagram using AI-driven navigation.
+   *
+   * Instead of hardcoded phases (search → stories → feed), this method
+   * uses an LLM to decide each navigation action based on the current
+   * accessibility tree and session goals.
+   *
+   * @param targetMinutes - Total browsing time
+   * @param userInterests - Topics to search for
+   * @param config - Navigation loop configuration
+   * @returns BrowsingSession with captured screenshots
+   */
+  async browseWithAINavigation(targetMinutes, userInterests, config) {
+    const startTime = Date.now();
+    const targetDurationMs = targetMinutes * 60 * 1e3;
+    this.page = await this.context.newPage();
+    this.ghost = new GhostMouse(this.page);
+    this.scroll = new HumanScroll(this.page);
+    this.navigator = new A11yNavigator(this.page);
+    this.vision = new ContentVision(this.apiKey);
+    this.screenshotCollector = new ScreenshotCollector(this.page, {
+      maxCaptures: 60,
+      jpegQuality: 85,
+      minScrollDelta: 200,
+      saveToDirectory: path4.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
+    });
+    this.contentReadiness = new ContentReadiness(this.page);
+    this.navigationLLM = new NavigationLLM({ apiKey: this.apiKey });
+    this.navigationExecutor = new NavigationExecutor(
+      this.page,
+      this.ghost,
+      this.scroll,
+      this.navigator
+    );
+    if (this.debugMode) {
+      await this.ghost.enableVisibleCursor();
+      this.debugOverlay = new DebugOverlay(this.page);
+      await this.debugOverlay.enable();
+    }
+    const loopConfig = {
+      maxActions: config?.maxActions || 200,
+      // Higher limit - LLM controls termination
+      maxDurationMs: config?.maxDurationMs || 5 * 60 * 1e3,
+      // 5 minutes default
+      minPostsForCompletion: config?.minPostsForCompletion || 5,
+      // LLM decides actual completion
+      actionDelayMs: config?.actionDelayMs || [300, 1e3]
+      // Faster - LLM controls pacing via linger
+    };
+    try {
+      console.log("\u{1F310} Navigating to Instagram...");
+      await this.page.goto("https://www.instagram.com/", {
+        waitUntil: "domcontentloaded"
+      });
+      await this.humanDelay(2e3, 4e3);
+      const state = await this.navigator.getContentState();
+      console.log("\u{1F4CA} Content State:", state);
+      if (state.currentView === "login") {
+        throw new Error("SESSION_EXPIRED");
+      }
+      console.log("\n\u{1F916} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+      console.log("\u{1F916} AI NAVIGATION MODE ACTIVE");
+      console.log("\u{1F916} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
+      await this.runNavigationLoop(
+        userInterests,
+        loopConfig,
+        startTime
+      );
+    } catch (error) {
+      console.error("\u274C AI Navigation error:", error.message);
+      if (["SESSION_EXPIRED", "RATE_LIMITED"].includes(error.message)) {
+        throw error;
+      }
+    } finally {
+      if (this.debugOverlay) {
+        await this.debugOverlay.disable();
+      }
+      console.log(`
+\u{1F4CA} AI Navigation Summary:`);
+      console.log(`   - Decisions made: ${this.navigationLLM.getDecisionCount()}`);
+      console.log(`   - Estimated LLM cost: $${this.navigationLLM.getEstimatedCost().toFixed(4)}`);
+      console.log(`   - Screenshots captured: ${this.screenshotCollector.getCaptureCount()}`);
+      this.screenshotCollector.logSummary();
+      await this.page.close();
+    }
+    return {
+      captures: this.screenshotCollector.getCaptures(),
+      sessionDuration: Date.now() - startTime,
+      captureCount: this.screenshotCollector.getCaptureCount(),
+      scrapedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  /**
+   * LLM-DRIVEN NAVIGATION LOOP
+   *
+   * The LLM has FULL STRATEGIC CONTROL over:
+   * - Phase transitions (search/stories/feed)
+   * - Session termination
+   * - Capture timing
+   * - Pacing (linger duration)
+   *
+   * No hardcoded phase sequence, time budgets, or termination thresholds.
+   * The LLM decides everything based on content quality and session context.
+   */
+  async runNavigationLoop(userInterests, config, startTime) {
+    let actionCount = 0;
+    let postsCollected = 0;
+    let storiesWatched = 0;
+    const interestsSearched = [];
+    let currentPhase = "search";
+    const phaseHistory = [];
+    let phaseStartTime = Date.now();
+    let phaseItemsCollected = 0;
+    let totalPostsSeen = 0;
+    const uniquePosts = /* @__PURE__ */ new Set();
+    let adsSkipped = 0;
+    const engagementState = {
+      level: "feed",
+      levelEnteredAt: Date.now(),
+      deeplyExploredPostUrls: []
+    };
+    console.log("\n\u{1F916} LLM-DRIVEN NAVIGATION LOOP STARTED");
+    console.log(`   Total budget: ${(config.maxDurationMs / 1e3 / 60).toFixed(1)} minutes`);
+    console.log(`   Interests: ${userInterests.join(", ")}`);
+    while (actionCount < config.maxActions) {
+      const elapsed = Date.now() - startTime;
+      if (elapsed >= config.maxDurationMs) {
+        console.log("\u23F0 Time limit reached, stopping navigation");
+        break;
+      }
+      const state = await this.navigator.getContentState();
+      const elements = await this.navigator.getNavigationElements(30);
+      const treeSummary = await this.navigator.buildTreeSummaryForLLM();
+      const context = {
+        sessionId: `session-${startTime}`,
+        startTime,
+        targetDurationMs: config.maxDurationMs,
+        url: this.page.url(),
+        view: state.currentView,
+        currentGoal: this.getGoalForPhase(currentPhase, userInterests, interestsSearched),
+        userInterests,
+        postsCollected,
+        storiesWatched,
+        interestsSearched,
+        actionsRemaining: config.maxActions - actionCount,
+        recentActions: this.navigationExecutor.getRecentActions(5),
+        // Strategic context for LLM decision-making
+        timeRemainingMs: config.maxDurationMs - elapsed,
+        currentPhase,
+        phaseHistory,
+        captureCount: this.screenshotCollector.getPhotoCount(),
+        videoState: state.hasVideo ? {
+          isPlaying: true,
+          // Assume playing if detected
+          duration: 0,
+          // Unknown without CDP query
+          currentTime: 0
+        } : void 0,
+        contentStats: {
+          uniquePostsRatio: totalPostsSeen > 0 ? uniquePosts.size / totalPostsSeen : 1,
+          adRatio: totalPostsSeen > 0 ? adsSkipped / totalPostsSeen : 0,
+          engagementLevel: this.estimateEngagementLevel(postsCollected, elapsed)
+        },
+        // Deep engagement state
+        engagementState,
+        // Tree summary for dynamic page awareness
+        treeSummary
+      };
+      const decision = await this.navigationLLM.decideAction(context, elements);
+      console.log(`  \u{1F916} Decision: ${decision.action} - ${decision.reasoning}`);
+      if (decision.strategic) {
+        if (decision.strategic.switchPhase) {
+          console.log(`  \u{1F3AF} Strategic: Switch to ${decision.strategic.switchPhase} phase`);
+        }
+        if (decision.strategic.terminateSession) {
+          console.log(`  \u{1F3AF} Strategic: Terminate session - ${decision.strategic.reason}`);
+        }
+        if (decision.strategic.captureNow) {
+          console.log(`  \u{1F3AF} Strategic: Capture now`);
+        }
+        if (decision.strategic.lingerDuration) {
+          console.log(`  \u{1F3AF} Strategic: Linger ${decision.strategic.lingerDuration}`);
+        }
+        if (decision.strategic.engageDepth) {
+          console.log(`  \u{1F50D} Strategic: Engage at depth ${decision.strategic.engageDepth}`);
+        }
+        if (decision.strategic.closeEngagement) {
+          console.log(`  \u{1F6AA} Strategic: Close engagement`);
+        }
+      }
+      if (this.debugOverlay) {
+        let targetElement = void 0;
+        if (decision.action === "click") {
+          const clickParams = decision.params;
+          targetElement = elements.find((e) => e.id === clickParams.id);
+        }
+        const debugState = {
+          phase: currentPhase,
+          timeRemainingMs: config.maxDurationMs - elapsed,
+          captureCount: this.screenshotCollector.getPhotoCount(),
+          engagementLevel: engagementState.level,
+          carouselState: engagementState.carouselState ? {
+            currentSlide: engagementState.carouselState.currentSlide,
+            totalSlides: engagementState.carouselState.totalSlides
+          } : void 0,
+          currentPostUsername: engagementState.currentPost?.username,
+          action: decision.action,
+          targetId: targetElement?.id,
+          targetName: targetElement?.name,
+          targetRole: targetElement?.role,
+          confidence: decision.confidence,
+          reasoning: decision.reasoning,
+          postsCollected,
+          actionsRemaining: config.maxActions - actionCount
+        };
+        await this.debugOverlay.updateState(debugState);
+        if (decision.action === "click" && targetElement?.boundingBox) {
+          await this.debugOverlay.clearHighlights();
+          await this.debugOverlay.highlightElement(
+            targetElement.boundingBox,
+            `#${targetElement.id} ${targetElement.role}: "${targetElement.name?.slice(0, 25)}..."`
+          );
+          const clickPoint = {
+            x: targetElement.boundingBox.x + targetElement.boundingBox.width / 2,
+            y: targetElement.boundingBox.y + targetElement.boundingBox.height / 2
+          };
+          await this.debugOverlay.showClickTarget(clickPoint, "CLICK");
+          await this.humanDelay(300, 500);
+        }
+      }
+      if (decision.strategic?.terminateSession) {
+        console.log(`
+\u2705 LLM terminated session: ${decision.strategic.reason || "Content exhausted"}`);
+        break;
+      }
+      if (decision.strategic?.switchPhase && decision.strategic.switchPhase !== currentPhase) {
+        const newPhase = decision.strategic.switchPhase;
+        phaseHistory.push({
+          phase: currentPhase,
+          durationMs: Date.now() - phaseStartTime,
+          itemsCollected: phaseItemsCollected
+        });
+        console.log(`
+\u{1F504} LLM Phase transition: ${currentPhase} \u2192 ${newPhase}`);
+        console.log(`   Reason: ${decision.strategic.reason || "LLM decision"}`);
+        currentPhase = newPhase;
+        phaseStartTime = Date.now();
+        phaseItemsCollected = 0;
+        if (newPhase === "complete") {
+          console.log("\u2705 LLM signaled session complete");
+          break;
+        }
+      }
+      const result = await this.navigationExecutor.execute(decision, elements);
+      if (this.debugOverlay) {
+        await this.debugOverlay.clearHighlights();
+      }
+      if (result.success) {
+        console.log(`  \u2705 Action succeeded`);
+        totalPostsSeen++;
+        const postId = `${result.resultingUrl}-${actionCount}`;
+        uniquePosts.add(postId);
+        const newState = await this.navigator.getContentState();
+        if (newState.currentView === "story") {
+          storiesWatched++;
+          phaseItemsCollected++;
+        }
+        const shouldCapture = decision.capture?.shouldCapture && result.focusedElement || decision.strategic?.captureNow;
+        if (shouldCapture) {
+          await this.humanDelay(500, 800);
+          let source = "feed";
+          if (newState.currentView === "story") {
+            source = "story";
+          } else if (newState.currentView === "profile") {
+            source = "profile";
+          } else if (this.page.url().includes("/explore") || this.page.url().includes("search")) {
+            source = "search";
+          }
+          const postBounds = await this.navigator.findPostContentBounds();
+          const captureBounds = postBounds || result.focusedElement?.boundingBox;
+          if (captureBounds) {
+            const captureReason = decision.capture?.reason || decision.strategic?.reason || "LLM strategic capture";
+            const captured = await this.screenshotCollector.captureFocusedElement(
+              captureBounds,
+              source,
+              context.currentGoal.target,
+              captureReason
+            );
+            if (captured) {
+              postsCollected++;
+              phaseItemsCollected++;
+              console.log(`  \u{1F4F8} Capture: ${captureReason}${postBounds ? " (full post)" : " (element)"}`);
+            }
+          }
+        }
+        if (decision.strategic?.lingerDuration) {
+          await this.navigationExecutor.executeLinger(decision.strategic);
+        }
+        const engagementLevel = await this.navigator.detectEngagementLevel();
+        if (engagementLevel.level !== engagementState.level) {
+          console.log(`  \u{1F4CD} Engagement: ${engagementState.level} \u2192 ${engagementLevel.level}`);
+          engagementState.level = engagementLevel.level;
+          engagementState.levelEnteredAt = Date.now();
+          if (engagementLevel.level === "post_modal" && engagementLevel.postUrl) {
+            engagementState.currentPost = {
+              postUrl: engagementLevel.postUrl,
+              username: engagementLevel.username
+            };
+            engagementState.entryAction = "clicked_post";
+          }
+          if (engagementLevel.level === "profile") {
+            engagementState.currentPost = {
+              username: engagementLevel.username
+            };
+            engagementState.entryAction = "clicked_username";
+          }
+        }
+        if (engagementState.level === "post_modal") {
+          const metrics = await this.navigator.extractPostEngagementMetrics();
+          engagementState.postMetrics = {
+            likeCount: metrics.likeCount,
+            commentCount: metrics.commentCount,
+            hasVideo: metrics.hasVideo
+          };
+          if (metrics.carouselState) {
+            const prevSlide = engagementState.carouselState?.currentSlide || 0;
+            engagementState.carouselState = {
+              currentSlide: metrics.carouselState.currentSlide,
+              totalSlides: metrics.carouselState.totalSlides,
+              fullyExplored: metrics.carouselState.currentSlide === metrics.carouselState.totalSlides
+            };
+            if (prevSlide !== metrics.carouselState.currentSlide) {
+              console.log(`  \u{1F3A0} Carousel: Slide ${metrics.carouselState.currentSlide}/${metrics.carouselState.totalSlides}`);
+            }
+          }
+        }
+        if (decision.strategic?.closeEngagement) {
+          if (engagementState.currentPost?.postUrl) {
+            engagementState.deeplyExploredPostUrls.push(engagementState.currentPost.postUrl);
+            console.log(`  \u2713 Added to explored posts (${engagementState.deeplyExploredPostUrls.length} total)`);
+          }
+          if (decision.action === "press" && decision.params.key === "Escape") {
+            engagementState.level = "feed";
+            engagementState.currentPost = void 0;
+            engagementState.carouselState = void 0;
+            engagementState.postMetrics = void 0;
+            engagementState.entryAction = void 0;
+            engagementState.levelEnteredAt = Date.now();
+          }
+        }
+      } else {
+        console.log(`  \u274C Action failed: ${result.errorMessage}`);
+      }
+      actionCount++;
+      if (this.navigationExecutor.isInLoop()) {
+        console.log("  \u26A0\uFE0F Loop detected, attempting recovery");
+        await this.page.keyboard.press("Escape");
+        await this.humanDelay(1e3, 2e3);
+      }
+      if (!decision.strategic?.lingerDuration) {
+        const [minDelay, maxDelay] = config.actionDelayMs;
+        await this.humanDelay(minDelay / 2, maxDelay / 2);
+      }
+    }
+    phaseHistory.push({
+      phase: currentPhase,
+      durationMs: Date.now() - phaseStartTime,
+      itemsCollected: phaseItemsCollected
+    });
+    console.log(`
+\u{1F4CA} LLM Navigation Complete:`);
+    console.log(`   Actions: ${actionCount}`);
+    console.log(`   Posts captured: ${postsCollected}`);
+    console.log(`   Stories watched: ${storiesWatched}`);
+    console.log(`   Unique content ratio: ${(uniquePosts.size / Math.max(totalPostsSeen, 1) * 100).toFixed(0)}%`);
+    console.log(`   Posts deeply explored: ${engagementState.deeplyExploredPostUrls.length}`);
+    console.log(`   Phase history: ${phaseHistory.map((p) => `${p.phase}(${(p.durationMs / 1e3).toFixed(0)}s)`).join(" \u2192 ")}`);
+  }
+  /**
+   * Estimate engagement level based on capture rate.
+   */
+  estimateEngagementLevel(postsCollected, elapsedMs) {
+    const capturesPerMinute = postsCollected / (elapsedMs / 6e4);
+    if (capturesPerMinute > 3) return "high";
+    if (capturesPerMinute > 1) return "medium";
+    return "low";
+  }
+  /**
+   * Get the navigation goal for a given phase.
+   * Note: Time allocation is now fully LLM-controlled.
+   * These goals provide hints but LLM decides actual duration.
+   */
+  getGoalForPhase(phase, userInterests, interestsSearched) {
+    switch (phase) {
+      case "search":
+        const nextInterest = userInterests.find((i) => !interestsSearched.includes(i));
+        if (nextInterest) {
+          return {
+            type: "search_interest",
+            target: nextInterest
+          };
+        }
+        return { type: "general_browse" };
+      case "stories":
+        return { type: "watch_stories" };
+      case "feed":
+        return { type: "browse_feed" };
+      default:
+        return { type: "general_browse" };
+    }
+  }
+  // NOTE: shouldTransitionPhase() and getNextPhase() removed
+  // LLM now controls phase transitions through strategic decisions
 };
 
 // src/main/services/AnalysisGenerator.ts

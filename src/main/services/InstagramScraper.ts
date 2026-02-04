@@ -20,8 +20,8 @@ import { HumanScroll } from './HumanScroll.js';
 import { A11yNavigator } from './A11yNavigator.js';
 import { ContentVision } from './ContentVision.js';
 import { UsageService } from './UsageService.js';
-import { StrategicGaze } from './StrategicGaze.js';
 import { ScreenshotCollector } from './ScreenshotCollector.js';
+import { ContentReadiness } from './ContentReadiness.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -31,9 +31,21 @@ import {
     ScrapedSession,
     BrowsingSession,
     BoundingBox,
-    ContentState,
-    GazeTarget
+    ContentState
 } from '../../types/instagram.js';
+import {
+    NavigationContext,
+    NavigationGoal,
+    NavigationLoopConfig,
+    BrowsingPhase,
+    ActionRecord,
+    EngagementState,
+    EngagementLevel,
+    PressParams
+} from '../../types/navigation.js';
+import { NavigationLLM } from './NavigationLLM.js';
+import { NavigationExecutor } from './NavigationExecutor.js';
+import { DebugOverlay, DebugState } from './DebugOverlay.js';
 
 // ============================================================================
 // DEBUGGING & AUDIT TRAIL TYPES
@@ -92,9 +104,14 @@ export class InstagramScraper {
     private scroll!: HumanScroll;
     private navigator!: A11yNavigator;
     private vision!: ContentVision;
-    private strategicGaze!: StrategicGaze;
     private screenshotCollector!: ScreenshotCollector;
+    private contentReadiness!: ContentReadiness;
     private page!: Page;
+
+    // AI Navigation
+    private navigationLLM!: NavigationLLM;
+    private navigationExecutor!: NavigationExecutor;
+    private debugOverlay?: DebugOverlay;
 
     // Track current view for gaze planning
     private lastKnownView: ContentState['currentView'] = 'unknown';
@@ -164,7 +181,6 @@ export class InstagramScraper {
         this.scroll = new HumanScroll(this.page);
         this.navigator = new A11yNavigator(this.page);
         this.vision = new ContentVision(this.apiKey);
-        this.strategicGaze = new StrategicGaze(this.apiKey);
 
         // Enable visible cursor in debug mode
         if (this.debugMode) {
@@ -282,18 +298,27 @@ export class InstagramScraper {
     /**
      * Screenshot-First Browsing Session.
      *
-     * This is the new architecture that:
-     * 1. Browses Instagram naturally (like a human would)
-     * 2. Screenshots each post/story as encountered
-     * 3. Returns all screenshots for batch LLM processing
-     *
-     * NO Vision API calls during browsing - all analysis happens at the end.
+     * Now delegates to AI-driven navigation for intelligent browsing.
+     * The AI decides what to click, scroll, and type based on the
+     * accessibility tree and current goals.
      *
      * @param targetMinutes - Total browsing time
      * @param userInterests - Topics to search for
      * @returns BrowsingSession with all captured screenshots
      */
     async browseAndCapture(
+        targetMinutes: number,
+        userInterests: string[]
+    ): Promise<BrowsingSession> {
+        // Delegate to AI-driven navigation
+        return this.browseWithAINavigation(targetMinutes, userInterests);
+    }
+
+    /**
+     * [DEPRECATED] Original hardcoded browsing session.
+     * Kept for reference but no longer used.
+     */
+    private async browseAndCaptureHardcoded(
         targetMinutes: number,
         userInterests: string[]
     ): Promise<BrowsingSession> {
@@ -304,14 +329,14 @@ export class InstagramScraper {
         this.ghost = new GhostMouse(this.page);
         this.scroll = new HumanScroll(this.page);
         this.navigator = new A11yNavigator(this.page);
-        this.vision = new ContentVision(this.apiKey);  // Keep for potential fallback
-        this.strategicGaze = new StrategicGaze(this.apiKey);
+        this.vision = new ContentVision(this.apiKey);
         this.screenshotCollector = new ScreenshotCollector(this.page, {
-            maxCaptures: 60,  // Capture more, ImageTagger will filter to best 25
+            maxCaptures: 60,
             jpegQuality: 85,
             minScrollDelta: 200,
             saveToDirectory: path.join(os.homedir(), 'Documents', 'Kowalski', 'debug-screenshots')
         });
+        this.contentReadiness = new ContentReadiness(this.page);
 
         // Enable visible cursor in debug mode
         if (this.debugMode) {
@@ -421,7 +446,10 @@ export class InstagramScraper {
             // 3. Wait for results to load
             await this.humanDelay(3000, 5000);
 
-            // 4. Check if we're on a profile page
+            // 4. FOCUS CHECK: Ensure no overlays are blocking before capture
+            await this.contentReadiness.ensureViewportClear();
+
+            // Check if we're on a profile page
             const currentView = await this.navigator.getContentState();
             if (currentView.currentView === 'profile') {
                 console.log(`  📍 On profile page, capturing...`);
@@ -508,6 +536,9 @@ export class InstagramScraper {
             // New story - reset stuck counter
             stuckCount = 0;
             lastStoryHash = currentHash;
+
+            // FOCUS CHECK: Ensure no overlays are blocking the story
+            await this.contentReadiness.ensureViewportClear();
 
             // Check if this story is a video
             const videoInfo = await this.navigator.detectVideoContent();
@@ -675,16 +706,37 @@ export class InstagramScraper {
 
                 // Click next slide
                 await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
-                await this.humanDelay(800, 1500); // Wait for slide transition
 
-                // VERIFY slide actually changed before capturing
-                const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
-                if (currentSlideIndicator && previousSlideIndicator &&
-                    currentSlideIndicator.current === previousSlideIndicator.current) {
-                    console.log(`  🎠 Slide unchanged after click (still ${currentSlideIndicator.current}), stopping carousel`);
+                // STATE-BASED TRANSITION VERIFICATION: Wait for slide indicator to change
+                const transitionStart = Date.now();
+                const maxTransitionWait = 3000;
+                let slideTransitioned = false;
+
+                while (Date.now() - transitionStart < maxTransitionWait) {
+                    const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
+
+                    if (currentSlideIndicator && previousSlideIndicator &&
+                        currentSlideIndicator.current !== previousSlideIndicator.current) {
+                        // Slide changed! Now wait for image to load
+                        const readiness = await this.contentReadiness.waitForImagesLoaded(2000);
+                        if (!readiness.ready) {
+                            console.log(`  🎠 Slide image not fully loaded (${readiness.details})`);
+                        }
+                        previousSlideIndicator = currentSlideIndicator;
+                        slideTransitioned = true;
+                        break;
+                    }
+
+                    await this.humanDelay(100, 200);
+                }
+
+                if (!slideTransitioned) {
+                    console.log(`  🎠 Slide unchanged after ${maxTransitionWait}ms, stopping carousel`);
                     break;  // Navigation failed
                 }
-                previousSlideIndicator = currentSlideIndicator;
+
+                // Small human pause after transition confirmed
+                await this.humanDelay(200, 400);
 
                 // Capture this slide (ScreenshotCollector will dedupe via hash if needed)
                 await this.screenshotCollector.captureCurrentPost('carousel');
@@ -736,6 +788,12 @@ export class InstagramScraper {
                 break;
             }
 
+            // FOCUS CHECK: Ensure no overlays (notifications, messages) are blocking the view
+            const viewportClear = await this.contentReadiness.ensureViewportClear();
+            if (!viewportClear) {
+                console.log('  ⚠️ Could not clear blocking overlay, attempting to continue...');
+            }
+
             // Get current scroll position for absolute Y calculation
             const currentScrollY = await this.scroll.getScrollPosition();
 
@@ -777,7 +835,14 @@ export class InstagramScraper {
                     await this.scroll.scroll({ baseDistance: 350 });
                 }
 
-                await this.humanDelay(400, 800);
+                // STATE-BASED READINESS: Wait for images to load instead of fixed delay
+                const readiness = await this.contentReadiness.waitForContentReady(2500);
+                if (!readiness.ready) {
+                    console.log(`  ⏳ Content not fully ready: ${readiness.reason} (waited ${readiness.waitedMs}ms)`);
+                }
+
+                // Small human-like pause after content ready
+                await this.humanDelay(200, 400);
 
                 // Check for ad BEFORE any capture - skip sponsored content
                 const adCheck = await this.navigator.detectAdContent();
@@ -790,6 +855,18 @@ export class InstagramScraper {
 
                 // DEEP EXPLORATION: Expand caption, check for carousel
                 const exploration = await this.explorePostDeeply();
+
+                // POSITION RE-VERIFICATION: Check if element drifted during exploration
+                const driftCheck = await this.contentReadiness.checkElementDrift(
+                    targetPost.backendNodeId,
+                    80  // tolerance: 80px (matches centering tolerance)
+                );
+
+                if (driftCheck?.drifted) {
+                    console.log(`  📍 Element drifted ${Math.round(driftCheck.drift)}px, re-centering...`);
+                    await this.scroll.scrollToElementCentered(targetPost.backendNodeId, 1);
+                    await this.contentReadiness.waitForImagesLoaded(1000);
+                }
 
                 // Capture main post (only if not already captured as part of carousel)
                 if (!exploration.isCarousel) {
@@ -1109,17 +1186,9 @@ export class InstagramScraper {
                 console.log(`  🎯 Found next via spatial: "${nextStoryBtn.name}" at x=${nextStoryBtn.boundingBox.x}`);
                 await this.ghost.clickElement(nextStoryBtn.boundingBox, 0.3);
             } else {
-                // Fallback: blind click right zone (stories may not have visible buttons)
-                const viewportSize = this.page.viewportSize();
-                if (viewportSize) {
-                    const rightZone = {
-                        x: viewportSize.width * 0.6,
-                        y: viewportSize.height * 0.2,
-                        width: viewportSize.width * 0.35,
-                        height: viewportSize.height * 0.6
-                    };
-                    await this.ghost.clickElement(rightZone, 0.2);
-                }
+                // Fallback: keyboard navigation (SAFE - no engagement risk)
+                console.log('  ➡️ No button found, using keyboard to advance');
+                await this.page.keyboard.press('ArrowRight');
             }
 
             await this.humanDelay(1000, 2000);
@@ -1530,17 +1599,9 @@ export class InstagramScraper {
                 if (nextBtn?.boundingBox) {
                     await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
                 } else {
-                    // Fallback: blind click right zone (highlights may not have visible buttons)
-                    const viewportSize = this.page.viewportSize();
-                    if (viewportSize) {
-                        const rightZone = {
-                            x: viewportSize.width * 0.7,
-                            y: viewportSize.height * 0.3,
-                            width: viewportSize.width * 0.25,
-                            height: viewportSize.height * 0.4
-                        };
-                        await this.ghost.clickElement(rightZone, 0.2);
-                    }
+                    // Fallback: keyboard navigation (SAFE - no engagement risk)
+                    console.log('  ➡️ No button found, using keyboard to advance');
+                    await this.page.keyboard.press('ArrowRight');
                 }
                 await this.humanDelay(5000, 8000);
             }
@@ -1702,15 +1763,11 @@ export class InstagramScraper {
             const scrollPos = await this.scroll.getScrollPosition();
             const contentDensity = await this.navigator.analyzeContentDensity();
 
-            // Get visible elements (limited for performance)
-            const gazeTargets = await this.navigator.findGazeTargets(5);
-            const visibleElements = gazeTargets.map(t => `${t.role}:${t.label.slice(0, 20)}`);
-
             return {
                 view: contentState.currentView,
                 scrollPosition: scrollPos,
                 contentType: contentDensity.type,
-                visibleElements
+                visibleElements: []  // Simplified - no longer tracking gaze targets
             };
         } catch {
             return { view: 'unknown' };
@@ -1731,8 +1788,6 @@ export class InstagramScraper {
                 waitUntil: 'domcontentloaded'
             });
             await this.humanDelay(2000, 3000);
-            // Reset gaze planning for new view
-            this.strategicGaze.reset();
             this.lastKnownView = 'feed';
         }
     }
@@ -1746,105 +1801,27 @@ export class InstagramScraper {
     }
 
     // =========================================================================
-    // GAZE-AWARE INTERACTION METHODS
+    // HUMAN-LIKE INTERACTION METHODS
     // =========================================================================
 
     /**
-     * Click an element with human-like gaze simulation.
+     * Click an element with human-like behavior.
      *
-     * This implements the "Look, then Move" pattern:
-     * 1. Check if view changed (triggers LLM gaze planning)
-     * 2. Find nearby visually interesting elements (gaze anchors)
-     * 3. Execute gaze-lag movement: scan anchors → ballistic → corrective → click
-     *
-     * Falls back to normal clicking if gaze planning fails.
+     * Uses Bezier curve movement, Gaussian click positioning, and role-specific
+     * timing for natural interaction.
      *
      * @param boundingBox - Element to click
      * @param role - Accessibility role for timing adjustment
-     * @param action - Optional action description for intent inference
+     * @param _action - Optional action description (unused, kept for compatibility)
      */
     private async clickWithGaze(
         boundingBox: BoundingBox,
         role: string = 'button',
-        action?: string
+        _action?: string
     ): Promise<void> {
         try {
-            // Check current view for potential gaze strategy update
-            const currentState = await this.navigator.getContentState();
-            const currentView = currentState.currentView;
-
-            // Get gaze targets - either from LLM or deterministic fallback
-            let gazeTargets: GazeTarget[] = [];
-
-            // Only plan gaze on view transitions
-            if (currentView !== this.lastKnownView) {
-                this.lastKnownView = currentView;
-
-                // Try LLM-based gaze planning (only on major view changes)
-                const intent = StrategicGaze.inferIntent(currentView, action);
-                const spatialMap = await this.navigator.getSpatialMap(15);
-
-                if (spatialMap.length > 0) {
-                    const strategy = await this.strategicGaze.planGazeStrategy(
-                        currentView,
-                        spatialMap,
-                        intent
-                    );
-
-                    if (strategy && strategy.gazeAnchors.length > 0) {
-                        // Convert normalized coordinates to screen pixels
-                        const viewport = await this.navigator.getViewportInfo();
-                        const denormalized = this.strategicGaze.denormalizeStrategy(
-                            strategy,
-                            viewport.width,
-                            viewport.height
-                        );
-
-                        // Convert to GazeTarget format (we only have points from LLM)
-                        gazeTargets = denormalized.gazeAnchors.map(point => ({
-                            point,
-                            role: 'unknown',
-                            label: 'LLM anchor',
-                            salience: strategy.confidence,
-                            boundingBox: { x: point.x - 10, y: point.y - 10, width: 20, height: 20 }
-                        }));
-
-                        console.log(`  👁️ Gaze strategy: ${gazeTargets.length} anchors (LLM confidence: ${strategy.confidence.toFixed(2)})`);
-                    }
-                }
-            }
-
-            // If no LLM strategy, use deterministic gaze target detection
-            if (gazeTargets.length === 0) {
-                gazeTargets = await this.navigator.findGazeTargets(2);
-                if (gazeTargets.length > 0) {
-                    console.log(`  👁️ Gaze targets: ${gazeTargets.length} (deterministic)`);
-                }
-            }
-
-            // Calculate primary target point (center of bounding box with slight offset)
-            const primaryTarget = {
-                x: boundingBox.x + boundingBox.width / 2,
-                y: boundingBox.y + boundingBox.height / 2
-            };
-
-            // === DEBUG: Draw Gaze Overlay in headed mode ===
-            if (this.debugMode && gazeTargets.length > 0) {
-                await this.navigator.drawGazeOverlay(gazeTargets, primaryTarget, true);
-            }
-
-            // Execute gaze-aware click
-            if (gazeTargets.length > 0) {
-                await this.ghost.investigateAndClickElement(
-                    boundingBox,
-                    gazeTargets,
-                    role,
-                    0.3  // centerBias
-                );
-            } else {
-                // Fallback to normal click with role-specific timing
-                await this.ghost.clickElementWithRole(boundingBox, role, 0.3);
-            }
+            // Click with human-like behavior (Bezier curves, jitter, role-specific timing)
+            await this.ghost.clickElementWithRole(boundingBox, role, 0.3);
 
         } catch (error) {
             // On any error, fall back to simple click
@@ -1867,4 +1844,554 @@ export class InstagramScraper {
     }): Promise<{ contentType: string; scrollDistance: number }> {
         return this.scroll.scrollWithIntent(this.navigator, config);
     }
+
+    // =========================================================================
+    // AI-DRIVEN NAVIGATION (Replaces hardcoded phase logic)
+    // =========================================================================
+
+    /**
+     * Browse Instagram using AI-driven navigation.
+     *
+     * Instead of hardcoded phases (search → stories → feed), this method
+     * uses an LLM to decide each navigation action based on the current
+     * accessibility tree and session goals.
+     *
+     * @param targetMinutes - Total browsing time
+     * @param userInterests - Topics to search for
+     * @param config - Navigation loop configuration
+     * @returns BrowsingSession with captured screenshots
+     */
+    async browseWithAINavigation(
+        targetMinutes: number,
+        userInterests: string[],
+        config?: Partial<NavigationLoopConfig>
+    ): Promise<BrowsingSession> {
+        const startTime = Date.now();
+        const targetDurationMs = targetMinutes * 60 * 1000;
+
+        this.page = await this.context.newPage();
+
+        // Initialize layer instances
+        this.ghost = new GhostMouse(this.page);
+        this.scroll = new HumanScroll(this.page);
+        this.navigator = new A11yNavigator(this.page);
+        this.vision = new ContentVision(this.apiKey);
+        this.screenshotCollector = new ScreenshotCollector(this.page, {
+            maxCaptures: 60,
+            jpegQuality: 85,
+            minScrollDelta: 200,
+            saveToDirectory: path.join(os.homedir(), 'Documents', 'Kowalski', 'debug-screenshots')
+        });
+        this.contentReadiness = new ContentReadiness(this.page);
+
+        // Initialize AI navigation services
+        this.navigationLLM = new NavigationLLM({ apiKey: this.apiKey });
+        this.navigationExecutor = new NavigationExecutor(
+            this.page,
+            this.ghost,
+            this.scroll,
+            this.navigator
+        );
+
+        // Enable visible cursor and debug overlay in debug mode
+        if (this.debugMode) {
+            await this.ghost.enableVisibleCursor();
+
+            // Initialize and enable debug overlay for visual debugging
+            this.debugOverlay = new DebugOverlay(this.page);
+            await this.debugOverlay.enable();
+        }
+
+        // Default loop configuration
+        // LLM has full strategic control - 5 minute default for debugging
+        const loopConfig: NavigationLoopConfig = {
+            maxActions: config?.maxActions || 200,  // Higher limit - LLM controls termination
+            maxDurationMs: config?.maxDurationMs || 5 * 60 * 1000,  // 5 minutes default
+            minPostsForCompletion: config?.minPostsForCompletion || 5,  // LLM decides actual completion
+            actionDelayMs: config?.actionDelayMs || [300, 1000]  // Faster - LLM controls pacing via linger
+        };
+
+        try {
+            // 1. Navigate to Instagram
+            console.log('🌐 Navigating to Instagram...');
+            await this.page.goto('https://www.instagram.com/', {
+                waitUntil: 'domcontentloaded'
+            });
+            await this.humanDelay(2000, 4000);
+
+            // 2. Check page state
+            const state = await this.navigator.getContentState();
+            console.log('📊 Content State:', state);
+
+            if (state.currentView === 'login') {
+                throw new Error('SESSION_EXPIRED');
+            }
+
+            console.log('\n🤖 ═══════════════════════════════════════');
+            console.log('🤖 AI NAVIGATION MODE ACTIVE');
+            console.log('🤖 ═══════════════════════════════════════\n');
+
+            // 3. Run AI navigation loop
+            await this.runNavigationLoop(
+                userInterests,
+                loopConfig,
+                startTime
+            );
+
+        } catch (error: any) {
+            console.error('❌ AI Navigation error:', error.message);
+            if (['SESSION_EXPIRED', 'RATE_LIMITED'].includes(error.message)) {
+                throw error;
+            }
+        } finally {
+            // Disable debug overlay before closing
+            if (this.debugOverlay) {
+                await this.debugOverlay.disable();
+            }
+
+            // Log summary
+            console.log(`\n📊 AI Navigation Summary:`);
+            console.log(`   - Decisions made: ${this.navigationLLM.getDecisionCount()}`);
+            console.log(`   - Estimated LLM cost: $${this.navigationLLM.getEstimatedCost().toFixed(4)}`);
+            console.log(`   - Screenshots captured: ${this.screenshotCollector.getCaptureCount()}`);
+
+            this.screenshotCollector.logSummary();
+            await this.page.close();
+        }
+
+        return {
+            captures: this.screenshotCollector.getCaptures(),
+            sessionDuration: Date.now() - startTime,
+            captureCount: this.screenshotCollector.getCaptureCount(),
+            scrapedAt: new Date().toISOString()
+        };
+    }
+
+    /**
+     * LLM-DRIVEN NAVIGATION LOOP
+     *
+     * The LLM has FULL STRATEGIC CONTROL over:
+     * - Phase transitions (search/stories/feed)
+     * - Session termination
+     * - Capture timing
+     * - Pacing (linger duration)
+     *
+     * No hardcoded phase sequence, time budgets, or termination thresholds.
+     * The LLM decides everything based on content quality and session context.
+     */
+    private async runNavigationLoop(
+        userInterests: string[],
+        config: NavigationLoopConfig,
+        startTime: number
+    ): Promise<void> {
+        let actionCount = 0;
+        let postsCollected = 0;
+        let storiesWatched = 0;
+        const interestsSearched: string[] = [];
+
+        // Phase tracking (LLM controls transitions)
+        let currentPhase: BrowsingPhase = 'search';
+        const phaseHistory: Array<{ phase: BrowsingPhase; durationMs: number; itemsCollected: number }> = [];
+        let phaseStartTime = Date.now();
+        let phaseItemsCollected = 0;
+
+        // Content quality tracking
+        let totalPostsSeen = 0;
+        const uniquePosts = new Set<string>();
+        let adsSkipped = 0;
+
+        // Deep engagement state (LLM-controlled)
+        const engagementState: EngagementState = {
+            level: 'feed',
+            levelEnteredAt: Date.now(),
+            deeplyExploredPostUrls: []
+        };
+
+        console.log('\n🤖 LLM-DRIVEN NAVIGATION LOOP STARTED');
+        console.log(`   Total budget: ${(config.maxDurationMs / 1000 / 60).toFixed(1)} minutes`);
+        console.log(`   Interests: ${userInterests.join(', ')}`);
+
+        while (actionCount < config.maxActions) {
+            // Check time limit (hard stop)
+            const elapsed = Date.now() - startTime;
+            if (elapsed >= config.maxDurationMs) {
+                console.log('⏰ Time limit reached, stopping navigation');
+                break;
+            }
+
+            // Get current state
+            const state = await this.navigator.getContentState();
+            const elements = await this.navigator.getNavigationElements(30);
+
+            // Get tree summary for LLM dynamic page awareness
+            const treeSummary = await this.navigator.buildTreeSummaryForLLM();
+
+            // Build comprehensive context for LLM strategic decisions
+            const context: NavigationContext = {
+                sessionId: `session-${startTime}`,
+                startTime,
+                targetDurationMs: config.maxDurationMs,
+                url: this.page.url(),
+                view: state.currentView,
+                currentGoal: this.getGoalForPhase(currentPhase, userInterests, interestsSearched),
+                userInterests,
+                postsCollected,
+                storiesWatched,
+                interestsSearched,
+                actionsRemaining: config.maxActions - actionCount,
+                recentActions: this.navigationExecutor.getRecentActions(5),
+
+                // Strategic context for LLM decision-making
+                timeRemainingMs: config.maxDurationMs - elapsed,
+                currentPhase,
+                phaseHistory,
+                captureCount: this.screenshotCollector.getPhotoCount(),
+                videoState: state.hasVideo ? {
+                    isPlaying: true,  // Assume playing if detected
+                    duration: 0,      // Unknown without CDP query
+                    currentTime: 0
+                } : undefined,
+                contentStats: {
+                    uniquePostsRatio: totalPostsSeen > 0 ? uniquePosts.size / totalPostsSeen : 1,
+                    adRatio: totalPostsSeen > 0 ? adsSkipped / totalPostsSeen : 0,
+                    engagementLevel: this.estimateEngagementLevel(postsCollected, elapsed)
+                },
+
+                // Deep engagement state
+                engagementState,
+
+                // Tree summary for dynamic page awareness
+                treeSummary
+            };
+
+            // Get LLM decision (includes strategic decisions)
+            const decision = await this.navigationLLM.decideAction(context, elements);
+            console.log(`  🤖 Decision: ${decision.action} - ${decision.reasoning}`);
+
+            // Log strategic decisions if present
+            if (decision.strategic) {
+                if (decision.strategic.switchPhase) {
+                    console.log(`  🎯 Strategic: Switch to ${decision.strategic.switchPhase} phase`);
+                }
+                if (decision.strategic.terminateSession) {
+                    console.log(`  🎯 Strategic: Terminate session - ${decision.strategic.reason}`);
+                }
+                if (decision.strategic.captureNow) {
+                    console.log(`  🎯 Strategic: Capture now`);
+                }
+                if (decision.strategic.lingerDuration) {
+                    console.log(`  🎯 Strategic: Linger ${decision.strategic.lingerDuration}`);
+                }
+                if (decision.strategic.engageDepth) {
+                    console.log(`  🔍 Strategic: Engage at depth ${decision.strategic.engageDepth}`);
+                }
+                if (decision.strategic.closeEngagement) {
+                    console.log(`  🚪 Strategic: Close engagement`);
+                }
+            }
+
+            // === DEBUG OVERLAY UPDATE ===
+            if (this.debugOverlay) {
+                // Find target element if clicking
+                let targetElement = undefined;
+                if (decision.action === 'click') {
+                    const clickParams = decision.params as { id: number };
+                    targetElement = elements.find(e => e.id === clickParams.id);
+                }
+
+                // Update debug panel with current state
+                const debugState: DebugState = {
+                    phase: currentPhase,
+                    timeRemainingMs: config.maxDurationMs - elapsed,
+                    captureCount: this.screenshotCollector.getPhotoCount(),
+                    engagementLevel: engagementState.level,
+                    carouselState: engagementState.carouselState ? {
+                        currentSlide: engagementState.carouselState.currentSlide,
+                        totalSlides: engagementState.carouselState.totalSlides
+                    } : undefined,
+                    currentPostUsername: engagementState.currentPost?.username,
+                    action: decision.action,
+                    targetId: targetElement?.id,
+                    targetName: targetElement?.name,
+                    targetRole: targetElement?.role,
+                    confidence: decision.confidence,
+                    reasoning: decision.reasoning,
+                    postsCollected,
+                    actionsRemaining: config.maxActions - actionCount
+                };
+
+                await this.debugOverlay.updateState(debugState);
+
+                // If clicking, highlight the target element
+                if (decision.action === 'click' && targetElement?.boundingBox) {
+                    await this.debugOverlay.clearHighlights();
+                    await this.debugOverlay.highlightElement(
+                        targetElement.boundingBox,
+                        `#${targetElement.id} ${targetElement.role}: "${targetElement.name?.slice(0, 25)}..."`
+                    );
+
+                    // Show crosshair at click point
+                    const clickPoint = {
+                        x: targetElement.boundingBox.x + targetElement.boundingBox.width / 2,
+                        y: targetElement.boundingBox.y + targetElement.boundingBox.height / 2
+                    };
+                    await this.debugOverlay.showClickTarget(clickPoint, 'CLICK');
+
+                    // Brief pause to see target before clicking
+                    await this.humanDelay(300, 500);
+                }
+            }
+
+            // Handle LLM strategic termination
+            if (decision.strategic?.terminateSession) {
+                console.log(`\n✅ LLM terminated session: ${decision.strategic.reason || 'Content exhausted'}`);
+                break;
+            }
+
+            // Handle LLM strategic phase switch
+            if (decision.strategic?.switchPhase && decision.strategic.switchPhase !== currentPhase) {
+                const newPhase = decision.strategic.switchPhase as BrowsingPhase;
+
+                // Record phase history
+                phaseHistory.push({
+                    phase: currentPhase,
+                    durationMs: Date.now() - phaseStartTime,
+                    itemsCollected: phaseItemsCollected
+                });
+
+                console.log(`\n🔄 LLM Phase transition: ${currentPhase} → ${newPhase}`);
+                console.log(`   Reason: ${decision.strategic.reason || 'LLM decision'}`);
+
+                currentPhase = newPhase;
+                phaseStartTime = Date.now();
+                phaseItemsCollected = 0;
+
+                if (newPhase === 'complete') {
+                    console.log('✅ LLM signaled session complete');
+                    break;
+                }
+            }
+
+            // Execute the decision
+            const result = await this.navigationExecutor.execute(decision, elements);
+
+            // Clear debug highlights after execution
+            if (this.debugOverlay) {
+                await this.debugOverlay.clearHighlights();
+            }
+
+            if (result.success) {
+                console.log(`  ✅ Action succeeded`);
+
+                // Track content seen
+                totalPostsSeen++;
+                const postId = `${result.resultingUrl}-${actionCount}`;
+                uniquePosts.add(postId);
+
+                // Track story watching
+                const newState = await this.navigator.getContentState();
+                if (newState.currentView === 'story') {
+                    storiesWatched++;
+                    phaseItemsCollected++;
+                }
+
+                // LLM-driven capture: Either through capture intent OR strategic captureNow
+                const shouldCapture = (decision.capture?.shouldCapture && result.focusedElement) ||
+                                     decision.strategic?.captureNow;
+
+                if (shouldCapture) {
+                    await this.humanDelay(500, 800); // Wait for content to stabilize
+
+                    // Determine capture source based on current view
+                    let source: 'feed' | 'story' | 'search' | 'profile' | 'carousel' = 'feed';
+                    if (newState.currentView === 'story') {
+                        source = 'story';
+                    } else if (newState.currentView === 'profile') {
+                        source = 'profile';
+                    } else if (this.page.url().includes('/explore') || this.page.url().includes('search')) {
+                        source = 'search';
+                    }
+
+                    // Find the full post content area
+                    const postBounds = await this.navigator.findPostContentBounds();
+                    const captureBounds = postBounds || result.focusedElement?.boundingBox;
+
+                    if (captureBounds) {
+                        const captureReason = decision.capture?.reason ||
+                                             decision.strategic?.reason ||
+                                             'LLM strategic capture';
+
+                        const captured = await this.screenshotCollector.captureFocusedElement(
+                            captureBounds,
+                            source,
+                            context.currentGoal.target,
+                            captureReason
+                        );
+
+                        if (captured) {
+                            postsCollected++;
+                            phaseItemsCollected++;
+                            console.log(`  📸 Capture: ${captureReason}${postBounds ? ' (full post)' : ' (element)'}`);
+                        }
+                    }
+                }
+
+                // Execute LLM-controlled linger duration
+                if (decision.strategic?.lingerDuration) {
+                    await this.navigationExecutor.executeLinger(decision.strategic);
+                }
+
+                // === DEEP ENGAGEMENT STATE TRACKING ===
+
+                // Detect engagement level change
+                const engagementLevel = await this.navigator.detectEngagementLevel();
+                if (engagementLevel.level !== engagementState.level) {
+                    console.log(`  📍 Engagement: ${engagementState.level} → ${engagementLevel.level}`);
+                    engagementState.level = engagementLevel.level;
+                    engagementState.levelEnteredAt = Date.now();
+
+                    // If entering post modal, track the post
+                    if (engagementLevel.level === 'post_modal' && engagementLevel.postUrl) {
+                        engagementState.currentPost = {
+                            postUrl: engagementLevel.postUrl,
+                            username: engagementLevel.username
+                        };
+                        engagementState.entryAction = 'clicked_post';
+                    }
+
+                    // If entering profile
+                    if (engagementLevel.level === 'profile') {
+                        engagementState.currentPost = {
+                            username: engagementLevel.username
+                        };
+                        engagementState.entryAction = 'clicked_username';
+                    }
+                }
+
+                // If in post modal, extract metrics and carousel state
+                if (engagementState.level === 'post_modal') {
+                    const metrics = await this.navigator.extractPostEngagementMetrics();
+                    engagementState.postMetrics = {
+                        likeCount: metrics.likeCount,
+                        commentCount: metrics.commentCount,
+                        hasVideo: metrics.hasVideo
+                    };
+
+                    // Update carousel state
+                    if (metrics.carouselState) {
+                        const prevSlide = engagementState.carouselState?.currentSlide || 0;
+                        engagementState.carouselState = {
+                            currentSlide: metrics.carouselState.currentSlide,
+                            totalSlides: metrics.carouselState.totalSlides,
+                            fullyExplored: metrics.carouselState.currentSlide === metrics.carouselState.totalSlides
+                        };
+
+                        // Log carousel navigation
+                        if (prevSlide !== metrics.carouselState.currentSlide) {
+                            console.log(`  🎠 Carousel: Slide ${metrics.carouselState.currentSlide}/${metrics.carouselState.totalSlides}`);
+                        }
+                    }
+                }
+
+                // Handle closeEngagement decision
+                if (decision.strategic?.closeEngagement) {
+                    // Mark post as deeply explored
+                    if (engagementState.currentPost?.postUrl) {
+                        engagementState.deeplyExploredPostUrls.push(engagementState.currentPost.postUrl);
+                        console.log(`  ✓ Added to explored posts (${engagementState.deeplyExploredPostUrls.length} total)`);
+                    }
+
+                    // If we just pressed Escape, reset engagement state
+                    if (decision.action === 'press' && (decision.params as PressParams).key === 'Escape') {
+                        engagementState.level = 'feed';
+                        engagementState.currentPost = undefined;
+                        engagementState.carouselState = undefined;
+                        engagementState.postMetrics = undefined;
+                        engagementState.entryAction = undefined;
+                        engagementState.levelEnteredAt = Date.now();
+                    }
+                }
+            } else {
+                console.log(`  ❌ Action failed: ${result.errorMessage}`);
+            }
+
+            actionCount++;
+
+            // Check for stuck/loop detection (safety net)
+            if (this.navigationExecutor.isInLoop()) {
+                console.log('  ⚠️ Loop detected, attempting recovery');
+                await this.page.keyboard.press('Escape');
+                await this.humanDelay(1000, 2000);
+            }
+
+            // Minimal delay between actions (LLM controls pacing via linger)
+            // Only add small delay if no linger was executed
+            if (!decision.strategic?.lingerDuration) {
+                const [minDelay, maxDelay] = config.actionDelayMs!;
+                await this.humanDelay(minDelay / 2, maxDelay / 2);
+            }
+        }
+
+        // Final phase history entry
+        phaseHistory.push({
+            phase: currentPhase,
+            durationMs: Date.now() - phaseStartTime,
+            itemsCollected: phaseItemsCollected
+        });
+
+        console.log(`\n📊 LLM Navigation Complete:`);
+        console.log(`   Actions: ${actionCount}`);
+        console.log(`   Posts captured: ${postsCollected}`);
+        console.log(`   Stories watched: ${storiesWatched}`);
+        console.log(`   Unique content ratio: ${(uniquePosts.size / Math.max(totalPostsSeen, 1) * 100).toFixed(0)}%`);
+        console.log(`   Posts deeply explored: ${engagementState.deeplyExploredPostUrls.length}`);
+        console.log(`   Phase history: ${phaseHistory.map(p => `${p.phase}(${(p.durationMs/1000).toFixed(0)}s)`).join(' → ')}`);
+    }
+
+    /**
+     * Estimate engagement level based on capture rate.
+     */
+    private estimateEngagementLevel(postsCollected: number, elapsedMs: number): 'low' | 'medium' | 'high' {
+        const capturesPerMinute = postsCollected / (elapsedMs / 60000);
+        if (capturesPerMinute > 3) return 'high';
+        if (capturesPerMinute > 1) return 'medium';
+        return 'low';
+    }
+
+    /**
+     * Get the navigation goal for a given phase.
+     * Note: Time allocation is now fully LLM-controlled.
+     * These goals provide hints but LLM decides actual duration.
+     */
+    private getGoalForPhase(
+        phase: BrowsingPhase,
+        userInterests: string[],
+        interestsSearched: string[]
+    ): NavigationGoal {
+        switch (phase) {
+            case 'search':
+                // Find next unsearched interest
+                const nextInterest = userInterests.find(i => !interestsSearched.includes(i));
+                if (nextInterest) {
+                    return {
+                        type: 'search_interest',
+                        target: nextInterest
+                    };
+                }
+                // Fall through to general browse if all interests searched
+                return { type: 'general_browse' };
+
+            case 'stories':
+                return { type: 'watch_stories' };
+
+            case 'feed':
+                return { type: 'browse_feed' };
+
+            default:
+                return { type: 'general_browse' };
+        }
+    }
+
+    // NOTE: shouldTransitionPhase() and getNextPhase() removed
+    // LLM now controls phase transitions through strategic decisions
 }
