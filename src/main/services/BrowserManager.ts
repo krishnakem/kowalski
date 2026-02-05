@@ -87,6 +87,8 @@ export class BrowserManager {
             // Better: launch() accepts optional 'args' array to append.
 
             const extraArgs = [];
+            let scrapingViewport: { width: number; height: number } | null = null;
+
             if (config.bounds) {
                 // APP MODE: Removes address bar and tabs for a cleaner login experience
                 // Note: --frameless is not a valid Chromium flag, removed to prevent crashes
@@ -97,7 +99,11 @@ export class BrowserManager {
                 // Randomized window size per session for fingerprint diversity
                 const windowSize = BrowserManager.generateWindowSize(config.headless);
                 extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
-                console.log(`📐 BrowserManager: Window size ${windowSize.width}x${windowSize.height} (headless=${config.headless})`);
+                // Explicit viewport ensures page content area matches exactly,
+                // regardless of window chrome. Also guarantees page.viewportSize()
+                // always returns correct values (no null fallback needed).
+                scrapingViewport = windowSize;
+                console.log(`📐 BrowserManager: Viewport ${windowSize.width}x${windowSize.height} (headless=${config.headless})`);
             }
 
             // 2. Launch Persistent Context
@@ -130,7 +136,9 @@ export class BrowserManager {
             this.browserContext = await chromium.launchPersistentContext(persistentContextPath, {
                 headless: config.headless,
                 executablePath: executablePath || undefined,
-                viewport: null, // Let window size dictate viewport (deviceScaleFactor not compatible with null viewport)
+                // Explicit viewport for scraping (guarantees page content area size + page.viewportSize() always works).
+                // Null for login mode (window-dictated, user-interactive).
+                viewport: scrapingViewport,
                 // Dynamic User-Agent that matches actual Chromium version (auto-detected)
                 userAgent: ChromiumVersionHelper.generateUserAgent(),
 
@@ -138,7 +146,6 @@ export class BrowserManager {
                 locale: 'en-US',
                 timezoneId: systemTimezone,
                 colorScheme: 'light',
-                // Note: deviceScaleFactor removed - not compatible with viewport: null
 
                 // HTTP headers that Chrome normally sends
                 extraHTTPHeaders: {
@@ -456,16 +463,16 @@ export class BrowserManager {
             }
         }
 
-        // Random 70-92% of screen for each dimension (independent)
-        const widthRatio = 0.70 + Math.random() * 0.22;
-        const heightRatio = 0.70 + Math.random() * 0.22;
+        // Random 85-97% of screen for each dimension (independent)
+        const widthRatio = 0.85 + Math.random() * 0.12;
+        const heightRatio = 0.85 + Math.random() * 0.12;
 
         let width = Math.round(screenWidth * widthRatio);
         let height = Math.round(screenHeight * heightRatio);
 
-        // Floor: Instagram desktop needs ~1000px wide, ~700px tall
-        width = Math.max(width, 1024);
-        height = Math.max(height, 700);
+        // Floor: Instagram vertical feed needs a large viewport for good screenshots
+        width = Math.max(width, 1440);
+        height = Math.max(height, 900);
 
         return { width, height };
     }

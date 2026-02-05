@@ -307,10 +307,15 @@ export type ActionParams = ClickParams | ScrollParams | TypeParams | PressParams
 /**
  * Capture intent signaled by the LLM.
  * When the LLM focuses on something interesting, it signals capture intent.
+ *
+ * Capture priority (handled in InstagramScraper.runNavigationLoop):
+ *   1. targetId set → screenshot crops to that element's bounding box
+ *   2. strategic.captureNow without targetId → full viewport capture
+ *   3. shouldCapture without targetId → fallback to nearest article / focused element
  */
 export interface CaptureIntent {
     shouldCapture: boolean;                  // LLM signals "this is worth capturing"
-    targetId?: number;                       // Element ID that's the focus
+    targetId?: number;                       // Element ID to crop to (highest priority framing)
     reason?: string;                         // Why this is capture-worthy (for logging)
 }
 
@@ -323,8 +328,8 @@ export interface StrategicDecision {
     switchPhase?: 'search' | 'stories' | 'feed' | null;  // Switch to different phase
     terminateSession?: boolean;              // End the session (content exhausted)
 
-    // Capture control
-    captureNow?: boolean;                    // Signal to capture current viewport
+    // Capture control (priority 2: full viewport when no capture.targetId is set)
+    captureNow?: boolean;                    // Full viewport capture (use when no specific element to target)
 
     // Pacing control
     lingerDuration?: 'short' | 'medium' | 'long';  // How long to stay (short=1s, medium=3s, long=6s)

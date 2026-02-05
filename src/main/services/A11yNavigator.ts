@@ -452,6 +452,16 @@ export class A11yNavigator {
     }
 
     /**
+     * Re-fetch an element's bounding box from CDP (fresh viewport-relative coords).
+     * Use after an action has executed to get current position, not stale pre-action position.
+     */
+    async refetchBoundingBox(backendNodeId: number): Promise<BoundingBox | null> {
+        return this.withSession(async (cdpSession) => {
+            return this.getNodeBoundingBox(cdpSession, backendNodeId);
+        });
+    }
+
+    /**
      * Get bounding box for a node using its backendDOMNodeId via CDP.
      * This avoids DOM queries - we use CDP's DOM.getBoxModel directly.
      */

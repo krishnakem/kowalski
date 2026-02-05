@@ -212,7 +212,7 @@ export class InstagramScraper {
             maxCaptures: 150,
             jpegQuality: 85,
             minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.10),
-            saveToDirectory: path.join(os.homedir(), 'Documents', 'Kowalski', 'debug-screenshots')
+            saveToDirectory: path.join(os.homedir(), 'Documents', 'debug-screenshots')
         });
         this.contentReadiness = new ContentReadiness(this.page);
 
@@ -591,9 +591,11 @@ export class InstagramScraper {
                     }
                 }
 
-                // LLM-driven capture: Either through capture intent OR strategic captureNow
-                const shouldCapture = (decision.capture?.shouldCapture && result.focusedElement) ||
-                                     decision.strategic?.captureNow;
+                // LLM-controlled capture with 3-tier priority:
+                // 1. capture.targetId → crop to specific element the LLM chose
+                // 2. strategic.captureNow (no targetId) → full viewport
+                // 3. capture.shouldCapture (no targetId) → fallback to nearest article
+                const shouldCapture = decision.capture?.shouldCapture || decision.strategic?.captureNow;
 
                 if (shouldCapture) {
                     await this.humanDelay(500, 800); // Wait for content to stabilize
@@ -608,27 +610,84 @@ export class InstagramScraper {
                         source = 'search';
                     }
 
-                    // Find the full post content area
-                    const postBounds = await this.navigator.findPostContentBounds();
-                    const captureBounds = postBounds || result.focusedElement?.boundingBox;
+                    const captureReason = decision.capture?.reason ||
+                                         decision.strategic?.reason ||
+                                         'LLM strategic capture';
 
-                    if (captureBounds) {
-                        const captureReason = decision.capture?.reason ||
-                                             decision.strategic?.reason ||
-                                             'LLM strategic capture';
+                    let captured = false;
 
-                        const captured = await this.screenshotCollector.captureFocusedElement(
-                            captureBounds,
-                            source,
-                            context.currentGoal.target,
-                            captureReason
+                    // PRIORITY 1: LLM specified targetId → crop to that element
+                    if (decision.capture?.targetId !== undefined) {
+                        const targetElement = elements.find(e => e.id === decision.capture!.targetId);
+
+                        // Re-fetch bounding box — the action may have shifted the viewport
+                        let freshBox: BoundingBox | null = null;
+                        if (targetElement?.backendNodeId) {
+                            freshBox = await this.navigator.refetchBoundingBox(targetElement.backendNodeId);
+                        }
+
+                        const captureBox = freshBox || targetElement?.boundingBox;
+
+                        // Viewport bounds check — skip if element scrolled entirely off-screen
+                        const viewportHeight = this.page.viewportSize()?.height || 1920;
+                        const offViewport = captureBox && (
+                            captureBox.y + captureBox.height < 0 || captureBox.y > viewportHeight
                         );
 
-                        if (captured) {
-                            postsCollected++;
-                            phaseItemsCollected++;
-                            console.log(`  📸 Capture: ${captureReason}${postBounds ? ' (full post)' : ' (element)'}`);
+                        if (captureBox && !offViewport) {
+                            const cap = await this.screenshotCollector.captureFocusedElement(
+                                captureBox, source, context.currentGoal.target, captureReason
+                            );
+                            if (cap) {
+                                captured = true;
+                                console.log(`  📸 Capture (targetId=${decision.capture.targetId}${freshBox ? '' : ', stale bounds'}): ${captureReason}`);
+                            }
+                        } else if (offViewport) {
+                            console.warn(`  ⚠️ capture.targetId=${decision.capture.targetId} is off-viewport (y=${captureBox!.y.toFixed(0)}), skipping`);
+                        } else {
+                            console.warn(`  ⚠️ capture.targetId=${decision.capture.targetId} not found or no boundingBox, falling back`);
+                            const postBounds = await this.navigator.findPostContentBounds();
+                            const fallbackBounds = postBounds || result.focusedElement?.boundingBox;
+                            if (fallbackBounds) {
+                                const cap = await this.screenshotCollector.captureFocusedElement(
+                                    fallbackBounds, source, context.currentGoal.target, captureReason
+                                );
+                                if (cap) {
+                                    captured = true;
+                                    console.log(`  📸 Capture (fallback from invalid targetId): ${captureReason}`);
+                                }
+                            }
                         }
+                    }
+                    // PRIORITY 2: captureNow without targetId → full viewport
+                    else if (decision.strategic?.captureNow) {
+                        const cap = await this.screenshotCollector.captureCurrentPost(
+                            source,
+                            context.currentGoal.target
+                        );
+                        if (cap) {
+                            captured = true;
+                            console.log(`  📸 Capture (viewport): ${captureReason}`);
+                        }
+                    }
+                    // PRIORITY 3: shouldCapture without targetId → article fallback
+                    else {
+                        const postBounds = await this.navigator.findPostContentBounds();
+                        const captureBounds = postBounds || result.focusedElement?.boundingBox;
+                        if (captureBounds) {
+                            const cap = await this.screenshotCollector.captureFocusedElement(
+                                captureBounds, source, context.currentGoal.target, captureReason
+                            );
+                            if (cap) {
+                                captured = true;
+                                console.log(`  📸 Capture: ${captureReason}${postBounds ? ' (full post)' : ' (element)'}`);
+                            }
+                        }
+                    }
+
+                    if (captured) {
+                        postsCollected++;
+                        phaseItemsCollected++;
                     }
                 }
 

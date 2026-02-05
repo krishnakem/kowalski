@@ -253,6 +253,7 @@ var BrowserManager = class _BrowserManager {
       console.log(`\u{1F680} BrowserManager: Launching Persistent Context at: ${persistentContextPath}`);
       console.log(`   Headless: ${config.headless}`);
       const extraArgs = [];
+      let scrapingViewport = null;
       if (config.bounds) {
         extraArgs.push(`--app=https://www.instagram.com/accounts/login/`);
         extraArgs.push(`--window-position=${config.bounds.x},${config.bounds.y}`);
@@ -260,7 +261,8 @@ var BrowserManager = class _BrowserManager {
       } else {
         const windowSize = _BrowserManager.generateWindowSize(config.headless);
         extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
-        console.log(`\u{1F4D0} BrowserManager: Window size ${windowSize.width}x${windowSize.height} (headless=${config.headless})`);
+        scrapingViewport = windowSize;
+        console.log(`\u{1F4D0} BrowserManager: Viewport ${windowSize.width}x${windowSize.height} (headless=${config.headless})`);
       }
       const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
       console.log("\u{1F50D} DEBUG: Custom executable path:", customExecutablePath);
@@ -283,15 +285,15 @@ var BrowserManager = class _BrowserManager {
       this.browserContext = await import_playwright_extra.chromium.launchPersistentContext(persistentContextPath, {
         headless: config.headless,
         executablePath: executablePath || void 0,
-        viewport: null,
-        // Let window size dictate viewport (deviceScaleFactor not compatible with null viewport)
+        // Explicit viewport for scraping (guarantees page content area size + page.viewportSize() always works).
+        // Null for login mode (window-dictated, user-interactive).
+        viewport: scrapingViewport,
         // Dynamic User-Agent that matches actual Chromium version (auto-detected)
         userAgent: ChromiumVersionHelper.generateUserAgent(),
         // Fingerprint consistency options
         locale: "en-US",
         timezoneId: systemTimezone,
         colorScheme: "light",
-        // Note: deviceScaleFactor removed - not compatible with viewport: null
         // HTTP headers that Chrome normally sends
         extraHTTPHeaders: {
           "Accept-Language": "en-US,en;q=0.9"
@@ -537,12 +539,12 @@ var BrowserManager = class _BrowserManager {
         screenHeight = 1080;
       }
     }
-    const widthRatio = 0.7 + Math.random() * 0.22;
-    const heightRatio = 0.7 + Math.random() * 0.22;
+    const widthRatio = 0.85 + Math.random() * 0.12;
+    const heightRatio = 0.85 + Math.random() * 0.12;
     let width = Math.round(screenWidth * widthRatio);
     let height = Math.round(screenHeight * heightRatio);
-    width = Math.max(width, 1024);
-    height = Math.max(height, 700);
+    width = Math.max(width, 1440);
+    height = Math.max(height, 900);
     return { width, height };
   }
   // =========================================================================
@@ -3349,6 +3351,15 @@ var A11yNavigator = class {
         });
       }
     }
+  }
+  /**
+   * Re-fetch an element's bounding box from CDP (fresh viewport-relative coords).
+   * Use after an action has executed to get current position, not stale pre-action position.
+   */
+  async refetchBoundingBox(backendNodeId) {
+    return this.withSession(async (cdpSession) => {
+      return this.getNodeBoundingBox(cdpSession, backendNodeId);
+    });
   }
   /**
    * Get bounding box for a node using its backendDOMNodeId via CDP.
@@ -6795,6 +6806,33 @@ var NavigationLLM = class {
   getSystemPrompt() {
     return `You are a FULLY AUTONOMOUS navigation agent for an Instagram browser session. You have COMPLETE STRATEGIC CONTROL over the session - you decide what to do, when to switch activities, and when to end.
 
+CORE PHILOSOPHY \u2014 SMART CONTENT COLLECTION:
+You are NOT a mindless scroll bot. Your job is to collect high-quality content efficiently.
+- On the FEED: posts are already fully visible \u2014 scroll and capture interesting ones directly
+- On GRID views (profiles, explore, hashtags): thumbnails are too small \u2014 you MUST click them to open post modals
+- A well-captured feed post (article with full image + caption) is just as valuable as a modal view
+- On profiles: click into 3+ posts to see full captions, carousel slides, and comments
+- Match content to user interests before capturing \u2014 don't capture everything
+
+SESSION START PATTERN:
+When a session begins and you're on the feed:
+1. Scroll through the first 2-3 posts \u2014 capture any that match interests or have high engagement
+2. Then search for your first interest topic to find targeted content
+3. From search results, visit a relevant profile and click into their recent posts
+This gives you a mix of feed content + interest-targeted content early in the session.
+
+CAPTURE PACING:
+- Target: ~1 capture every 10-15 seconds. A 300-second session should produce 15-25 captures.
+- If you're below 5 captures at the halfway point, you're being too selective \u2014 capture more aggressively.
+- The session FAILS if you collect fewer than 10 captures. Don't be overly picky.
+- Stories are your easiest captures \u2014 each frame is fresh, full-screen, and takes 3-5 seconds. Watch 3-5 stories early in the session to build a capture baseline.
+
+TIME ALLOCATION (for a 300-second session):
+- First 30s: Scroll feed, capture 2-3 interesting posts, watch 2-3 stories
+- 30-180s: Search for interest topics, visit profiles, click into grid posts
+- 180-270s: Return to feed for any new content, visit a second profile if needed
+- Last 30s: Wrap up, capture anything remaining, terminate
+
 YOU CONTROL:
 1. TACTICAL: What action to take next (click, scroll, type, press, wait)
 2. STRATEGIC: When to switch phases, when to capture, when to terminate
@@ -6826,11 +6864,43 @@ Elements are grouped by their container from the accessibility tree:
 - "navigation" container = nav links (Home, Explore, Messages, etc.)
 - "dialog" container = modal/popup content
 
+INSTAGRAM HAS TWO CONTENT LAYOUTS \u2014 LEARN THE DIFFERENCE:
+
+1. FEED LAYOUT (instagram.com/ home feed):
+   Posts are ALREADY FULLY VISIBLE \u2014 large image/video, caption preview, engagement counts, timestamp.
+   - DO NOT click into feed posts. There is nothing more to see.
+   - Just SCROLL to discover posts, then CAPTURE interesting ones directly.
+   - Each post is inside an "article" container. The article and its children are what you screenshot.
+   - To capture a feed post: set capture.targetId to the article element's id, or use strategic.captureNow for the full viewport.
+
+2. GRID LAYOUT (profile pages, explore page, hashtag pages, search result pages):
+   Posts appear as SMALL THUMBNAILS in a grid (3 columns on profiles, mixed sizes on explore).
+   - Thumbnails are too small to capture meaningfully \u2014 you MUST click one to open it.
+   - Click a thumbnail (link or image with caption text) \u2192 post opens in a MODAL DIALOG.
+   - Capture the content inside the modal, then close it (press Escape or click Close) and click the next thumbnail.
+   - Grid thumbnails in the accessibility tree look like: link "Caption text..." at consistent Y positions in rows of 3.
+
+RULE: If the current view is "feed" \u2192 scroll and capture, don't click posts.
+RULE: If the current view is "profile", "explore", or a hashtag/search page \u2192 click thumbnails to open posts, then capture.
+
 PATTERN RECOGNITION:
 - Multiple small buttons with usernames = carousel (stories, suggestions)
 - Buttons inside "article" containers = post interaction buttons
 - textbox inside "dialog" = input field in modal/popup
 - Use siblingCount to understand clusters
+
+ELEMENT IDENTIFICATION QUICK REFERENCE:
+| What you want to do              | What to look for in the tree                                    |
+|----------------------------------|-----------------------------------------------------------------|
+| Capture a feed post              | article "" container \u2192 use its id as capture.targetId           |
+| Open a post from a grid          | link "Caption text..." or image with caption \u2192 CLICK this       |
+| Watch a story                    | button "Story by [user], not seen" \u2192 CLICK this                 |
+| Search for a topic               | link "Search" in sidebar, then textbox "Search input"           |
+| Close a modal/overlay            | button "Close" or press Escape                                  |
+| Navigate carousel in modal       | button "Next" / "Go Back", or press ArrowRight/ArrowLeft        |
+| Go to someone's profile          | link "[username]" \u2014 the text username link, not the avatar      |
+| Check post age                   | link "1h" / "2d" / "1w" \u2014 timestamp link inside article        |
+| Skip suggested accounts          | Scroll past any section with button "Follow" elements           |
 
 DYNAMIC PAGE AWARENESS (infer from tree context):
 YOU must infer where you are from the accessibility tree. Look at:
@@ -6868,10 +6938,18 @@ USE CONTENT TO MAKE SMART DECISIONS:
 \u274C Sponsored/ad content \u2192 skip immediately
 \u274C Generic content with low engagement \u2192 don't capture
 
+TIMESTAMP RECENCY (from link elements like "1h", "2d", "1w" inside articles):
+- Minutes/hours (1m, 30m, 1h, 3h) = very fresh, PRIORITIZE these
+- 1-3 days (1d, 2d, 3d) = recent, good for the digest
+- 4-7 days (4d, 5d, 6d, 1w) = borderline, only capture if highly relevant to user interests
+- 2+ weeks (2w, 4w, 12w, 90w) = STALE \u2014 skip immediately, do not capture
+The digest should primarily contain content from the last 48 hours.
+
 EXAMPLE: User interests: ["coffee", "travel", "photography"]
-- Post with Caption: "Morning espresso \u2615 #coffee #barista" \u2192 HIGH RELEVANCE, capture!
-- Post with Caption: "New workout routine \u{1F4AA} #fitness" \u2192 LOW RELEVANCE, scroll past
+- Post with Caption: "Morning espresso \u2615 #coffee #barista" \u2192 HIGH RELEVANCE, priority capture!
+- Post with Caption: "New workout routine \u{1F4AA} #fitness" \u2192 Not an interest match, but capture if engagement is very high (10K+ likes) or content is timely/trending
 - Post with Tags: #travel, #wanderlust \u2192 MATCHES, engage deeper
+- Post from a friend with 500 likes about their weekend \u2192 CAPTURE \u2014 the digest should reflect the user's full feed, not just one topic
 
 AVAILABLE TACTICAL ACTIONS:
 - click(id): Click element by ID
@@ -6903,8 +6981,14 @@ Include a "strategic" field to make session-level decisions:
 2. SESSION TERMINATION - You decide when you're done:
    - "terminateSession": true \u2192 end the session (content exhausted, time's up, goal achieved)
 
-3. CAPTURE CONTROL - You decide what's worth screenshotting:
-   - "captureNow": true \u2192 take a screenshot of current view
+3. CAPTURE CONTROL - You decide WHAT to screenshot and HOW it's framed:
+   - To capture a SPECIFIC ELEMENT: set capture.targetId to the element's id number.
+     The screenshot will crop tightly to that element's bounding box.
+     Use this for: a specific post, image, profile header, story frame, etc.
+   - To capture the FULL VIEWPORT: set strategic.captureNow = true (without capture.targetId).
+     Captures everything currently visible on screen.
+     Use this for: overview shots, page layouts, full dialog views.
+   - You control the framing \u2014 pick the element that best shows the content worth capturing.
 
 4. PACING CONTROL - You decide how long to linger:
    - "lingerDuration": "short" (1s) | "medium" (3s) | "long" (6s) | "xlong" (12s)
@@ -6916,11 +7000,20 @@ WHEN TO TERMINATE:
 - \u2705 Collected enough content (good variety of captures)
 - \u2705 Stuck and can't recover
 
-WHEN TO CAPTURE:
-- \u2705 Interesting post visible that matches user interests
-- \u2705 Story content visible (before advancing)
-- \u2705 Search results showing relevant content
-- \u274C Don't capture: navigation screens, loading states, empty feeds
+CAPTURE QUALITY HIERARCHY (best \u2192 worst):
+1. FEED POST (article on home feed \u2014 full image + caption already visible) \u2014 BEST on feed, capture via targetId on the article
+2. POST MODAL (opened from a grid thumbnail \u2014 full caption + comments visible) \u2014 BEST on grids, always capture
+3. STORY CONTENT (individual story frame) \u2014 GREAT, capture each frame
+4. CAROUSEL SLIDES (in modal, individual slides) \u2014 GREAT, capture each slide
+5. PROFILE GRID (scrolled profile with thumbnails visible) \u2014 OK, capture once as overview
+\u274C NEVER capture: navigation screens, loading states, empty feeds, "Suggested for you" panels
+
+CAPTURE FRAMING \u2014 USE targetId:
+When you see an interesting element, set capture.targetId to its id number.
+Example: You see id:12 article "Photo by coffeelover" with great engagement.
+\u2192 Set capture.targetId: 12 to crop the screenshot to that exact post.
+If you're in a modal viewing a post, set targetId to the article or dialog element.
+For full-screen captures (stories, overview), use strategic.captureNow without targetId.
 
 VIDEO HANDLING:
 When you see a video playing (videoState in context):
@@ -6937,44 +7030,91 @@ FORBIDDEN ACTIONS:
 - NEVER click: like_button, comment_button, share_button, save_button, follow_button
 - Read-only browsing only
 
-STAGNATION DETECTION:
-- Check RECENT ACTIONS for scrollY values. If scrollY is unchanged across 2+ scrolls, you are STUCK at the page bottom or blocked by an overlay.
-- If stuck scrolling: try press(Escape) to close overlays, back() to go to previous page, or click a navigation link (Home, Explore) to change context.
-- If "no change detected" appears 3+ times in recent actions, STOP repeating the same action and switch strategy completely.
-- If SESSION MEMORY is available, use past session patterns to avoid known dead-ends.
+STAGNATION DETECTION AND RECOVERY:
+Check RECENT ACTIONS for these failure patterns and apply the correct fix:
 
-DEEP ENGAGEMENT:
-You can engage deeply with posts to understand them better. This is OPTIONAL but encouraged for interesting content.
+1. SCROLL STUCK (scrollY unchanged across 2+ scrolls):
+   \u2192 A modal/overlay may be intercepting scroll events, OR scroll focus was lost after back() navigation.
+   \u2192 Fix #1: Press Escape to close any overlay, then retry scroll.
+   \u2192 Fix #2: If no overlay is visible, click on any element in the main content area (an article, an image) to restore scroll focus, then retry scroll.
+
+2. CLICK DID NOTHING on feed (clicking article, no_change_detected):
+   \u2192 You're on the FEED \u2014 you don't need to click posts here. Just scroll and capture.
+   \u2192 Fix: Stop clicking, switch to scrolling + capturing.
+
+3. CLICK DID NOTHING on grid (clicking thumbnail, no_change_detected):
+   \u2192 You may have clicked a non-interactive element (container, decorative image).
+   \u2192 Fix: Find the link element with caption text \u2014 that's the clickable thumbnail. Click THAT.
+
+4. STUCK IN LOOP (same actions repeating 3+ times):
+   \u2192 Switch strategy completely. If feed isn't working, search for a specific account.
+   \u2192 If search isn't working, go to a known profile directly.
+   \u2192 If a profile is exhausted, try a different one.
+
+5. CONTENT NOT LOADING (tree looks sparse after navigation):
+   \u2192 Use wait(2) to let content load. Instagram loads images lazily.
+
+6. FEED IS STALE (only old timestamps visible like 2w, 3w):
+   \u2192 Scroll past old content or switch to a different content source.
+   \u2192 Search for an account that posts frequently for fresher content.
+
+CONTENT COLLECTION \u2014 TWO MODES:
+
+MODE 1: FEED (home feed at instagram.com/)
+Posts are ALREADY FULLY VISIBLE \u2014 large image/video, caption preview, engagement counts, timestamp.
+- You don't need to click into feed posts to capture them \u2014 they're already fully visible. (You CAN still click usernames to visit profiles or timestamps to check post details.)
+- Just SCROLL to discover posts, then CAPTURE interesting ones directly.
+- Each post is an "article" container. Set capture.targetId to the article's id, or use strategic.captureNow.
+
+MODE 2: GRID (profile pages, explore, hashtag pages)
+Posts appear as SMALL THUMBNAILS \u2014 too small to capture meaningfully.
+- You MUST click a thumbnail (link or image with caption text) to open the post in a modal dialog.
+- In the modal: capture, navigate carousel slides (ArrowRight/ArrowLeft), capture each slide.
+- Close modal (Escape or "Close" button) and click the next thumbnail.
+- Aim to open 3+ posts per profile grid visit.
 
 ENGAGEMENT LEVELS:
-1. FEED LEVEL (default): Scrolling through posts in main feed
-2. POST MODAL LEVEL: Clicked on a post, viewing full content with comments visible
-3. COMMENTS LEVEL: Scrolled down in modal to read more comments
-4. PROFILE LEVEL: Clicked on username to explore their content
+1. FEED LEVEL: Scrolling feed \u2014 scroll and capture interesting articles directly
+2. GRID LEVEL: On a profile/explore/hashtag page \u2014 click thumbnails to open modals
+3. POST MODAL LEVEL: Inside a modal from a grid click \u2014 capture, browse carousel, close
+4. PROFILE LEVEL: Clicked on a username \u2014 explore their content grid, click into their posts
 
-HOW TO ENGAGE DEEPLY:
-1. Click on a post image/video to open the post modal (detail view)
-2. In the modal, you can:
-   - Navigate carousel slides using ArrowRight/ArrowLeft keys
-   - Scroll down to see comments
-   - Click username to visit their profile
-3. Close modal by pressing Escape key
-
-WHEN TO ENGAGE DEEPLY (signals):
-\u2705 High engagement visible (many likes/comments like "1,234 likes", "View all 42 comments")
+WHEN TO CLICK A THUMBNAIL (grid views only \u2014 NOT the feed):
 \u2705 Content relevant to user interests (keywords in caption/username match)
-\u2705 Carousel post detected (slide indicators like "1 of 4")
-\u2705 Interesting caption snippet visible
-\u2705 Good visual content (nature, photography, etc.)
+\u2705 High engagement visible (many likes/comments)
+\u2705 Carousel post (slide indicators like "1 of 4") \u2014 extra valuable, multiple images
+\u2705 Recent timestamp visible
 \u274C Already explored this post (check deeplyExploredPosts count)
-\u274C Low engagement / not relevant
 \u274C Ad or sponsored content
-\u274C Time pressure (need to cover more ground)
+\u274C Very low engagement AND not relevant to interests
 
-ENGAGEMENT DEPTH:
-- Adjust engagement time based on content relevance
-- A few seconds for irrelevant content, longer for high-value content
-- You decide the duration \u2014 there are no fixed time buckets
+WHEN TO CAPTURE ON THE FEED (no clicking needed):
+\u2705 Post matches user interests (caption, hashtags, username)
+\u2705 Fresh timestamp (minutes or hours old)
+\u2705 High engagement
+\u2705 High-engagement or trending content even if not directly matching interests \u2014 a good digest reflects the user's full world, not just their stated topics
+\u274C Stale content (2+ weeks old)
+\u274C Ads / "Sponsored" posts
+\u274C "Suggested for you" panels (not real posts)
+
+POST MODAL (appears after clicking a thumbnail on a profile/explore/hashtag grid):
+The modal is a "dialog" container overlaying the page. Layout:
+- LEFT SIDE: Full-size image or video. If it's a carousel, you'll see "Next"/"Go Back" buttons or can press ArrowRight/ArrowLeft to advance slides.
+- RIGHT SIDE: Username, full caption (not truncated like feed), full comments list, engagement buttons, timestamp at bottom.
+- CLOSE: button "Close" in top-right, or press Escape. Returns you to the grid.
+
+CAPTURING IN A MODAL:
+- Use strategic.captureNow for full viewport capture (gets image + caption + comments).
+- Or use capture.targetId on the main image element for a focused image capture.
+- For carousels: advance through slides with Next/ArrowRight, capture each interesting slide separately.
+
+IMPORTANT: After capturing, CLOSE the modal (Escape) and click the NEXT thumbnail. Don't stay in one modal forever.
+
+ENGAGEMENT DEPTH (for grid \u2192 modal interactions):
+- "quick": Open thumbnail, capture modal, close (5-10 seconds)
+- "moderate": Open thumbnail, capture, browse carousel slides, close (10-20 seconds)
+- "deep": Open thumbnail, capture all slides, read comments, maybe visit profile (20-40 seconds)
+For feed posts: no depth needed \u2014 just scroll past and capture via targetId.
 
 Include engagement decisions in your strategic field:
 - "engageDepth": "quick" | "moderate" | "deep" | null
@@ -7042,18 +7182,20 @@ Typing \u2192 seeing result links \u2192 scrolling away or typing again
 WHY: You never clicked a result, so you never navigated anywhere!
 FIX: After typing, look for links with follower counts and CLICK one.
 
-PROFILE EXPLORATION (after clicking a search result):
-When you land on a profile page, generally explore it before leaving:
+PROFILE EXPLORATION \u2014 REQUIRED WORKFLOW:
+When you land on a profile page, this is your REQUIRED workflow:
 1. Scroll down to see the profile's posts grid
-2. Capture screenshots of interesting content (use captureNow: true)
-3. Click individual posts to see them in detail, capture, then close (Escape)
-4. Keep scrolling and capturing until you've collected enough content
-5. Leaving too quickly wastes the navigation effort it took to get here
+2. Click the MOST RECENT post (top-left of grid) to open it in detail view
+3. In the modal: read caption, navigate carousel slides, capture screenshots
+4. Close modal (Escape), then click 2-4 MORE posts from the grid
+5. Each opened post = capture the detail view (level 1 quality!)
+6. Open AT LEAST 3 posts from any profile you visit (if under 60 seconds remaining, capture 1-2 and move on)
+7. Only leave the profile after you've explored multiple posts in detail
 
 COMMON PROFILE FAILURE:
-Search \u2192 click profile \u2192 immediately go back \u2192 search again (infinite loop!)
-WHY: You left the profile before exploring it. The search is useless without capturing content.
-FIX: Explore the profile and capture content before navigating away.
+Landing on profile \u2192 scrolling the grid \u2192 capturing grid thumbnails \u2192 leaving WITHOUT opening any posts
+WHY: Grid thumbnails are LOW VALUE (level 5). The real content is inside individual posts opened as modals.
+FIX: Click thumbnails to open modals \u2014 see full captions, all carousel slides, and comments.
 
 OUTPUT FORMAT (JSON only):
 {
@@ -7067,8 +7209,8 @@ OUTPUT FORMAT (JSON only):
   "confidence": 0.0-1.0,
   "capture": {
     "shouldCapture": true,
-    "targetId": <element ID>,
-    "reason": "Why this is worth capturing"
+    "targetId": 12,
+    "reason": "Interesting coffee post with 5K likes \u2014 crop to this article"
   },
   "strategic": {
     "switchPhase": "search"|"stories"|"feed"|null,
@@ -7096,16 +7238,37 @@ STRATEGIC DECISION EXAMPLES:
   }
 }
 
-2. Found good content, want to capture and linger:
+2. Found interesting post on feed, capturing it directly (no click needed):
 {
-  "reasoning": "Found a beautiful nature photo matching user interests",
+  "reasoning": "Feed post about coffee with 5.2K likes matches user interests \u2014 capturing the article directly",
   "action": "scroll",
   "params": {"direction": "down", "amount": "small"},
-  "expectedOutcome": "Center the post in view",
+  "expectedOutcome": "Scroll to next post after capturing this one",
+  "capture": {
+    "shouldCapture": true,
+    "targetId": 15,
+    "reason": "Coffee post with 5.2K likes \u2014 crop to this article element on the feed"
+  },
   "strategic": {
-    "captureNow": true,
-    "lingerDuration": "long",
-    "reason": "High-quality content worth studying"
+    "lingerDuration": "short",
+    "reason": "Feed post captured, scrolling to discover more content"
+  }
+}
+
+2b. Capturing a feed post while lingering (no scroll needed):
+{
+  "reasoning": "This NFL post from nflaunz has 70K likes and is 1h old \u2014 highly engaging and fresh, capturing it now",
+  "action": "wait",
+  "params": {"seconds": 1},
+  "expectedOutcome": "Linger on current view while capture fires",
+  "capture": {
+    "shouldCapture": true,
+    "targetId": 9,
+    "reason": "NFL Melbourne game announcement \u2014 70K likes, 1h old, crop to this article"
+  },
+  "strategic": {
+    "lingerDuration": "short",
+    "reason": "Captured current feed post, will scroll to next after"
   }
 }
 
@@ -7133,29 +7296,33 @@ STRATEGIC DECISION EXAMPLES:
   }
 }
 
-5. Engaging deeply with an interesting post:
+5. On a profile grid, clicking a thumbnail to open it in a modal:
 {
-  "reasoning": "Post has 5,234 likes and is a carousel with 4 slides - worth exploring",
+  "reasoning": "Profile grid thumbnail about travel with 5,234 likes \u2014 clicking to open in modal for full view",
   "action": "click",
-  "params": {"id": 12, "expectedName": "Photo by username"},
-  "expectedOutcome": "Post modal opens for detailed view",
+  "params": {"id": 12, "expectedName": "Travel photo caption text"},
+  "expectedOutcome": "Post modal opens with full image, caption, and comments",
   "strategic": {
     "engageDepth": "moderate",
     "lingerDuration": "medium",
-    "reason": "High engagement carousel, will navigate all slides"
+    "reason": "High engagement post on grid, will capture modal and browse carousel"
   }
 }
 
-6. Navigating carousel in post modal:
+6. Navigating carousel in post modal (capture each slide by targeting the article element):
 {
-  "reasoning": "On slide 2/4, interesting content continues",
+  "reasoning": "On slide 2/4, interesting content continues \u2014 capture this slide",
   "action": "press",
   "params": {"key": "ArrowRight"},
   "expectedOutcome": "Move to slide 3",
+  "capture": {
+    "shouldCapture": true,
+    "targetId": 8,
+    "reason": "Carousel slide 2/4 \u2014 crop to the article element for this slide"
+  },
   "strategic": {
-    "captureNow": true,
     "lingerDuration": "short",
-    "reason": "Capturing each carousel slide"
+    "reason": "Navigating carousel slides"
   }
 }
 
@@ -7171,7 +7338,7 @@ STRATEGIC DECISION EXAMPLES:
   }
 }
 
-Remember: YOU are in control. Make intelligent decisions about the entire session, not just individual actions. Engage deeply with interesting content - don't just scroll past everything!`;
+Remember: YOU are in control. Make intelligent decisions about the entire session, not just individual actions. On the feed, capture posts directly. On grids, click into posts for full detail. Prioritize content matching user interests, but also capture high-quality, timely, or high-engagement content that makes the digest feel complete. A good digest reflects what's happening in the user's world, not just one topic.`;
   }
   /**
    * Build the user prompt with current context and elements.
@@ -7198,10 +7365,10 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
         goalDesc = "Browse the home feed and collect interesting posts";
         break;
       case "explore_profile":
-        goalDesc = `Explore profile: ${context.currentGoal.target}`;
+        goalDesc = `Explore profile: ${context.currentGoal.target} \u2014 open 3+ posts to capture full captions, carousel slides, and comments`;
         break;
       case "analyze_account":
-        goalDesc = "Create a comprehensive digest of this account \u2014 you decide the approach";
+        goalDesc = "Build a comprehensive digest \u2014 click into individual posts for full content. Scrolling the feed alone is not enough.";
         break;
       default:
         goalDesc = "General browsing - YOU decide what to do";
@@ -7268,7 +7435,21 @@ ${context.loopWarning ? `
 WARNING #${context.loopWarning.consecutiveWarnings} \u2014 You are repeating actions with no effect. Change your approach NOW.
 ${context.loopWarning.consecutiveWarnings >= 2 ? "CRITICAL: Auto-recovery will override your next action if you do not change strategy." : ""}
 ` : ""}
+${this.buildDepthReminder(context)}
 Make your decision. Include strategic decisions to signal captures, activity changes, or session termination.`;
+  }
+  /**
+   * Build a depth reminder if the LLM has been scrolling without clicking into posts.
+   */
+  buildDepthReminder(context) {
+    const atFeedLevel = !context.engagementState || context.engagementState.level === "feed";
+    if (!atFeedLevel) return "";
+    const recentScrollCount = context.recentActions.slice(-6).filter((a) => a.action === "scroll").length;
+    if (recentScrollCount >= 3) {
+      return `\u26A0\uFE0F DEPTH REMINDER: You've scrolled ${recentScrollCount} times without clicking into a post. Open a post to get high-quality detail captures instead of low-value feed screenshots.
+`;
+    }
+    return "";
   }
   /**
    * Detect active overlays from container roles in the accessibility tree.
@@ -8791,7 +8972,7 @@ var InstagramScraper = class {
       maxCaptures: 150,
       jpegQuality: 85,
       minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.1),
-      saveToDirectory: path5.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
+      saveToDirectory: path5.join(os.homedir(), "Documents", "debug-screenshots")
     });
     this.contentReadiness = new ContentReadiness(this.page);
     this.navigationLLM = new NavigationLLM({ apiKey: this.apiKey });
@@ -9078,7 +9259,7 @@ var InstagramScraper = class {
             console.log(`  \u{1F4CD} Landed on profile \u2014 marked "${currentInterest}" as searched (${interestsSearched.length}/${userInterests.length})`);
           }
         }
-        const shouldCapture = decision.capture?.shouldCapture && result.focusedElement || decision.strategic?.captureNow;
+        const shouldCapture = decision.capture?.shouldCapture || decision.strategic?.captureNow;
         if (shouldCapture) {
           await this.humanDelay(500, 800);
           let source = "feed";
@@ -9089,21 +9270,75 @@ var InstagramScraper = class {
           } else if (this.page.url().includes("/explore") || this.page.url().includes("search")) {
             source = "search";
           }
-          const postBounds = await this.navigator.findPostContentBounds();
-          const captureBounds = postBounds || result.focusedElement?.boundingBox;
-          if (captureBounds) {
-            const captureReason = decision.capture?.reason || decision.strategic?.reason || "LLM strategic capture";
-            const captured = await this.screenshotCollector.captureFocusedElement(
-              captureBounds,
-              source,
-              context.currentGoal.target,
-              captureReason
-            );
-            if (captured) {
-              postsCollected++;
-              phaseItemsCollected++;
-              console.log(`  \u{1F4F8} Capture: ${captureReason}${postBounds ? " (full post)" : " (element)"}`);
+          const captureReason = decision.capture?.reason || decision.strategic?.reason || "LLM strategic capture";
+          let captured = false;
+          if (decision.capture?.targetId !== void 0) {
+            const targetElement = elements.find((e) => e.id === decision.capture.targetId);
+            let freshBox = null;
+            if (targetElement?.backendNodeId) {
+              freshBox = await this.navigator.refetchBoundingBox(targetElement.backendNodeId);
             }
+            const captureBox = freshBox || targetElement?.boundingBox;
+            const viewportHeight = this.page.viewportSize()?.height || 1920;
+            const offViewport = captureBox && (captureBox.y + captureBox.height < 0 || captureBox.y > viewportHeight);
+            if (captureBox && !offViewport) {
+              const cap = await this.screenshotCollector.captureFocusedElement(
+                captureBox,
+                source,
+                context.currentGoal.target,
+                captureReason
+              );
+              if (cap) {
+                captured = true;
+                console.log(`  \u{1F4F8} Capture (targetId=${decision.capture.targetId}${freshBox ? "" : ", stale bounds"}): ${captureReason}`);
+              }
+            } else if (offViewport) {
+              console.warn(`  \u26A0\uFE0F capture.targetId=${decision.capture.targetId} is off-viewport (y=${captureBox.y.toFixed(0)}), skipping`);
+            } else {
+              console.warn(`  \u26A0\uFE0F capture.targetId=${decision.capture.targetId} not found or no boundingBox, falling back`);
+              const postBounds = await this.navigator.findPostContentBounds();
+              const fallbackBounds = postBounds || result.focusedElement?.boundingBox;
+              if (fallbackBounds) {
+                const cap = await this.screenshotCollector.captureFocusedElement(
+                  fallbackBounds,
+                  source,
+                  context.currentGoal.target,
+                  captureReason
+                );
+                if (cap) {
+                  captured = true;
+                  console.log(`  \u{1F4F8} Capture (fallback from invalid targetId): ${captureReason}`);
+                }
+              }
+            }
+          } else if (decision.strategic?.captureNow) {
+            const cap = await this.screenshotCollector.captureCurrentPost(
+              source,
+              context.currentGoal.target
+            );
+            if (cap) {
+              captured = true;
+              console.log(`  \u{1F4F8} Capture (viewport): ${captureReason}`);
+            }
+          } else {
+            const postBounds = await this.navigator.findPostContentBounds();
+            const captureBounds = postBounds || result.focusedElement?.boundingBox;
+            if (captureBounds) {
+              const cap = await this.screenshotCollector.captureFocusedElement(
+                captureBounds,
+                source,
+                context.currentGoal.target,
+                captureReason
+              );
+              if (cap) {
+                captured = true;
+                console.log(`  \u{1F4F8} Capture: ${captureReason}${postBounds ? " (full post)" : " (element)"}`);
+              }
+            }
+          }
+          if (captured) {
+            postsCollected++;
+            phaseItemsCollected++;
           }
         }
         if (decision.strategic?.lingerDuration) {
@@ -9254,14 +9489,24 @@ var InstagramScraper = class {
    * These goals provide hints but LLM decides actual duration.
    */
   getGoalForPhase(phase, userInterests, interestsSearched, currentView, currentUrl) {
+    if (currentUrl && (currentUrl.includes("/p/") || currentUrl.includes("/reel/"))) {
+      return {
+        type: "analyze_account",
+        target: "Capture this post detail view, navigate carousel slides, then close modal"
+      };
+    }
     if (currentView === "profile") {
       const username = this.navigator.getProfileUsername() || "this profile";
       return {
         type: "explore_profile",
-        target: username
+        target: username,
+        minItems: 3
       };
     }
-    return { type: "analyze_account" };
+    return {
+      type: "analyze_account",
+      target: "Click into individual posts for detail captures"
+    };
   }
   // NOTE: shouldTransitionPhase() and getNextPhase() removed
   // LLM now controls phase transitions through strategic decisions
