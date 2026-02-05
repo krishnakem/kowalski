@@ -27,10 +27,10 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // src/main/main.ts
-var import_electron5 = require("electron");
-var import_path4 = __toESM(require("path"), 1);
+var import_electron6 = require("electron");
+var import_path5 = __toESM(require("path"), 1);
 var import_url = require("url");
-var import_fs4 = __toESM(require("fs"), 1);
+var import_fs5 = __toESM(require("fs"), 1);
 
 // src/main/services/BrowserManager.ts
 var import_electron2 = require("electron");
@@ -784,9 +784,9 @@ var UsageService = class _UsageService {
 };
 
 // src/main/services/SchedulerService.ts
-var import_electron4 = require("electron");
-var import_fs3 = __toESM(require("fs"), 1);
-var import_path3 = __toESM(require("path"), 1);
+var import_electron5 = require("electron");
+var import_fs4 = __toESM(require("fs"), 1);
+var import_path4 = __toESM(require("path"), 1);
 var import_child_process = require("child_process");
 
 // src/main/services/LoremIpsumGenerator.ts
@@ -2134,7 +2134,7 @@ var Bezier = class _Bezier {
       }
       return s;
     }).reverse();
-    const fs7 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils.makeline(bs, fs7), le = utils.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
+    const fs8 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils.makeline(bs, fs8), le = utils.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
     return new PolyBezier(segments);
   }
   outlineshapes(d1, d2, curveIntersectionThreshold) {
@@ -3504,7 +3504,7 @@ var A11yNavigator = class {
     let cdpSession = null;
     try {
       cdpSession = await this.page.context().newCDPSession(this.page);
-      for (const node of allStoryNodes.slice(0, 10)) {
+      for (const node of allStoryNodes) {
         if (!node.backendDOMNodeId) continue;
         const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
         if (box && box.width > 0 && box.height > 0) {
@@ -3555,8 +3555,8 @@ var A11yNavigator = class {
         if (!node.backendDOMNodeId) continue;
         const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
         if (!box || box.width <= 0 || box.height <= 0) continue;
-        if (box.width < 200 || box.height < 200) continue;
-        const isNearViewport = box.y < viewport.height + 500 && box.y + box.height > -500;
+        if (box.width < viewport.width * 0.05 || box.height < viewport.height * 0.05) continue;
+        const isNearViewport = box.y < viewport.height * 2 && box.y + box.height > -viewport.height;
         if (!isNearViewport) continue;
         posts.push({
           role: "article",
@@ -3622,8 +3622,8 @@ var A11yNavigator = class {
             width: x2 - x1,
             height: y3 - y1
           };
-          if (box.width < 200 || box.height < 200) continue;
-          const isNearViewport = box.y < viewport.height + 500 && box.y + box.height > -500;
+          if (box.width < viewport.width * 0.05 || box.height < viewport.height * 0.05) continue;
+          const isNearViewport = box.y < viewport.height * 2 && box.y + box.height > -viewport.height;
           if (!isNearViewport) continue;
           posts.push({
             role: "article",
@@ -3688,6 +3688,7 @@ var A11yNavigator = class {
   async findAllButtons() {
     return this.withSession(async (cdpSession) => {
       const buttons = [];
+      const viewport = await this.getViewportInfo();
       const response = await cdpSession.send("Accessibility.getFullAXTree");
       const nodes = response.nodes || [];
       const buttonNodes = nodes.filter((node) => {
@@ -3700,7 +3701,7 @@ var A11yNavigator = class {
         try {
           const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
           if (!box) continue;
-          if (box.width > 10 && box.height > 10) {
+          if (box.width > viewport.width * 5e-3 && box.height > viewport.height * 5e-3) {
             buttons.push({
               role: "button",
               name: node.name?.value || "[unnamed]",
@@ -3798,16 +3799,26 @@ var A11yNavigator = class {
       if (node.ignored) continue;
       const role = node.role?.value?.toLowerCase() || "";
       const name = node.name?.value || "";
-      if (["region", "dialog", "main", "navigation", "complementary", "alertdialog"].includes(role)) {
-        if (name && name.length > 0) {
-          containers.push({
-            role,
-            name,
-            childCount: node.childIds?.length || 0
-          });
-        }
+      if ([
+        "region",
+        "dialog",
+        "main",
+        "navigation",
+        "complementary",
+        "alertdialog",
+        "group",
+        "list",
+        "form",
+        "toolbar",
+        "tablist"
+      ].includes(role)) {
+        containers.push({
+          role,
+          name: name || "[unnamed]",
+          childCount: node.childIds?.length || 0
+        });
       }
-      if (["textbox", "searchbox", "input", "combobox"].includes(role)) {
+      if (["textbox", "searchbox", "input", "combobox", "slider", "spinbutton"].includes(role)) {
         const parentChain = this.getParentContainerChain(tree, node);
         inputs.push({
           role,
@@ -3815,15 +3826,14 @@ var A11yNavigator = class {
           parentContainers: parentChain
         });
       }
-      if (name && name.length > 2 && name.length < 50) {
+      if (name && name.length > 2 && name.length < 120) {
         landmarkSet.add(name);
       }
     }
     return {
       containers,
       inputs,
-      landmarks: Array.from(landmarkSet).slice(0, 20)
-      // Limit to 20 most relevant
+      landmarks: Array.from(landmarkSet)
     };
   }
   /**
@@ -3833,7 +3843,7 @@ var A11yNavigator = class {
   getParentContainerChain(tree, node) {
     const chain = [];
     let current = node.parentId ? tree.nodeMap.get(node.parentId) : null;
-    while (current && chain.length < 5) {
+    while (current && chain.length < 10) {
       const name = current.name?.value;
       const role = current.role?.value?.toLowerCase();
       if (name && name.length > 2 && ["region", "dialog", "main", "navigation", "complementary", "alertdialog", "article"].includes(role || "")) {
@@ -4006,7 +4016,6 @@ var A11yNavigator = class {
         const role = node.role?.value?.toLowerCase();
         if (!this.INTERACTIVE_ROLES.includes(role || "")) continue;
         const state = this.extractElementState(node);
-        if (state.disabled) continue;
         if (!node.backendDOMNodeId) continue;
         try {
           const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
@@ -4191,14 +4200,17 @@ var A11yNavigator = class {
     if (highlightNodes.length === 0) {
       return highlights;
     }
+    const viewport = await this.getViewportInfo();
+    const minHighlight = viewport.width * 0.015;
+    const maxHighlight = viewport.width * 0.15;
     let cdpSession = null;
     try {
       cdpSession = await this.page.context().newCDPSession(this.page);
-      for (const node of highlightNodes.slice(0, 5)) {
+      for (const node of highlightNodes) {
         if (!node.backendDOMNodeId) continue;
         const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
         if (box && box.width > 0 && box.height > 0) {
-          if (box.width >= 30 && box.width <= 100 && box.height >= 30 && box.height <= 100) {
+          if (box.width >= minHighlight && box.width <= maxHighlight && box.height >= minHighlight && box.height <= maxHighlight) {
             highlights.push({
               role: node.role?.value || "button",
               name: node.name?.value || "Highlight",
@@ -4455,12 +4467,12 @@ var A11yNavigator = class {
       if (node.ignored) continue;
       const role = node.role?.value?.toLowerCase();
       const name = node.name?.value || "";
-      if (name.length < 20) continue;
+      if (name.length < 5) continue;
       if (role === "button" || role === "link" || role === "textbox") continue;
       if (/^(home|search|explore|reels|messages|notifications|create|profile)$/i.test(name)) continue;
       if (name.includes("#") || name.includes("@")) {
         captionCandidates.unshift(name);
-      } else if (name.length > 50) {
+      } else if (name.length > 5) {
         captionCandidates.push(name);
       }
     }
@@ -4546,8 +4558,7 @@ var A11yNavigator = class {
       if (node.ignored) return false;
       const nodeName = node.name?.value || "";
       const nodeRole = node.role?.value?.toLowerCase();
-      const interactiveRoles = ["button", "link", "menuitem", "tab", "checkbox", "radio"];
-      return interactiveRoles.includes(nodeRole || "") && pattern.test(nodeName);
+      return this.INTERACTIVE_ROLES.includes(nodeRole || "") && pattern.test(nodeName);
     });
     if (matches.length === 0) {
       return elements;
@@ -4555,7 +4566,7 @@ var A11yNavigator = class {
     let cdpSession = null;
     try {
       cdpSession = await this.page.context().newCDPSession(this.page);
-      for (const node of matches.slice(0, 20)) {
+      for (const node of matches.slice(0, 100)) {
         if (!node.backendDOMNodeId) continue;
         const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
         if (box && box.width > 0 && box.height > 0) {
@@ -4787,7 +4798,7 @@ var A11yNavigator = class {
     let cdpSession = null;
     try {
       cdpSession = await this.page.context().newCDPSession(this.page);
-      for (const node of linkNodes.slice(0, 10)) {
+      for (const node of linkNodes.slice(0, 50)) {
         if (!node.backendDOMNodeId) continue;
         const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
         if (box && box.width > 0 && box.height > 0) {
@@ -5478,7 +5489,7 @@ var A11yNavigator = class {
    * @param maxElements - Maximum elements to return (for token efficiency)
    * @returns Array of NavigationElement objects
    */
-  async getNavigationElements(maxElements = 30) {
+  async getNavigationElements(maxElements = 1e3) {
     const elements = [];
     const viewport = await this.getViewportInfo();
     const tree = await this.buildAccessibilityTree();
@@ -5497,7 +5508,13 @@ var A11yNavigator = class {
       "textbox",
       "searchbox",
       "menuitem",
-      "listitem"
+      "listitem",
+      "tab",
+      "checkbox",
+      "radio",
+      "switch",
+      "slider",
+      "combobox"
     ];
     for (const node of tree.nodeMap.values()) {
       if (node.ignored) continue;
@@ -5518,8 +5535,8 @@ var A11yNavigator = class {
         if (!node.backendDOMNodeId) continue;
         const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
         if (!box || box.width <= 0 || box.height <= 0) continue;
-        if (box.y + box.height < 0 || box.y > viewport.height) continue;
-        if (box.width < 20 || box.height < 20) continue;
+        if (box.y + box.height < -viewport.height || box.y > viewport.height * 2) continue;
+        if (box.width < viewport.width * 5e-3 || box.height < viewport.height * 5e-3) continue;
         const role = node.role?.value || "unknown";
         const name = node.name?.value || "";
         const normalizeX = (x) => Math.round(x / viewport.width * 1e3);
@@ -5539,8 +5556,7 @@ var A11yNavigator = class {
         elements.push({
           id: idCounter++,
           role: role.toLowerCase(),
-          name: name.slice(0, 50),
-          // Longer names for better context
+          name: name.slice(0, 300),
           position: {
             x: normalizeX(box.x),
             y: normalizeY(box.y),
@@ -5548,7 +5564,7 @@ var A11yNavigator = class {
             h: normalizeY(box.height)
           },
           containerRole: container?.role?.value?.toLowerCase(),
-          containerName: container?.name?.value?.slice(0, 30),
+          containerName: container?.name?.value?.slice(0, 200),
           depth: node.depth,
           siblingCount,
           semanticHint: semanticHint !== "unknown" ? semanticHint : void 0,
@@ -5678,7 +5694,7 @@ var A11yNavigator = class {
       const description = node.description?.value;
       if ((role === "image" || role === "img" || role === "figure") && description) {
         if (!altText && description.length > 5) {
-          altText = description.slice(0, 50);
+          altText = description.slice(0, 500);
         }
       }
       if (!likes && /^[\d,]+\s*likes?$/i.test(name)) {
@@ -5687,12 +5703,12 @@ var A11yNavigator = class {
       if (!comments && (/view\s*(all\s*)?\d+\s*comments?/i.test(name) || /^\d+\s*comments?$/i.test(name))) {
         comments = name;
       }
-      if (!captionText && name.length >= 20) {
+      if (!captionText && name.length >= 5) {
         if (role !== "button" && role !== "link" && role !== "textbox") {
           if (!/^(home|search|explore|reels|messages|notifications|create|profile)$/i.test(name)) {
             if (name.includes("#") || name.includes("@")) {
               captionText = name;
-            } else if (name.length > 50) {
+            } else if (name.length > 5) {
               captionText = name;
             }
           }
@@ -5711,9 +5727,9 @@ var A11yNavigator = class {
     if (!captionText && !likes && !comments && !altText) {
       return void 0;
     }
-    const hashtags = this.extractHashtags(captionText, 5);
+    const hashtags = this.extractHashtags(captionText, 30);
     return {
-      captionText: captionText?.slice(0, 100),
+      captionText: captionText?.slice(0, 1e3),
       altText,
       engagement: likes || comments ? { likes, comments } : void 0,
       hasHashtags: hashtags.length > 0,
@@ -6017,12 +6033,12 @@ var import_crypto = require("crypto");
 var fs3 = __toESM(require("fs"), 1);
 var path3 = __toESM(require("path"), 1);
 var DEFAULT_CONFIG = {
-  maxCaptures: 60,
-  // Capture more, filter later with ImageTagger
+  maxCaptures: 200,
+  // Generous limit — LLM controls capture decisions
   jpegQuality: 85,
   // Good balance of quality and size
-  minScrollDelta: 200
-  // Must scroll at least 200px for new capture
+  minScrollDelta: 100
+  // Must scroll at least 100px for new capture
 };
 var STORY_CROP_CONFIG = {
   topMargin: 65,
@@ -6091,7 +6107,7 @@ var ScreenshotCollector = class {
       console.log(`\u{1F4F8} Skipping duplicate post: ${postId}`);
       return false;
     }
-    const positionBucket = Math.round(scrollPosition / 150);
+    const positionBucket = Math.round(scrollPosition / 75);
     if (source !== "carousel" && source !== "story" && this.capturedPositions.has(positionBucket)) {
       console.log(`\u{1F4F8} Skipping duplicate position: bucket ${positionBucket} (scroll ~${scrollPosition}px)`);
       return false;
@@ -6181,7 +6197,7 @@ var ScreenshotCollector = class {
       viewport = { width: 1080, height: 1920 };
     }
     try {
-      const padding = 30;
+      const padding = 50;
       const captureRegion = {
         x: Math.max(0, elementBox.x - padding),
         y: Math.max(0, elementBox.y - padding),
@@ -6196,11 +6212,6 @@ var ScreenshotCollector = class {
       }
       captureRegion.width = Math.max(captureRegion.width, 100);
       captureRegion.height = Math.max(captureRegion.height, 100);
-      console.log(`
-\u{1F4F8} === INTENTIONAL CAPTURE ===`);
-      console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
-      console.log(`   Reason: ${reason || "LLM focus"}`);
-      console.log(`   Crop: ${captureRegion.width}x${captureRegion.height}px`);
       const screenshot = await this.page.screenshot({
         type: "jpeg",
         quality: this.config.jpegQuality,
@@ -6208,18 +6219,14 @@ var ScreenshotCollector = class {
       });
       const hash = this.computeImageHash(screenshot);
       if (this.capturedHashes.has(hash)) {
-        console.log(`   Status: Skipped (duplicate hash)`);
-        console.log(`==============================
-`);
+        console.log(`  \u{1F4F8} Capture skipped (duplicate hash)`);
         return null;
       }
       this.capturedHashes.add(hash);
       const postId = this.extractPostId();
       if (postId) {
         if (this.capturedPostIds.has(postId)) {
-          console.log(`   Status: Skipped (duplicate postId: ${postId})`);
-          console.log(`==============================
-`);
+          console.log(`  \u{1F4F8} Capture skipped (duplicate postId: ${postId})`);
           return null;
         }
         this.capturedPostIds.add(postId);
@@ -6236,7 +6243,12 @@ var ScreenshotCollector = class {
       };
       this.captures.push(captured);
       this.saveScreenshotToDisk(screenshot, source, captured.id);
-      console.log(`   Status: Captured #${captured.id} (${source}${interest ? `: ${interest}` : ""})`);
+      console.log(`
+\u{1F4F8} === CAPTURED #${captured.id} ===`);
+      console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
+      console.log(`   Reason: ${reason || "LLM focus"}`);
+      console.log(`   Crop: ${captureRegion.width}x${captureRegion.height}px`);
+      console.log(`   Source: ${source}${interest ? `: ${interest}` : ""}`);
       console.log(`==============================
 `);
       return captured;
@@ -6955,17 +6967,16 @@ var ContentReadiness = class {
 };
 
 // src/main/services/InstagramScraper.ts
-var fs4 = __toESM(require("fs"), 1);
-var path4 = __toESM(require("path"), 1);
+var fs5 = __toESM(require("fs"), 1);
+var path5 = __toESM(require("path"), 1);
 var os = __toESM(require("os"), 1);
 var import_crypto2 = require("crypto");
 
 // src/main/services/NavigationLLM.ts
 var DEFAULT_CONFIG3 = {
   model: "gpt-4o-mini",
-  maxTokens: 400,
-  // Increased for richer context
-  temperature: 0.3
+  maxTokens: 800,
+  temperature: 0.5
 };
 var NavigationLLM = class {
   apiKey;
@@ -6994,6 +7005,26 @@ var NavigationLLM = class {
 YOU CONTROL:
 1. TACTICAL: What action to take next (click, scroll, type, press, wait)
 2. STRATEGIC: When to switch phases, when to capture, when to terminate
+
+WEB UI REASONING:
+You can understand ANY web page by analyzing the accessibility tree structure:
+
+1. LAYOUT DETECTION: Elements in "navigation" containers are nav menus. Elements in "main" are primary content. Elements in "complementary" are sidebars. Use container roles to understand page layout.
+
+2. NAVIGATION DISCOVERY: Look for links/buttons inside "navigation" containers \u2014 these let you move between sections. Read their names to understand where they lead.
+
+3. PAGE CONTEXT: Infer your location from container names, URL, and element patterns:
+   - Many "article" containers = content feed
+   - A grid of images = gallery/explore view
+   - Profile stats (followers, posts) = user profile
+   - A dialog/modal container = overlay on top of main content
+
+4. WORKFLOW COMPLETION: When performing multi-step tasks (like searching), complete the full workflow:
+   - After typing in a search field, WAIT for results to appear as links, then CLICK one
+   - After opening content, explore it before moving on
+   - Use navigation links to move between sections, don't just scroll hoping to find things
+
+5. SPATIAL REASONING: Use Y position to understand vertical layout. Elements at Y < 100 are likely headers/nav. Elements at Y > 900 are footers. Group elements by similar Y values to understand rows.
 
 UNDERSTANDING THE ACCESSIBILITY TREE:
 Elements are grouped by their container from the accessibility tree:
@@ -7052,7 +7083,7 @@ EXAMPLE: User interests: ["coffee", "travel", "photography"]
 AVAILABLE TACTICAL ACTIONS:
 - click(id): Click element by ID
 - hover(id): Hover over element (reveals hidden menus, tooltips, preview content)
-- scroll(direction, amount): direction='up'|'down'|'left'|'right', amount='small'|'medium'|'large'
+- scroll(direction, amount): direction='up'|'down'|'left'|'right', amount='small'|'medium'|'large'|'xlarge'
 - type(text): Type text into focused input
 - press(key): Press any key - Escape, Enter, Backspace, Delete, Space, ArrowRight, ArrowLeft, ArrowUp, ArrowDown, Tab, Home, End, PageUp, PageDown
 - clear(): Clear the currently focused input field (select all + delete)
@@ -7071,11 +7102,10 @@ USE CASES:
 STRATEGIC DECISIONS (YOU CONTROL THESE):
 Include a "strategic" field to make session-level decisions:
 
-1. PHASE SWITCHING - You decide when to change activities:
-   - "switchPhase": "search" \u2192 go search for user interests
-   - "switchPhase": "stories" \u2192 go watch stories
-   - "switchPhase": "feed" \u2192 go browse the feed
-   - Leave null to stay in current phase
+1. APPROACH \u2014 You have full freedom to explore this account however you see fit:
+   - Browse the feed, watch stories, search for topics, explore profiles
+   - Any combination, any order \u2014 allocate your time based on what you find
+   - Use "switchPhase" to log what you're doing: "search" | "stories" | "feed"
 
 2. SESSION TERMINATION - You decide when you're done:
    - "terminateSession": true \u2192 end the session (content exhausted, time's up, goal achieved)
@@ -7084,14 +7114,8 @@ Include a "strategic" field to make session-level decisions:
    - "captureNow": true \u2192 take a screenshot of current view
 
 4. PACING CONTROL - You decide how long to linger:
-   - "lingerDuration": "short" (1s) | "medium" (3s) | "long" (6s)
+   - "lingerDuration": "short" (1s) | "medium" (3s) | "long" (6s) | "xlong" (12s)
    - Use "long" for interesting content, "short" for navigation
-
-WHEN TO SWITCH PHASES:
-- Switch to "search" when: you have unsearched interests AND time permits
-- Switch to "stories" when: you see story circles AND haven't watched many stories
-- Switch to "feed" when: search/stories are done OR you want to explore organic content
-- DON'T switch constantly - spend quality time in each phase
 
 WHEN TO TERMINATE:
 - \u2705 Time is almost up (< 30 seconds remaining)
@@ -7111,14 +7135,20 @@ When you see a video playing (videoState in context):
 - Use lingerDuration: "long" for interesting videos, "short" for ads
 - Capture multiple frames by staying on video (system auto-captures)
 
-ALWAYS SKIP ADS:
-- If you detect sponsored content ("Sponsored", "Paid partnership", "Shop now", "Learn more")
-- Scroll past ads quickly - use lingerDuration: "short" and scroll
-- Don't capture ads
+ADS:
+- Ads rarely contain useful content \u2014 skip them unless they relate to user interests.
+- Sponsored indicators: "Sponsored", "Paid partnership", "Shop now", "Learn more"
+- Use lingerDuration: "short" and scroll past when not relevant
 
 FORBIDDEN ACTIONS:
 - NEVER click: like_button, comment_button, share_button, save_button, follow_button
 - Read-only browsing only
+
+STAGNATION DETECTION:
+- Check RECENT ACTIONS for scrollY values. If scrollY is unchanged across 2+ scrolls, you are STUCK at the page bottom or blocked by an overlay.
+- If stuck scrolling: try press(Escape) to close overlays, back() to go to previous page, or click a navigation link (Home, Explore) to change context.
+- If "no change detected" appears 3+ times in recent actions, STOP repeating the same action and switch strategy completely.
+- If SESSION MEMORY is available, use past session patterns to avoid known dead-ends.
 
 DEEP ENGAGEMENT:
 You can engage deeply with posts to understand them better. This is OPTIONAL but encouraged for interesting content.
@@ -7148,10 +7178,10 @@ WHEN TO ENGAGE DEEPLY (signals):
 \u274C Ad or sponsored content
 \u274C Time pressure (need to cover more ground)
 
-ENGAGEMENT DEPTH LEVELS:
-- QUICK LOOK: Open modal, view main image/video, close (10-15s total)
-- MODERATE: Open, navigate all carousel slides, skim comments (30-60s)
-- DEEP DIVE: Full carousel, read comments thoroughly, maybe visit profile (60-120s)
+ENGAGEMENT DEPTH:
+- Adjust engagement time based on content relevance
+- A few seconds for irrelevant content, longer for high-value content
+- You decide the duration \u2014 there are no fixed time buckets
 
 Include engagement decisions in your strategic field:
 - "engageDepth": "quick" | "moderate" | "deep" | null
@@ -7219,11 +7249,27 @@ Typing \u2192 seeing result links \u2192 scrolling away or typing again
 WHY: You never clicked a result, so you never navigated anywhere!
 FIX: After typing, look for links with follower counts and CLICK one.
 
+PROFILE EXPLORATION (after clicking a search result):
+When you land on a profile page, generally explore it before leaving:
+1. Scroll down to see the profile's posts grid
+2. Capture screenshots of interesting content (use captureNow: true)
+3. Click individual posts to see them in detail, capture, then close (Escape)
+4. Keep scrolling and capturing until you've collected enough content
+5. Leaving too quickly wastes the navigation effort it took to get here
+
+COMMON PROFILE FAILURE:
+Search \u2192 click profile \u2192 immediately go back \u2192 search again (infinite loop!)
+WHY: You left the profile before exploring it. The search is useless without capturing content.
+FIX: Explore the profile and capture content before navigating away.
+
 OUTPUT FORMAT (JSON only):
 {
   "reasoning": "Explain your decision",
   "action": "click|hover|scroll|type|press|clear|back|wait",
   "params": { ... },
+  NOTE: For click/hover, params MUST include "expectedName" \u2014 the element name you expect to interact with.
+  Example: "params": {"id": 5, "expectedName": "Search"}
+  This prevents clicking the wrong element if you mix up IDs.
   "expectedOutcome": "What should happen",
   "confidence": 0.0-1.0,
   "capture": {
@@ -7235,7 +7281,7 @@ OUTPUT FORMAT (JSON only):
     "switchPhase": "search"|"stories"|"feed"|null,
     "terminateSession": false,
     "captureNow": true,
-    "lingerDuration": "short"|"medium"|"long",
+    "lingerDuration": "short"|"medium"|"long"|"xlong",
     "engageDepth": "quick"|"moderate"|"deep"|null,
     "closeEngagement": false,
     "reason": "Strategic reasoning"
@@ -7248,7 +7294,7 @@ STRATEGIC DECISION EXAMPLES:
 {
   "reasoning": "Session just started, will search for user interests first",
   "action": "click",
-  "params": {"id": 3},
+  "params": {"id": 3, "expectedName": "Search"},
   "expectedOutcome": "Search panel opens",
   "strategic": {
     "switchPhase": "search",
@@ -7298,7 +7344,7 @@ STRATEGIC DECISION EXAMPLES:
 {
   "reasoning": "Post has 5,234 likes and is a carousel with 4 slides - worth exploring",
   "action": "click",
-  "params": {"id": 12},
+  "params": {"id": 12, "expectedName": "Photo by username"},
   "expectedOutcome": "Post modal opens for detailed view",
   "strategic": {
     "engageDepth": "moderate",
@@ -7338,7 +7384,15 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
    * Build the user prompt with current context and elements.
    */
   buildUserPrompt(context, elements) {
-    const recentActionsStr = context.recentActions.slice(-5).map((a, i) => `${i + 1}. ${a.action}(${JSON.stringify(a.params)}) \u2192 ${a.success ? "success" : "failed"}`).join("\n") || "None yet";
+    const recentActionsStr = context.recentActions.slice(-15).map((a, i) => {
+      let line = `${i + 1}. ${a.action}(${JSON.stringify(a.params)}) \u2192 ${a.success ? "success" : "FAILED"}`;
+      const parts = [];
+      if (a.clickedElementName) parts.push(`element="${a.clickedElementName}"`);
+      if (a.verified && a.verified !== "not_verified") parts.push(a.verified.replace(/_/g, " "));
+      if (a.scrollY !== void 0) parts.push(`scrollY=${a.scrollY}`);
+      if (parts.length > 0) line += ` [${parts.join(", ")}]`;
+      return line;
+    }).join("\n") || "None yet";
     let goalDesc = "";
     switch (context.currentGoal.type) {
       case "search_interest":
@@ -7353,10 +7407,13 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
       case "explore_profile":
         goalDesc = `Explore profile: ${context.currentGoal.target}`;
         break;
+      case "analyze_account":
+        goalDesc = "Create a comprehensive digest of this account \u2014 you decide the approach";
+        break;
       default:
         goalDesc = "General browsing - YOU decide what to do";
     }
-    const elementsByContainer = this.groupElementsByContainer(elements.slice(0, 30));
+    const elementsByContainer = this.groupElementsByContainer(elements);
     const overlays = this.detectActiveOverlays(elements);
     const overlayInfo = overlays.length > 0 ? `- Active dialogs: ${overlays.join(", ")}
 ` : "";
@@ -7364,10 +7421,6 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
     const targetSec = Math.round(context.targetDurationMs / 1e3);
     const remainingSec = Math.max(0, targetSec - elapsedSec);
     const interestsStr = context.userInterests.length > 0 ? context.userInterests.join(", ") : "None specified";
-    const searchedStr = context.interestsSearched.length > 0 ? context.interestsSearched.join(", ") : "None yet";
-    const unsearchedInterests = context.userInterests.filter(
-      (i) => !context.interestsSearched.includes(i)
-    );
     let phaseHistoryStr = "None yet";
     if (context.phaseHistory && context.phaseHistory.length > 0) {
       phaseHistoryStr = context.phaseHistory.map((p) => `${p.phase}: ${Math.round(p.durationMs / 1e3)}s, ${p.itemsCollected} items`).join("; ");
@@ -7384,36 +7437,45 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
     }
     return `YOU HAVE FULL STRATEGIC CONTROL. Decide what to do next.
 
-USER INTERESTS: ${interestsStr}
-- Searched: ${searchedStr}
-- Not yet searched: ${unsearchedInterests.length > 0 ? unsearchedInterests.join(", ") : "All searched"}
+CURRENT GOAL: ${goalDesc}
+
+USER INTERESTS (topics the user cares about): ${interestsStr}
 
 SESSION STATUS:
-- Current phase: ${context.currentPhase || "not set"}
+- Current activity: ${context.currentPhase || "exploring"}
 - Time: ${elapsedSec}s elapsed, ${remainingSec}s remaining (of ${targetSec}s total)
 - Collected: ${context.postsCollected} posts, ${context.storiesWatched} stories
 - Captures: ${context.captureCount || 0} screenshots taken
 
-PHASE HISTORY: ${phaseHistoryStr}
+ACTIVITY HISTORY: ${phaseHistoryStr}
 
 CURRENT STATE:
 - URL: ${context.url}
 - View: ${context.view}
 - Video: ${videoStr}
 - Content: ${contentStatsStr}
+- Scroll position: ${context.scrollPosition !== void 0 ? `${context.scrollPosition}px from top` : "unknown"}
+- Content freshness: ${context.elementFingerprint || "unknown"}
 ${overlayInfo}
 ${this.formatTreeContext(context)}
 
 ENGAGEMENT STATE:
 ${this.formatEngagementState(context)}
-
+${context.sessionMemoryDigest ? `
+SESSION MEMORY (from past sessions):
+${context.sessionMemoryDigest}
+` : ""}
 ACCESSIBILITY TREE (${elements.length} elements, grouped by container):
 ${elementsByContainer}
 
 RECENT ACTIONS:
 ${recentActionsStr}
-
-Make your decision. Include strategic decisions if you want to switch phases, terminate, or adjust pacing.`;
+${context.loopWarning ? `
+\u26A0\uFE0F LOOP DETECTED (${context.loopWarning.severity}): ${context.loopWarning.reason}
+WARNING #${context.loopWarning.consecutiveWarnings} \u2014 You are repeating actions with no effect. Change your approach NOW.
+${context.loopWarning.consecutiveWarnings >= 2 ? "CRITICAL: Auto-recovery will override your next action if you do not change strategy." : ""}
+` : ""}
+Make your decision. Include strategic decisions to signal captures, activity changes, or session termination.`;
   }
   /**
    * Detect active overlays from container roles in the accessibility tree.
@@ -7490,7 +7552,7 @@ Make your decision. Include strategic decisions if you want to switch phases, te
     lines.push("TREE CONTEXT (use this to infer where you are):");
     if (ts.containers.length > 0) {
       lines.push("\nContainers found:");
-      for (const c of ts.containers.slice(0, 10)) {
+      for (const c of ts.containers) {
         lines.push(`- ${c.role}: "${c.name}" (${c.childCount} children)`);
       }
     }
@@ -7505,7 +7567,7 @@ Make your decision. Include strategic decisions if you want to switch phases, te
     }
     if (ts.landmarks.length > 0) {
       lines.push(`
-Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
+Key landmarks: ${ts.landmarks.join(", ")}`);
     }
     return lines.join("\n");
   }
@@ -7524,7 +7586,6 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
       containers.get(containerKey).push(elem);
     }
     const parts = [];
-    const shownContentForContainer = /* @__PURE__ */ new Set();
     for (const [containerKey, elems] of containers) {
       const siblingInfo = elems[0]?.siblingCount ? ` (${elems[0].siblingCount} siblings)` : "";
       parts.push(`[${containerKey}${siblingInfo}]`);
@@ -7532,10 +7593,10 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
         const hint = e.semanticHint ? ` \u26A0\uFE0F${e.semanticHint}` : "";
         const depth = e.depth !== void 0 ? ` depth=${e.depth}` : "";
         parts.push(`  id:${e.id} ${e.role} "${e.name}" Y=${e.position.y}${hint}${depth}`);
-        if (e.contentPreview && !shownContentForContainer.has(containerKey)) {
+        if (e.contentPreview) {
           const cp = e.contentPreview;
           if (cp.captionText) {
-            parts.push(`    Caption: "${cp.captionText}${cp.captionText.length >= 100 ? "..." : ""}"`);
+            parts.push(`    Caption: "${cp.captionText}"`);
           }
           if (cp.engagement) {
             const engParts = [];
@@ -7551,7 +7612,6 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
           if (cp.altText) {
             parts.push(`    Alt: "${cp.altText}"`);
           }
-          shownContentForContainer.add(containerKey);
         }
       }
       parts.push("");
@@ -7570,42 +7630,46 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
       return this.fallbackDecision(context, elements, "No elements visible");
     }
     try {
-      const decision = await this.callLLM(context, elements);
+      const rawDecision = await this.callLLM(context, elements);
       this.decisionCount++;
       const estimatedCost = this.decisionCount * 1e-3;
+      const validated = this.validateDecision(rawDecision, elements);
       if (this.debug) {
         console.log("\n\u{1F9E0} === LLM REASONING ===");
         console.log(`Decision #${this.decisionCount} (est. cost: $${estimatedCost.toFixed(4)})`);
-        console.log(`Action: ${decision.action}`);
-        console.log(`Reasoning: ${decision.reasoning}`);
-        console.log(`Expected: ${decision.expectedOutcome}`);
-        console.log(`Confidence: ${decision.confidence ?? "N/A"}`);
-        if (decision.capture) {
-          console.log(`\u{1F4F8} Capture: ${decision.capture.shouldCapture ? "YES" : "NO"} - ${decision.capture.reason || "no reason"}`);
+        if (rawDecision.action !== validated.action) {
+          console.log(`Action: ${rawDecision.action} \u2192 ${validated.action} (safety modified)`);
+        } else {
+          console.log(`Action: ${validated.action}`);
+        }
+        console.log(`Reasoning: ${validated.reasoning}`);
+        console.log(`Expected: ${validated.expectedOutcome}`);
+        console.log(`Confidence: ${validated.confidence ?? "N/A"}`);
+        if (validated.capture) {
+          console.log(`\u{1F4F8} Capture: ${validated.capture.shouldCapture ? "YES" : "NO"} - ${validated.capture.reason || "no reason"}`);
         } else {
           console.log(`\u{1F4F8} Capture: NOT SIGNALED`);
         }
-        if (decision.strategic) {
+        if (validated.strategic) {
           console.log("\u{1F3AF} === STRATEGIC DECISIONS ===");
-          if (decision.strategic.switchPhase) {
-            console.log(`  Phase: SWITCH TO ${decision.strategic.switchPhase}`);
+          if (validated.strategic.switchPhase) {
+            console.log(`  Phase: SWITCH TO ${validated.strategic.switchPhase}`);
           }
-          if (decision.strategic.terminateSession) {
+          if (validated.strategic.terminateSession) {
             console.log(`  \u23F9\uFE0F TERMINATE SESSION`);
           }
-          if (decision.strategic.captureNow) {
+          if (validated.strategic.captureNow) {
             console.log(`  \u{1F4F8} Capture viewport NOW`);
           }
-          if (decision.strategic.lingerDuration) {
-            console.log(`  \u23F1\uFE0F Linger: ${decision.strategic.lingerDuration}`);
+          if (validated.strategic.lingerDuration) {
+            console.log(`  \u23F1\uFE0F Linger: ${validated.strategic.lingerDuration}`);
           }
-          if (decision.strategic.reason) {
-            console.log(`  Reason: ${decision.strategic.reason}`);
+          if (validated.strategic.reason) {
+            console.log(`  Reason: ${validated.strategic.reason}`);
           }
         }
         console.log("========================\n");
       }
-      const validated = this.validateDecision(decision, elements);
       return validated;
     } catch (error) {
       console.warn("NavigationLLM call failed, using fallback:", error);
@@ -7683,43 +7747,13 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
         "follow_button"
       ];
       if (targetElement.semanticHint && forbiddenHints.includes(targetElement.semanticHint)) {
-        console.warn(`[Safety Net] Blocked click on ${targetElement.semanticHint}`);
+        console.log(`  \u{1F6E1}\uFE0F Safety: click on ${targetElement.semanticHint} \u2192 scroll (forbidden element)`);
         return {
           ...decision,
           action: "scroll",
           params: { direction: "down", amount: "small" },
           reasoning: `SAFETY: Blocked interaction with ${targetElement.semanticHint}, scrolling instead`
         };
-      }
-      const name = targetElement.name?.toLowerCase() || "";
-      const interactivePatterns = [
-        "like",
-        "love",
-        "heart",
-        "comment",
-        "reply",
-        "share",
-        "send",
-        "save",
-        "bookmark",
-        "follow",
-        "unfollow",
-        "accept",
-        "decline",
-        "confirm",
-        "post",
-        "submit"
-      ];
-      for (const pattern of interactivePatterns) {
-        if (name === pattern || name.startsWith(pattern + " ")) {
-          console.warn(`[Safety Net] Blocked click on interactive element: "${name}"`);
-          return {
-            ...decision,
-            action: "scroll",
-            params: { direction: "down", amount: "small" },
-            reasoning: `SAFETY: Blocked interactive action "${name}", scrolling instead`
-          };
-        }
       }
       if (!decision.capture) {
         const nameLower = targetElement.name.toLowerCase();
@@ -7740,7 +7774,7 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
           const containerName = elem.containerName?.toLowerCase() || "";
           const inputName = elem.name?.toLowerCase() || "";
           if (containerName.includes("message") || containerName.includes("direct") || containerName.includes("inbox") || containerName.includes("chat")) {
-            console.warn(`[Safety Net] Blocked typing in message context: "${elem.containerName}"`);
+            console.log(`  \u{1F6E1}\uFE0F Safety: type in "${elem.containerName}" \u2192 Escape (message context)`);
             return {
               ...decision,
               action: "press",
@@ -7749,7 +7783,7 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
             };
           }
           if (containerName.includes("comment") || inputName.includes("comment") || inputName.includes("reply") || inputName.includes("add a comment")) {
-            console.warn(`[Safety Net] Blocked typing in comment context: "${inputName}"`);
+            console.log(`  \u{1F6E1}\uFE0F Safety: type in "${inputName}" \u2192 Escape (comment context)`);
             return {
               ...decision,
               action: "press",
@@ -7765,7 +7799,7 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
       if (!["up", "down", "left", "right"].includes(scrollParams.direction)) {
         scrollParams.direction = "down";
       }
-      if (!["small", "medium", "large"].includes(scrollParams.amount)) {
+      if (!["small", "medium", "large", "xlarge"].includes(scrollParams.amount)) {
         scrollParams.amount = "medium";
       }
     }
@@ -7816,16 +7850,29 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
   }
   /**
    * Fallback decision when LLM fails or is unavailable.
+   * Uses escalating strategies based on recent action patterns.
    */
   fallbackDecision(context, elements, reason) {
-    const recentScrollFails = context.recentActions.slice(-3).filter((a) => a.action === "scroll" && !a.success).length;
-    if (recentScrollFails >= 2) {
+    const recent = context.recentActions.slice(-15);
+    const scrollPositions = recent.filter((a) => a.scrollY !== void 0).map((a) => a.scrollY);
+    const scrollStagnant = scrollPositions.length >= 2 && scrollPositions.every((p) => p === scrollPositions[0]);
+    if (scrollStagnant) {
       return {
-        reasoning: `Fallback: ${reason}. Recent scrolls failed, trying escape.`,
+        reasoning: `Fallback: ${reason}. Scroll position stuck, trying escape.`,
         action: "press",
         params: { key: "Escape" },
-        expectedOutcome: "Close any modal or overlay",
+        expectedOutcome: "Close any blocking overlay",
         confidence: 0.3
+      };
+    }
+    const recentFailures = recent.filter((a) => !a.success).length;
+    if (recentFailures >= 3) {
+      return {
+        reasoning: `Fallback: ${reason}. Multiple failures, navigating back.`,
+        action: "back",
+        params: {},
+        expectedOutcome: "Return to previous page",
+        confidence: 0.2
       };
     }
     return {
@@ -7859,17 +7906,20 @@ Key landmarks: ${ts.landmarks.slice(0, 10).join(", ")}`);
 
 // src/main/services/NavigationExecutor.ts
 var SCROLL_AMOUNTS = {
-  small: 200,
-  medium: 500,
-  large: 800
+  small: 150,
+  medium: 400,
+  large: 700,
+  xlarge: 1200
 };
 var LINGER_DURATIONS = {
   short: 1e3,
   // 1 second - for navigation, skipping
   medium: 3e3,
   // 3 seconds - normal engagement
-  long: 6e3
+  long: 6e3,
   // 6 seconds - deep engagement, videos
+  xlong: 12e3
+  // 12 seconds - very deep engagement
 };
 var NavigationExecutor = class {
   page;
@@ -7933,32 +7983,64 @@ var NavigationExecutor = class {
   /**
    * Execute a click action with optional gaze anchors.
    * Returns the clicked element info for potential capture.
+   * Includes post-click verification to detect if click caused a state change.
    */
   async executeClick(decision, elements, startTime) {
     const params = decision.params;
-    const target = elements.find((e) => e.id === params.id);
+    let target = elements.find((e) => e.id === params.id);
     if (!target) {
       return this.failureResult(decision, startTime, `Element id=${params.id} not found`);
+    }
+    if (params.expectedName) {
+      const expectedLower = params.expectedName.toLowerCase();
+      const targetLower = target.name.toLowerCase();
+      const nameMatches = targetLower.includes(expectedLower) || expectedLower.includes(targetLower);
+      if (!nameMatches) {
+        const byName = elements.find(
+          (e) => e.name.toLowerCase().includes(expectedLower) || expectedLower.includes(e.name.toLowerCase())
+        );
+        if (byName) {
+          console.warn(`\u26A0\uFE0F Element ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}". Corrected to id:${byName.id} "${byName.name}"`);
+          target = byName;
+        } else {
+          console.warn(`\u26A0\uFE0F Element ID mismatch: id:${params.id} is "${target.name}", LLM expected "${params.expectedName}". No name match found, using original ID.`);
+        }
+      }
     }
     const boundingBox = target.boundingBox;
     if (!boundingBox) {
       return this.failureResult(decision, startTime, `Element id=${params.id} has no bounding box`);
     }
+    const preClickUrl = this.page.url();
+    const preClickState = await this.getQuickDOMSignature();
     await this.ghost.clickElement(boundingBox);
     await this.humanDelay(200, 500);
-    const record = this.recordAction(decision, true);
+    const postClickUrl = this.page.url();
+    const postClickState = await this.getQuickDOMSignature();
+    let verified = "no_change_detected";
+    if (preClickUrl !== postClickUrl) {
+      verified = "url_changed";
+    } else if (preClickState !== postClickState) {
+      verified = "dom_changed";
+    }
+    const record = this.recordAction(decision, true, void 0, {
+      url: postClickUrl,
+      verified,
+      clickedElementName: target.name
+    });
     return {
       success: true,
       actionTaken: "click",
       params,
-      resultingUrl: this.page.url(),
+      resultingUrl: postClickUrl,
       durationMs: Date.now() - startTime,
       // Return the clicked element info for capture
       focusedElement: {
         id: target.id,
         boundingBox,
         name: target.name
-      }
+      },
+      verified
     };
   }
   /**
@@ -7980,7 +8062,11 @@ var NavigationExecutor = class {
         // Shorter pause for navigation
       });
     }
-    this.recordAction(decision, true);
+    const scrollYAfter = await this.scroll.getScrollPosition();
+    this.recordAction(decision, true, void 0, {
+      scrollY: scrollYAfter,
+      url: this.page.url()
+    });
     return {
       success: true,
       actionTaken: "scroll",
@@ -7994,18 +8080,44 @@ var NavigationExecutor = class {
    */
   async executeType(decision, startTime) {
     const params = decision.params;
+    const focusedInput = await this.page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el) return null;
+      const tag = el.tagName.toLowerCase();
+      const role = el.getAttribute("role");
+      const isEditable = el.getAttribute("contenteditable") === "true";
+      const isInput = tag === "input" || tag === "textarea" || role === "textbox" || role === "searchbox" || role === "combobox" || isEditable;
+      return isInput ? el.getAttribute("aria-label") || el.getAttribute("placeholder") || tag : null;
+    }).catch(() => null);
+    if (!focusedInput) {
+      console.warn(`\u26A0\uFE0F Type action failed: no text input is focused. Text "${params.text}" would go nowhere.`);
+      this.recordAction(decision, false, "No text input focused", { url: this.page.url(), verified: "no_change_detected" });
+      return {
+        success: false,
+        actionTaken: "type",
+        params,
+        errorMessage: "No text input focused \u2014 click a search/text field first",
+        resultingUrl: this.page.url(),
+        durationMs: Date.now() - startTime,
+        verified: "no_change_detected"
+      };
+    }
+    const preTypeState = await this.getQuickDOMSignature();
     for (const char of params.text) {
       await this.page.keyboard.type(char);
       await this.humanDelay(50, 150);
     }
     await this.humanDelay(300, 600);
-    this.recordAction(decision, true);
+    const postTypeState = await this.getQuickDOMSignature();
+    const verified = preTypeState !== postTypeState ? "dom_changed" : "no_change_detected";
+    this.recordAction(decision, true, void 0, { url: this.page.url(), verified });
     return {
       success: true,
       actionTaken: "type",
       params,
       resultingUrl: this.page.url(),
-      durationMs: Date.now() - startTime
+      durationMs: Date.now() - startTime,
+      verified
     };
   }
   /**
@@ -8015,7 +8127,7 @@ var NavigationExecutor = class {
     const params = decision.params;
     await this.page.keyboard.press(params.key);
     await this.humanDelay(200, 400);
-    this.recordAction(decision, true);
+    this.recordAction(decision, true, void 0, { url: this.page.url() });
     return {
       success: true,
       actionTaken: "press",
@@ -8031,7 +8143,7 @@ var NavigationExecutor = class {
     const params = decision.params;
     const waitMs = params.seconds * 1e3 * this.sessionDelayMultiplier;
     await new Promise((resolve) => setTimeout(resolve, waitMs));
-    this.recordAction(decision, true);
+    this.recordAction(decision, true, void 0, { url: this.page.url() });
     return {
       success: true,
       actionTaken: "wait",
@@ -8045,16 +8157,30 @@ var NavigationExecutor = class {
    */
   async executeHover(decision, elements, startTime) {
     const params = decision.params;
-    const target = elements.find((e) => e.id === params.id);
+    let target = elements.find((e) => e.id === params.id);
     if (!target) {
       return this.failureResult(decision, startTime, `Element id=${params.id} not found`);
+    }
+    if (params.expectedName) {
+      const expectedLower = params.expectedName.toLowerCase();
+      const targetLower = target.name.toLowerCase();
+      const nameMatches = targetLower.includes(expectedLower) || expectedLower.includes(targetLower);
+      if (!nameMatches) {
+        const byName = elements.find(
+          (e) => e.name.toLowerCase().includes(expectedLower) || expectedLower.includes(e.name.toLowerCase())
+        );
+        if (byName) {
+          console.warn(`\u26A0\uFE0F Hover ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}". Corrected to id:${byName.id} "${byName.name}"`);
+          target = byName;
+        }
+      }
     }
     const boundingBox = target.boundingBox;
     if (!boundingBox) {
       return this.failureResult(decision, startTime, `Element id=${params.id} has no bounding box`);
     }
     await this.ghost.hoverElement(boundingBox);
-    this.recordAction(decision, true);
+    this.recordAction(decision, true, void 0, { url: this.page.url(), clickedElementName: target.name });
     return {
       success: true,
       actionTaken: "hover",
@@ -8074,7 +8200,7 @@ var NavigationExecutor = class {
   async executeBack(decision, startTime) {
     await this.page.goBack({ waitUntil: "domcontentloaded" });
     await this.humanDelay(500, 1e3);
-    this.recordAction(decision, true);
+    this.recordAction(decision, true, void 0, { url: this.page.url() });
     return {
       success: true,
       actionTaken: "back",
@@ -8092,7 +8218,7 @@ var NavigationExecutor = class {
     await this.humanDelay(50, 150);
     await this.page.keyboard.press("Backspace");
     await this.humanDelay(200, 400);
-    this.recordAction(decision, true);
+    this.recordAction(decision, true, void 0, { url: this.page.url() });
     return {
       success: true,
       actionTaken: "clear",
@@ -8115,15 +8241,16 @@ var NavigationExecutor = class {
     };
   }
   /**
-   * Record an action to history.
+   * Record an action to history with optional state context.
    */
-  recordAction(decision, success, errorMessage) {
+  recordAction(decision, success, errorMessage, stateContext) {
     const record = {
       timestamp: Date.now(),
       action: decision.action,
       params: decision.params,
       success,
-      errorMessage
+      errorMessage,
+      ...stateContext || {}
     };
     this.actionHistory.push(record);
     if (this.actionHistory.length > this.maxHistorySize) {
@@ -8139,17 +8266,40 @@ var NavigationExecutor = class {
   }
   /**
    * Check if we're in a loop (repeating same actions).
+   * Returns severity level for escalating recovery.
    */
   isInLoop(lookback = 6) {
-    if (this.actionHistory.length < lookback) return false;
+    if (this.actionHistory.length < lookback) return { inLoop: false, severity: "mild" };
     const recent = this.actionHistory.slice(-lookback);
+    const scrollActions = recent.filter((a) => a.action === "scroll" && a.scrollY !== void 0);
+    if (scrollActions.length >= 3) {
+      const positions = scrollActions.map((a) => a.scrollY);
+      const allSamePosition = positions.every((p) => p === positions[0]);
+      if (allSamePosition) return { inLoop: true, severity: "severe" };
+    }
+    const noChangeActions = recent.filter((a) => a.verified === "no_change_detected");
+    if (noChangeActions.length >= 4) return { inLoop: true, severity: "moderate" };
     const allSameAction = recent.every((a) => a.action === recent[0].action);
-    if (allSameAction && recent[0].action === "scroll") {
+    if (allSameAction && recent[0].action !== "scroll") {
       const failureRate = recent.filter((a) => !a.success).length / recent.length;
-      return failureRate > 0.5;
+      if (failureRate > 0.5) return { inLoop: true, severity: "moderate" };
     }
     const clickFailures = recent.filter((a) => a.action === "click" && !a.success);
-    return clickFailures.length >= 3;
+    if (clickFailures.length >= 3) return { inLoop: true, severity: "moderate" };
+    return { inLoop: false, severity: "mild" };
+  }
+  /**
+   * Get escalating recovery action based on loop severity.
+   */
+  getRecoveryAction(severity) {
+    switch (severity) {
+      case "mild":
+        return { action: "press", key: "Escape", reason: "Close any overlay" };
+      case "moderate":
+        return { action: "back", reason: "Navigate back to previous page" };
+      case "severe":
+        return { action: "navigate_home", reason: "Return to feed - page is stuck" };
+    }
   }
   /**
    * Human-like delay with session variance.
@@ -8158,6 +8308,23 @@ var NavigationExecutor = class {
     const baseDelay = minMs + Math.random() * (maxMs - minMs);
     const adjustedDelay = baseDelay * this.sessionDelayMultiplier;
     return new Promise((resolve) => setTimeout(resolve, adjustedDelay));
+  }
+  /**
+   * Get a quick DOM state signature for click verification.
+   * Captures lightweight signals: dialog count, article count, and scroll position.
+   * Cost: ~1-2ms (single evaluate call)
+   */
+  async getQuickDOMSignature() {
+    try {
+      return await this.page.evaluate(() => {
+        const dialogs = document.querySelectorAll('[role="dialog"]').length;
+        const articles = document.querySelectorAll("article").length;
+        const scrollY = Math.round(window.scrollY / 50);
+        return `d${dialogs}:a${articles}:s${scrollY}`;
+      });
+    } catch {
+      return "unknown";
+    }
   }
   /**
    * Reset executor state (for new session).
@@ -8708,6 +8875,147 @@ var DebugOverlay = class {
   }
 };
 
+// src/main/services/SessionMemory.ts
+var import_electron4 = require("electron");
+var import_fs3 = __toESM(require("fs"), 1);
+var import_path3 = __toESM(require("path"), 1);
+var MAX_SUMMARIES = 20;
+var DIGEST_SUMMARIES = 5;
+var SessionMemory = class {
+  storagePath;
+  summaries = [];
+  constructor() {
+    const userDataPath = import_electron4.app.getPath("userData");
+    this.storagePath = import_path3.default.join(userDataPath, "session_memory", "summaries.json");
+  }
+  /**
+   * Load session summaries from disk.
+   * Call this before a browsing session starts.
+   */
+  async loadMemory() {
+    try {
+      const data = await import_fs3.default.promises.readFile(this.storagePath, "utf-8");
+      this.summaries = JSON.parse(data);
+      console.log(`\u{1F9E0} Loaded ${this.summaries.length} session memories`);
+    } catch {
+      this.summaries = [];
+    }
+    return this.summaries;
+  }
+  /**
+   * Save a session summary to disk.
+   * Call this after a browsing session completes.
+   * Trims to MAX_SUMMARIES, keeping most recent.
+   */
+  async saveSession(summary) {
+    this.summaries.push(summary);
+    if (this.summaries.length > MAX_SUMMARIES) {
+      this.summaries = this.summaries.slice(-MAX_SUMMARIES);
+    }
+    const dir = import_path3.default.dirname(this.storagePath);
+    const tempPath = this.storagePath + ".tmp";
+    try {
+      await import_fs3.default.promises.mkdir(dir, { recursive: true });
+      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(this.summaries, null, 2));
+      await import_fs3.default.promises.rename(tempPath, this.storagePath);
+      console.log(`\u{1F9E0} Saved session memory (${this.summaries.length} sessions)`);
+    } catch (err) {
+      console.error("Failed to save session memory:", err);
+    }
+  }
+  /**
+   * Generate a compact LLM-ready digest from recent sessions.
+   * Returns ~150 tokens summarizing patterns and lessons learned.
+   */
+  generateDigest() {
+    const recent = this.summaries.slice(-DIGEST_SUMMARIES);
+    if (recent.length === 0) return "";
+    const lines = [`SESSION MEMORY (last ${recent.length} sessions):`];
+    const interestStats = this.getInterestStats(recent);
+    if (interestStats.length > 0) {
+      const ranked = interestStats.sort((a, b) => b.avgCaptures - a.avgCaptures).slice(0, 5).map((s) => `"${s.interest}" avg ${s.avgCaptures.toFixed(1)} captures (${s.quality})`).join(", ");
+      lines.push(`- Interest productivity: ${ranked}`);
+    }
+    const phaseStats = this.getPhaseStats(recent);
+    if (phaseStats.length > 0) {
+      const phaseSummary = phaseStats.map((p) => `${p.phase} ${p.avgTimePct.toFixed(0)}% time \u2192 ${p.avgCapturesPct.toFixed(0)}% captures`).join(", ");
+      lines.push(`- Phase split: ${phaseSummary}`);
+    }
+    const stagnationInfo = this.getStagnationPatterns(recent);
+    if (stagnationInfo) {
+      lines.push(`- ${stagnationInfo}`);
+    }
+    const avgCaptures = recent.reduce((sum, s) => sum + s.totalCaptures, 0) / recent.length;
+    const avgActions = recent.reduce((sum, s) => sum + s.totalActions, 0) / recent.length;
+    lines.push(`- Avg session: ${avgCaptures.toFixed(1)} captures in ${avgActions.toFixed(0)} actions`);
+    return lines.join("\n");
+  }
+  /**
+   * Get interest productivity rankings.
+   */
+  getInterestPriority() {
+    const stats = this.getInterestStats(this.summaries.slice(-DIGEST_SUMMARIES));
+    const priority = /* @__PURE__ */ new Map();
+    for (const stat of stats) {
+      priority.set(stat.interest, stat.avgCaptures);
+    }
+    return priority;
+  }
+  getInterestStats(summaries) {
+    const interestMap = /* @__PURE__ */ new Map();
+    for (const session2 of summaries) {
+      for (const result of session2.interestResults) {
+        const existing = interestMap.get(result.interest) || { totalCaptures: 0, count: 0 };
+        existing.totalCaptures += result.captureCount;
+        existing.count++;
+        interestMap.set(result.interest, existing);
+      }
+    }
+    return Array.from(interestMap.entries()).map(([interest, data]) => {
+      const avg = data.totalCaptures / data.count;
+      return {
+        interest,
+        avgCaptures: avg,
+        quality: avg >= 5 ? "HIGH" : avg >= 2 ? "MEDIUM" : "LOW"
+      };
+    });
+  }
+  getPhaseStats(summaries) {
+    const phaseMap = /* @__PURE__ */ new Map();
+    for (const session2 of summaries) {
+      const totalDuration = session2.phaseBreakdown.reduce((sum, p) => sum + p.durationMs, 0) || 1;
+      const totalCaptures = session2.phaseBreakdown.reduce((sum, p) => sum + p.capturesProduced, 0) || 1;
+      for (const phase of session2.phaseBreakdown) {
+        const existing = phaseMap.get(phase.phase) || { totalTimePct: 0, totalCapturesPct: 0, count: 0 };
+        existing.totalTimePct += phase.durationMs / totalDuration * 100;
+        existing.totalCapturesPct += phase.capturesProduced / totalCaptures * 100;
+        existing.count++;
+        phaseMap.set(phase.phase, existing);
+      }
+    }
+    return Array.from(phaseMap.entries()).map(([phase, data]) => ({
+      phase,
+      avgTimePct: data.totalTimePct / data.count,
+      avgCapturesPct: data.totalCapturesPct / data.count
+    }));
+  }
+  getStagnationPatterns(summaries) {
+    const allEvents = summaries.flatMap((s) => s.stagnationEvents);
+    if (allEvents.length === 0) return null;
+    const scrollYValues = allEvents.map((e) => e.scrollY);
+    const avgStagnationY = scrollYValues.reduce((a, b) => a + b, 0) / scrollYValues.length;
+    const recoverySuccess = /* @__PURE__ */ new Map();
+    for (const event of allEvents) {
+      const existing = recoverySuccess.get(event.recoveryAction) || { success: 0, total: 0 };
+      existing.total++;
+      if (event.recoveredSuccessfully) existing.success++;
+      recoverySuccess.set(event.recoveryAction, existing);
+    }
+    const bestRecovery = Array.from(recoverySuccess.entries()).sort((a, b) => b[1].success / b[1].total - a[1].success / a[1].total).map(([action, stats]) => `${action} (${Math.round(stats.success / stats.total * 100)}% effective)`).slice(0, 2).join(", ");
+    return `Stagnation: avg at ${Math.round(avgStagnationY)}px scrollY, recovery: ${bestRecovery}`;
+  }
+};
+
 // src/main/services/InstagramScraper.ts
 var InstagramScraper = class {
   context;
@@ -8727,6 +9035,7 @@ var InstagramScraper = class {
   navigationLLM;
   navigationExecutor;
   debugOverlay;
+  sessionMemory = new SessionMemory();
   // Track current view for gaze planning
   lastKnownView = "unknown";
   // Metrics
@@ -8751,13 +9060,13 @@ var InstagramScraper = class {
   /**
    * Main scraping entry point - Research Sequence.
    *
-   * Executes three phases:
-   * 1. Active Search - Search each interest, capture results
-   * 2. Story Watch - Watch available stories
-   * 3. Feed Scroll - Browse main feed
+   * [LEGACY] Hardcoded three-phase flow. Still used by SchedulerService for text-extraction pipeline.
+   * TODO: Migrate SchedulerService to browseAndCapture() + screenshot-based analysis.
+   * Once migrated, this method and all its helpers can be removed.
    *
    * @param targetMinutes - Total browsing time (human-paced), split across phases
    * @param userInterests - Topics to search for in Phase A
+   * @deprecated Use browseAndCapture() for AI-driven navigation
    */
   async scrapeFeedAndStories(targetMinutes, userInterests) {
     const budget = await this.usageService.getBudgetStatus(this.usageCap);
@@ -8872,10 +9181,10 @@ var InstagramScraper = class {
     this.navigator = new A11yNavigator(this.page);
     this.vision = new ContentVision(this.apiKey);
     this.screenshotCollector = new ScreenshotCollector(this.page, {
-      maxCaptures: 60,
+      maxCaptures: 150,
       jpegQuality: 85,
       minScrollDelta: 200,
-      saveToDirectory: path4.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
+      saveToDirectory: path5.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
     });
     this.contentReadiness = new ContentReadiness(this.page);
     if (this.debugMode) {
@@ -9190,7 +9499,7 @@ var InstagramScraper = class {
     const viewportInfo = await this.scroll.getViewportInfo();
     const viewportHeight = viewportInfo.height;
     while (Date.now() < endTime) {
-      if (this.screenshotCollector.getCaptureCount() >= 60) {
+      if (this.screenshotCollector.getCaptureCount() >= 150) {
         console.log("\u{1F4F8} Max captures reached, stopping browse");
         break;
       }
@@ -9845,19 +10154,19 @@ var InstagramScraper = class {
     console.log("\u26A0\uFE0F NAVIGATION LOOP DETECTED");
     console.log("\u26A0\uFE0F \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
     if (!this.diagnosticsDir) {
-      this.diagnosticsDir = path4.join(process.cwd(), "diagnostics");
-      if (!fs4.existsSync(this.diagnosticsDir)) {
-        fs4.mkdirSync(this.diagnosticsDir, { recursive: true });
+      this.diagnosticsDir = path5.join(process.cwd(), "diagnostics");
+      if (!fs5.existsSync(this.diagnosticsDir)) {
+        fs5.mkdirSync(this.diagnosticsDir, { recursive: true });
       }
     }
     const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
     try {
-      const screenshotPath = path4.join(this.diagnosticsDir, `loop_detected_screen_${timestamp}.png`);
+      const screenshotPath = path5.join(this.diagnosticsDir, `loop_detected_screen_${timestamp}.png`);
       await this.page.screenshot({ path: screenshotPath, fullPage: false });
       console.log(`\u{1F4F8} Screenshot saved: ${screenshotPath}`);
       const a11yTree = await this.navigator.getFullAccessibilityTree();
-      const treePath = path4.join(this.diagnosticsDir, `loop_diagnostic_tree_${timestamp}.json`);
-      fs4.writeFileSync(treePath, JSON.stringify({
+      const treePath = path5.join(this.diagnosticsDir, `loop_diagnostic_tree_${timestamp}.json`);
+      fs5.writeFileSync(treePath, JSON.stringify({
         timestamp,
         action,
         coordinate,
@@ -9973,10 +10282,10 @@ var InstagramScraper = class {
     this.navigator = new A11yNavigator(this.page);
     this.vision = new ContentVision(this.apiKey);
     this.screenshotCollector = new ScreenshotCollector(this.page, {
-      maxCaptures: 60,
+      maxCaptures: 150,
       jpegQuality: 85,
       minScrollDelta: 200,
-      saveToDirectory: path4.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
+      saveToDirectory: path5.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
     });
     this.contentReadiness = new ContentReadiness(this.page);
     this.navigationLLM = new NavigationLLM({ apiKey: this.apiKey });
@@ -9992,8 +10301,8 @@ var InstagramScraper = class {
       await this.debugOverlay.enable();
     }
     const loopConfig = {
-      maxActions: config?.maxActions || 200,
-      // Higher limit - LLM controls termination
+      maxActions: config?.maxActions || 500,
+      // LLM controls termination via strategic decisions
       maxDurationMs: config?.maxDurationMs || 5 * 60 * 1e3,
       // 5 minutes default
       minPostsForCompletion: config?.minPostsForCompletion || 5,
@@ -10015,10 +10324,13 @@ var InstagramScraper = class {
       console.log("\n\u{1F916} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
       console.log("\u{1F916} AI NAVIGATION MODE ACTIVE");
       console.log("\u{1F916} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
+      await this.sessionMemory.loadMemory();
+      const sessionMemoryDigest = this.sessionMemory.generateDigest();
       await this.runNavigationLoop(
         userInterests,
         loopConfig,
-        startTime
+        startTime,
+        sessionMemoryDigest
       );
     } catch (error) {
       console.error("\u274C AI Navigation error:", error.message);
@@ -10056,18 +10368,20 @@ var InstagramScraper = class {
    * No hardcoded phase sequence, time budgets, or termination thresholds.
    * The LLM decides everything based on content quality and session context.
    */
-  async runNavigationLoop(userInterests, config, startTime) {
+  async runNavigationLoop(userInterests, config, startTime, sessionMemoryDigest) {
     let actionCount = 0;
     let postsCollected = 0;
     let storiesWatched = 0;
     const interestsSearched = [];
-    let currentPhase = "search";
+    let currentPhase = "feed";
     const phaseHistory = [];
     let phaseStartTime = Date.now();
     let phaseItemsCollected = 0;
     let totalPostsSeen = 0;
     const uniquePosts = /* @__PURE__ */ new Set();
     let adsSkipped = 0;
+    const stagnationEvents = [];
+    let consecutiveLoopWarnings = 0;
     const engagementState = {
       level: "feed",
       levelEnteredAt: Date.now(),
@@ -10082,8 +10396,22 @@ var InstagramScraper = class {
         console.log("\u23F0 Time limit reached, stopping navigation");
         break;
       }
+      const loopStatus = this.navigationExecutor.isInLoop();
+      let loopWarning = void 0;
+      if (loopStatus.inLoop) {
+        consecutiveLoopWarnings++;
+        const recovery = this.navigationExecutor.getRecoveryAction(loopStatus.severity);
+        loopWarning = {
+          severity: loopStatus.severity,
+          reason: recovery.reason,
+          consecutiveWarnings: consecutiveLoopWarnings
+        };
+        console.log(`  \u26A0\uFE0F Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity}): ${recovery.reason}`);
+      } else {
+        consecutiveLoopWarnings = 0;
+      }
       const state = await this.navigator.getContentState();
-      const elements = await this.navigator.getNavigationElements(30);
+      const elements = await this.navigator.getNavigationElements();
       const treeSummary = await this.navigator.buildTreeSummaryForLLM();
       const context = {
         sessionId: `session-${startTime}`,
@@ -10091,13 +10419,13 @@ var InstagramScraper = class {
         targetDurationMs: config.maxDurationMs,
         url: this.page.url(),
         view: state.currentView,
-        currentGoal: this.getGoalForPhase(currentPhase, userInterests, interestsSearched),
+        currentGoal: this.getGoalForPhase(currentPhase, userInterests, interestsSearched, state.currentView, this.page.url()),
         userInterests,
         postsCollected,
         storiesWatched,
         interestsSearched,
         actionsRemaining: config.maxActions - actionCount,
-        recentActions: this.navigationExecutor.getRecentActions(5),
+        recentActions: this.navigationExecutor.getRecentActions(15),
         // Strategic context for LLM decision-making
         timeRemainingMs: config.maxDurationMs - elapsed,
         currentPhase,
@@ -10118,7 +10446,14 @@ var InstagramScraper = class {
         // Deep engagement state
         engagementState,
         // Tree summary for dynamic page awareness
-        treeSummary
+        treeSummary,
+        // Stagnation awareness
+        scrollPosition: await this.scroll.getScrollPosition(),
+        elementFingerprint: elements.slice(0, 25).map((e) => `${e.role}:${e.name?.slice(0, 30)}`).join("|"),
+        // Cross-session memory
+        sessionMemoryDigest,
+        // Loop warning (LLM decides recovery, auto-recovery only as last resort)
+        loopWarning
       };
       const decision = await this.navigationLLM.decideAction(context, elements);
       console.log(`  \u{1F916} Decision: ${decision.action} - ${decision.reasoning}`);
@@ -10210,14 +10545,32 @@ var InstagramScraper = class {
         await this.debugOverlay.clearHighlights();
       }
       if (result.success) {
-        console.log(`  \u2705 Action succeeded`);
-        totalPostsSeen++;
-        const postId = `${result.resultingUrl}-${actionCount}`;
-        uniquePosts.add(postId);
+        if (result.verified) {
+          const verifyLabel = result.verified === "url_changed" ? "URL changed" : result.verified === "dom_changed" ? "DOM changed" : result.verified === "no_change_detected" ? "no state change detected" : "";
+          console.log(`  \u2705 Action succeeded (${result.actionTaken}${verifyLabel ? ` - ${verifyLabel}` : ""})`);
+        } else {
+          console.log(`  \u2705 Action succeeded (${result.actionTaken})`);
+        }
+        const currentUrl = result.resultingUrl || "";
+        const isPostView = currentUrl.includes("/p/") || currentUrl.includes("/reel/");
+        const isStoryView = currentUrl.includes("/stories/");
+        const isCaptureAction = decision.capture?.shouldCapture || decision.strategic?.captureNow;
+        if (isPostView || isStoryView || isCaptureAction) {
+          totalPostsSeen++;
+          const postId = this.extractPostIdFromUrl(currentUrl) || `action-${actionCount}`;
+          uniquePosts.add(postId);
+        }
         const newState = await this.navigator.getContentState();
         if (newState.currentView === "story") {
           storiesWatched++;
           phaseItemsCollected++;
+        }
+        if (newState.currentView === "profile") {
+          const currentInterest = userInterests.find((i) => !interestsSearched.includes(i));
+          if (currentInterest && !interestsSearched.includes(currentInterest)) {
+            interestsSearched.push(currentInterest);
+            console.log(`  \u{1F4CD} Landed on profile \u2014 marked "${currentInterest}" as searched (${interestsSearched.length}/${userInterests.length})`);
+          }
         }
         const shouldCapture = decision.capture?.shouldCapture && result.focusedElement || decision.strategic?.captureNow;
         if (shouldCapture) {
@@ -10306,10 +10659,28 @@ var InstagramScraper = class {
         console.log(`  \u274C Action failed: ${result.errorMessage}`);
       }
       actionCount++;
-      if (this.navigationExecutor.isInLoop()) {
-        console.log("  \u26A0\uFE0F Loop detected, attempting recovery");
-        await this.page.keyboard.press("Escape");
+      if (consecutiveLoopWarnings >= 3) {
+        const recovery = this.navigationExecutor.getRecoveryAction(loopStatus.severity);
+        console.log(`  \u{1F6A8} Auto-recovery (LLM failed to recover after ${consecutiveLoopWarnings} warnings): ${recovery.reason}`);
+        const scrollYBefore = await this.scroll.getScrollPosition();
+        if (recovery.action === "press" && recovery.key) {
+          await this.page.keyboard.press(recovery.key);
+        } else if (recovery.action === "back") {
+          await this.page.goBack({ waitUntil: "domcontentloaded", timeout: 5e3 }).catch(() => {
+          });
+        } else if (recovery.action === "navigate_home") {
+          await this.page.goto("https://www.instagram.com/", { waitUntil: "domcontentloaded", timeout: 1e4 }).catch(() => {
+          });
+        }
         await this.humanDelay(1e3, 2e3);
+        consecutiveLoopWarnings = 0;
+        const scrollYAfter = await this.scroll.getScrollPosition();
+        stagnationEvents.push({
+          scrollY: scrollYBefore,
+          phase: currentPhase,
+          recoveryAction: recovery.action,
+          recoveredSuccessfully: scrollYAfter !== scrollYBefore || recovery.action === "navigate_home"
+        });
       }
       if (!decision.strategic?.lingerDuration) {
         const [minDelay, maxDelay] = config.actionDelayMs;
@@ -10329,6 +10700,30 @@ var InstagramScraper = class {
     console.log(`   Unique content ratio: ${(uniquePosts.size / Math.max(totalPostsSeen, 1) * 100).toFixed(0)}%`);
     console.log(`   Posts deeply explored: ${engagementState.deeplyExploredPostUrls.length}`);
     console.log(`   Phase history: ${phaseHistory.map((p) => `${p.phase}(${(p.durationMs / 1e3).toFixed(0)}s)`).join(" \u2192 ")}`);
+    const sessionSummary = {
+      id: `session-${startTime}`,
+      timestamp: startTime,
+      durationMs: Date.now() - startTime,
+      interestResults: userInterests.map((interest) => {
+        const searchedAt = interestsSearched.indexOf(interest);
+        return {
+          interest,
+          captureCount: Math.round(postsCollected / Math.max(userInterests.length, 1)),
+          searchTimeMs: searchedAt >= 0 ? phaseHistory.find((p) => p.phase === "search")?.durationMs || 0 : 0,
+          quality: postsCollected / Math.max(userInterests.length, 1) >= 5 ? "high" : postsCollected / Math.max(userInterests.length, 1) >= 2 ? "medium" : "low"
+        };
+      }),
+      phaseBreakdown: phaseHistory.map((p) => ({
+        phase: p.phase,
+        durationMs: p.durationMs,
+        capturesProduced: p.itemsCollected
+      })),
+      stagnationEvents,
+      totalCaptures: postsCollected,
+      totalActions: actionCount,
+      uniqueContentRatio: uniquePosts.size / Math.max(totalPostsSeen, 1)
+    };
+    await this.sessionMemory.saveSession(sessionSummary);
   }
   /**
    * Estimate engagement level based on capture rate.
@@ -10340,28 +10735,27 @@ var InstagramScraper = class {
     return "low";
   }
   /**
+   * Extract post ID from a URL string.
+   * Matches instagram.com/p/{ID}/ or /reel/{ID}/ patterns.
+   */
+  extractPostIdFromUrl(url) {
+    const match = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+    return match ? match[2] : null;
+  }
+  /**
    * Get the navigation goal for a given phase.
    * Note: Time allocation is now fully LLM-controlled.
    * These goals provide hints but LLM decides actual duration.
    */
-  getGoalForPhase(phase, userInterests, interestsSearched) {
-    switch (phase) {
-      case "search":
-        const nextInterest = userInterests.find((i) => !interestsSearched.includes(i));
-        if (nextInterest) {
-          return {
-            type: "search_interest",
-            target: nextInterest
-          };
-        }
-        return { type: "general_browse" };
-      case "stories":
-        return { type: "watch_stories" };
-      case "feed":
-        return { type: "browse_feed" };
-      default:
-        return { type: "general_browse" };
+  getGoalForPhase(phase, userInterests, interestsSearched, currentView, currentUrl) {
+    if (currentView === "profile") {
+      const username = this.navigator.getProfileUsername() || "this profile";
+      return {
+        type: "explore_profile",
+        target: username
+      };
     }
+    return { type: "analyze_account" };
   }
   // NOTE: shouldTransitionPhase() and getNextPhase() removed
   // LLM now controls phase transitions through strategic decisions
@@ -11271,10 +11665,10 @@ var SchedulerService = class _SchedulerService {
     console.log("\u23F0 SchedulerService: Initialized.");
     this.lastWakeTime = /* @__PURE__ */ new Date();
     console.log("\u23F0 Wake Time set to:", this.lastWakeTime.toLocaleString());
-    this.suspensionBlockerId = import_electron4.powerSaveBlocker.start("prevent-app-suspension");
+    this.suspensionBlockerId = import_electron5.powerSaveBlocker.start("prevent-app-suspension");
     console.log(`\u{1F50B} Power Save Blocker active (ID: ${this.suspensionBlockerId})`);
     this.startHeartbeat();
-    import_electron4.powerMonitor.on("resume", () => {
+    import_electron5.powerMonitor.on("resume", () => {
       console.log(`\u26A1\uFE0F System Resumed. Heartbeat active. App Uptime: ${Math.floor(process.uptime() / 60)}m. Last Wake (Start) Time: ${this.lastWakeTime.toLocaleString()}`);
       this.startHeartbeat();
     });
@@ -11283,11 +11677,11 @@ var SchedulerService = class _SchedulerService {
     if (this.checkInterval) clearInterval(this.checkInterval);
     if (this.alignmentTimeout) clearTimeout(this.alignmentTimeout);
     this.handleInsomniaState();
-    import_electron4.powerMonitor.on("on-ac", () => {
+    import_electron5.powerMonitor.on("on-ac", () => {
       console.log("\u{1F50C} Power Source: AC. Re-evaluating Insomnia Mode...");
       this.handleInsomniaState();
     });
-    import_electron4.powerMonitor.on("on-battery", () => {
+    import_electron5.powerMonitor.on("on-battery", () => {
       console.log("\u{1FAAB} Power Source: Battery. Disabling Insomnia Mode...");
       this.disableInsomnia();
     });
@@ -11305,7 +11699,7 @@ var SchedulerService = class _SchedulerService {
   insomniaProcess = null;
   // Type 'ChildProcess' needs import or 'any'
   handleInsomniaState() {
-    if (!import_electron4.powerMonitor.isOnBatteryPower()) {
+    if (!import_electron5.powerMonitor.isOnBatteryPower()) {
       this.enableInsomnia();
     } else {
       this.disableInsomnia();
@@ -11507,13 +11901,13 @@ var SchedulerService = class _SchedulerService {
       data: mockAnalysis,
       leadStoryPreview: mockAnalysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
     };
-    const userDataPath = import_electron4.app.getPath("userData");
-    const recordDir = import_path3.default.join(userDataPath, "analysis_records");
-    const recordPath = import_path3.default.join(recordDir, `${newRecord.id}.json`);
-    const tempPath = import_path3.default.join(recordDir, `${newRecord.id}.tmp`);
+    const userDataPath = import_electron5.app.getPath("userData");
+    const recordDir = import_path4.default.join(userDataPath, "analysis_records");
+    const recordPath = import_path4.default.join(recordDir, `${newRecord.id}.json`);
+    const tempPath = import_path4.default.join(recordDir, `${newRecord.id}.tmp`);
     try {
-      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs3.default.promises.rename(tempPath, recordPath);
+      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs4.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F4BE} Saved Full Analysis cleanly to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
@@ -11549,7 +11943,7 @@ var SchedulerService = class _SchedulerService {
         this.mainWindow.webContents.send("analysis-error", { message: "Failed to save analysis to disk." });
       }
       try {
-        if (import_fs3.default.existsSync(tempPath)) await import_fs3.default.promises.unlink(tempPath);
+        if (import_fs4.default.existsSync(tempPath)) await import_fs4.default.promises.unlink(tempPath);
       } catch (cleanupErr) {
       }
       return;
@@ -11614,13 +12008,13 @@ var SchedulerService = class _SchedulerService {
         data: analysis,
         leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
       };
-      const userDataPath = import_electron4.app.getPath("userData");
-      const recordDir = import_path3.default.join(userDataPath, "analysis_records");
-      const recordPath = import_path3.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path3.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs3.default.promises.mkdir(recordDir, { recursive: true });
-      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs3.default.promises.rename(tempPath, recordPath);
+      const userDataPath = import_electron5.app.getPath("userData");
+      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
+      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
+      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
+      await import_fs4.default.promises.mkdir(recordDir, { recursive: true });
+      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs4.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F4BE} Saved Analysis to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
@@ -11776,14 +12170,14 @@ var SchedulerService = class _SchedulerService {
       data: mockAnalysis,
       leadStoryPreview: mockAnalysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
     };
-    const userDataPath = import_electron4.app.getPath("userData");
-    const recordDir = import_path3.default.join(userDataPath, "analysis_records");
-    const recordPath = import_path3.default.join(recordDir, `${newRecord.id}.json`);
-    const tempPath = import_path3.default.join(recordDir, `${newRecord.id}.tmp`);
+    const userDataPath = import_electron5.app.getPath("userData");
+    const recordDir = import_path4.default.join(userDataPath, "analysis_records");
+    const recordPath = import_path4.default.join(recordDir, `${newRecord.id}.json`);
+    const tempPath = import_path4.default.join(recordDir, `${newRecord.id}.tmp`);
     try {
-      await import_fs3.default.promises.mkdir(recordDir, { recursive: true });
-      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs3.default.promises.rename(tempPath, recordPath);
+      await import_fs4.default.promises.mkdir(recordDir, { recursive: true });
+      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs4.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F4BE} Baker saved analysis to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
@@ -11807,7 +12201,7 @@ var SchedulerService = class _SchedulerService {
     } catch (e) {
       console.error("\u274C Baker failed to save analysis to disk:", e);
       try {
-        if (import_fs3.default.existsSync(tempPath)) await import_fs3.default.promises.unlink(tempPath);
+        if (import_fs4.default.existsSync(tempPath)) await import_fs4.default.promises.unlink(tempPath);
       } catch (cleanupErr) {
       }
     }
@@ -11862,13 +12256,13 @@ var SchedulerService = class _SchedulerService {
         data: analysis,
         leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
       };
-      const userDataPath = import_electron4.app.getPath("userData");
-      const recordDir = import_path3.default.join(userDataPath, "analysis_records");
-      const recordPath = import_path3.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path3.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs3.default.promises.mkdir(recordDir, { recursive: true });
-      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs3.default.promises.rename(tempPath, recordPath);
+      const userDataPath = import_electron5.app.getPath("userData");
+      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
+      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
+      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
+      await import_fs4.default.promises.mkdir(recordDir, { recursive: true });
+      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs4.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F4BE} Baker saved analysis to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
@@ -11999,16 +12393,16 @@ var SchedulerService = class _SchedulerService {
         location: settings.location || ""
       });
       const recordId = (0, import_uuid.v4)();
-      const userDataPath = import_electron4.app.getPath("userData");
-      const recordDir = import_path3.default.join(userDataPath, "analysis_records");
-      const imagesDir = import_path3.default.join(recordDir, recordId, "images");
-      await import_fs3.default.promises.mkdir(imagesDir, { recursive: true });
+      const userDataPath = import_electron5.app.getPath("userData");
+      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
+      const imagesDir = import_path4.default.join(recordDir, recordId, "images");
+      await import_fs4.default.promises.mkdir(imagesDir, { recursive: true });
       const selectedIds = new Set(bestCaptures.map((c) => c.id));
       const imageMetadata = [];
       for (const capture of bestCaptures) {
         const filename = `${capture.id}.jpg`;
-        const imagePath = import_path3.default.join(imagesDir, filename);
-        await import_fs3.default.promises.writeFile(imagePath, capture.screenshot);
+        const imagePath = import_path4.default.join(imagesDir, filename);
+        await import_fs4.default.promises.writeFile(imagePath, capture.screenshot);
         const captureTag = tags.find((t2) => t2.imageId === capture.id);
         imageMetadata.push({
           id: capture.id,
@@ -12034,10 +12428,10 @@ var SchedulerService = class _SchedulerService {
         data: analysisWithImages,
         leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
       };
-      const recordPath = import_path3.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path3.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs3.default.promises.rename(tempPath, recordPath);
+      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
+      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
+      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs4.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F9EA} Saved digest to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
@@ -12139,13 +12533,13 @@ var SchedulerService = class _SchedulerService {
         data: analysis,
         leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
       };
-      const userDataPath = import_electron4.app.getPath("userData");
-      const recordDir = import_path3.default.join(userDataPath, "analysis_records");
-      const recordPath = import_path3.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path3.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs3.default.promises.mkdir(recordDir, { recursive: true });
-      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs3.default.promises.rename(tempPath, recordPath);
+      const userDataPath = import_electron5.app.getPath("userData");
+      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
+      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
+      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
+      await import_fs4.default.promises.mkdir(recordDir, { recursive: true });
+      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs4.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F9EA} Saved analysis to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
@@ -12252,15 +12646,15 @@ var SchedulerService = class _SchedulerService {
         location: settings.location || ""
       });
       const recordId = (0, import_uuid.v4)();
-      const userDataPath = import_electron4.app.getPath("userData");
-      const recordDir = import_path3.default.join(userDataPath, "analysis_records");
-      const imagesDir = import_path3.default.join(recordDir, recordId, "images");
-      await import_fs3.default.promises.mkdir(imagesDir, { recursive: true });
+      const userDataPath = import_electron5.app.getPath("userData");
+      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
+      const imagesDir = import_path4.default.join(recordDir, recordId, "images");
+      await import_fs4.default.promises.mkdir(imagesDir, { recursive: true });
       const imageMetadata = [];
       for (const capture of bestCaptures) {
         const filename = `${capture.id}.jpg`;
-        const imagePath = import_path3.default.join(imagesDir, filename);
-        await import_fs3.default.promises.writeFile(imagePath, capture.screenshot);
+        const imagePath = import_path4.default.join(imagesDir, filename);
+        await import_fs4.default.promises.writeFile(imagePath, capture.screenshot);
         const captureTag = tags.find((t2) => t2.imageId === capture.id);
         imageMetadata.push({
           id: capture.id,
@@ -12286,10 +12680,10 @@ var SchedulerService = class _SchedulerService {
         data: analysisWithImages,
         leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
       };
-      const recordPath = import_path3.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path3.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs3.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs3.default.promises.rename(tempPath, recordPath);
+      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
+      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
+      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs4.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F4BE} Baker saved digest to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
@@ -12322,25 +12716,25 @@ var SchedulerService = class _SchedulerService {
 
 // src/main/main.ts
 var import_module = require("module");
-import_electron5.app.commandLine.appendSwitch("ignore-certificate-errors");
-import_electron5.app.commandLine.appendSwitch("disable-gpu");
-import_electron5.app.commandLine.appendSwitch("disable-software-rasterizer");
-import_electron5.app.commandLine.appendSwitch("disable-dev-shm-usage");
-import_electron5.app.commandLine.appendSwitch("disable-renderer-backgrounding");
+import_electron6.app.commandLine.appendSwitch("ignore-certificate-errors");
+import_electron6.app.commandLine.appendSwitch("disable-gpu");
+import_electron6.app.commandLine.appendSwitch("disable-software-rasterizer");
+import_electron6.app.commandLine.appendSwitch("disable-dev-shm-usage");
+import_electron6.app.commandLine.appendSwitch("disable-renderer-backgrounding");
 var __filename = (0, import_url.fileURLToPath)(__importMetaUrl);
-var __dirname = import_path4.default.dirname(__filename);
+var __dirname = import_path5.default.dirname(__filename);
 var require2 = (0, import_module.createRequire)(__importMetaUrl);
-if (!import_electron5.app.getLoginItemSettings().openAtLogin) {
-  import_electron5.app.setLoginItemSettings({
+if (!import_electron6.app.getLoginItemSettings().openAtLogin) {
+  import_electron6.app.setLoginItemSettings({
     openAtLogin: true,
     openAsHidden: false
     // Optional: could be true if we want silent start
   });
 }
 if (require2("electron-squirrel-startup")) {
-  import_electron5.app.quit();
+  import_electron6.app.quit();
 }
-import_electron5.protocol.registerSchemesAsPrivileged([
+import_electron6.protocol.registerSchemesAsPrivileged([
   {
     scheme: "kowalski-local",
     privileges: {
@@ -12357,7 +12751,7 @@ var SHARED_PARTITION = "persist:instagram_shared";
 var createWindow = () => {
   const width = 1280 + Math.floor(Math.random() * 100);
   const height = 800 + Math.floor(Math.random() * 100);
-  mainWindow = new import_electron5.BrowserWindow({
+  mainWindow = new import_electron6.BrowserWindow({
     width,
     height,
     title: "Kowalski",
@@ -12366,18 +12760,18 @@ var createWindow = () => {
     frame: true,
     // titleBarStyle property removed to use system default
     webPreferences: {
-      preload: import_path4.default.join(__dirname, "../preload/preload.cjs"),
+      preload: import_path5.default.join(__dirname, "../preload/preload.cjs"),
       webviewTag: true,
       partition: SHARED_PARTITION
       // Force main window to check this (though webview usually isolates)
     },
     // Set icon for Windows/Linux (and Mac if packaged)
     // Use the processed, standardized icon
-    icon: import_path4.default.join(__dirname, "../../build/icon-standard.png")
+    icon: import_path5.default.join(__dirname, "../../build/icon-standard.png")
   });
   if (process.platform === "darwin" && process.env.VITE_DEV_SERVER_URL) {
-    const iconPath = import_path4.default.join(__dirname, "../../build/icon-standard.png");
-    import_electron5.app.dock?.setIcon(iconPath);
+    const iconPath = import_path5.default.join(__dirname, "../../build/icon-standard.png");
+    import_electron6.app.dock?.setIcon(iconPath);
   }
   SchedulerService.getInstance().setMainWindow(mainWindow);
   mainWindow.on("page-title-updated", (e) => {
@@ -12388,7 +12782,7 @@ var createWindow = () => {
     console.log("Creating window with URL:", url);
     mainWindow.loadURL(url);
   } else {
-    const filePath = import_path4.default.join(__dirname, "../../dist/index.html");
+    const filePath = import_path5.default.join(__dirname, "../../dist/index.html");
     console.log("Loading file path:", filePath);
     mainWindow.loadFile(filePath);
   }
@@ -12413,70 +12807,70 @@ var createWindow = () => {
     SchedulerService.getInstance().setMainWindow(null);
   });
 };
-import_electron5.app.on("ready", () => {
+import_electron6.app.on("ready", () => {
   const protocolHandler = (request, callback) => {
     const url = new URL(request.url);
     const recordId = url.hostname;
     const filePath = url.pathname.startsWith("/") ? url.pathname.slice(1) : url.pathname;
-    const userDataPath2 = import_electron5.app.getPath("userData");
-    const fullPath = import_path4.default.join(userDataPath2, "analysis_records", recordId, filePath);
+    const userDataPath2 = import_electron6.app.getPath("userData");
+    const fullPath = import_path5.default.join(userDataPath2, "analysis_records", recordId, filePath);
     console.log(`\u{1F4F7} Protocol request: ${request.url}`);
     console.log(`\u{1F4F7} Resolved path: ${fullPath}`);
-    if (import_fs4.default.existsSync(fullPath)) {
+    if (import_fs5.default.existsSync(fullPath)) {
       console.log(`\u{1F4F7} File exists, serving: ${fullPath}`);
       callback({ path: fullPath });
     } else {
       console.error(`\u274C Protocol error: File not found: ${fullPath}`);
       console.error(`\u274C RecordId: ${recordId}, FilePath: ${filePath}`);
-      const recordsDir = import_path4.default.join(userDataPath2, "analysis_records");
-      if (import_fs4.default.existsSync(recordsDir)) {
-        console.log(`\u{1F4C2} Contents of analysis_records: ${import_fs4.default.readdirSync(recordsDir).join(", ")}`);
-        const recordDir = import_path4.default.join(recordsDir, recordId);
-        if (import_fs4.default.existsSync(recordDir)) {
-          console.log(`\u{1F4C2} Contents of ${recordId}: ${import_fs4.default.readdirSync(recordDir).join(", ")}`);
-          const imagesDir = import_path4.default.join(recordDir, "images");
-          if (import_fs4.default.existsSync(imagesDir)) {
-            console.log(`\u{1F4C2} Contents of images: ${import_fs4.default.readdirSync(imagesDir).join(", ")}`);
+      const recordsDir = import_path5.default.join(userDataPath2, "analysis_records");
+      if (import_fs5.default.existsSync(recordsDir)) {
+        console.log(`\u{1F4C2} Contents of analysis_records: ${import_fs5.default.readdirSync(recordsDir).join(", ")}`);
+        const recordDir = import_path5.default.join(recordsDir, recordId);
+        if (import_fs5.default.existsSync(recordDir)) {
+          console.log(`\u{1F4C2} Contents of ${recordId}: ${import_fs5.default.readdirSync(recordDir).join(", ")}`);
+          const imagesDir = import_path5.default.join(recordDir, "images");
+          if (import_fs5.default.existsSync(imagesDir)) {
+            console.log(`\u{1F4C2} Contents of images: ${import_fs5.default.readdirSync(imagesDir).join(", ")}`);
           }
         }
       }
       callback({ error: -6 });
     }
   };
-  import_electron5.protocol.registerFileProtocol("kowalski-local", protocolHandler);
+  import_electron6.protocol.registerFileProtocol("kowalski-local", protocolHandler);
   console.log("\u2705 Registered kowalski-local protocol on default session");
-  import_electron5.session.fromPartition(SHARED_PARTITION).protocol.registerFileProtocol("kowalski-local", protocolHandler);
+  import_electron6.session.fromPartition(SHARED_PARTITION).protocol.registerFileProtocol("kowalski-local", protocolHandler);
   console.log(`\u2705 Registered kowalski-local protocol on partition: ${SHARED_PARTITION}`);
   createWindow();
   console.log("Session persistence enabled.");
   console.log("Session persistence enabled.");
   UsageService.getInstance().initialize();
   SchedulerService.getInstance().initialize();
-  import_electron5.globalShortcut.register("CommandOrControl+Shift+H", () => {
+  import_electron6.globalShortcut.register("CommandOrControl+Shift+H", () => {
     console.log("\u{1F9EA} Testing Shortcut Triggered (Cmd+Shift+H)");
     SchedulerService.getInstance().triggerDebugRun();
   });
-  const userDataPath = import_electron5.app.getPath("userData");
-  const recordsPath = import_path4.default.join(userDataPath, "analysis_records");
-  if (!import_fs4.default.existsSync(recordsPath)) {
-    import_fs4.default.mkdirSync(recordsPath, { recursive: true });
+  const userDataPath = import_electron6.app.getPath("userData");
+  const recordsPath = import_path5.default.join(userDataPath, "analysis_records");
+  if (!import_fs5.default.existsSync(recordsPath)) {
+    import_fs5.default.mkdirSync(recordsPath, { recursive: true });
     console.log("\u{1F4C2} Created analysis_records directory");
   }
   setupIPCHandlers();
 });
-import_electron5.app.on("before-quit", () => {
+import_electron6.app.on("before-quit", () => {
   isQuitting = true;
-  import_electron5.globalShortcut.unregisterAll();
+  import_electron6.globalShortcut.unregisterAll();
   SchedulerService.getInstance().stop();
 });
 function setupIPCHandlers() {
-  import_electron5.ipcMain.handle("reset-session", async () => {
+  import_electron6.ipcMain.handle("reset-session", async () => {
     console.log("\u{1F9F9} Starting session reset...");
     try {
-      const userDataPath = import_electron5.app.getPath("userData");
-      const sessionPath = import_path4.default.join(userDataPath, "session.json");
-      if (import_fs4.default.existsSync(sessionPath)) {
-        import_fs4.default.unlinkSync(sessionPath);
+      const userDataPath = import_electron6.app.getPath("userData");
+      const sessionPath = import_path5.default.join(userDataPath, "session.json");
+      if (import_fs5.default.existsSync(sessionPath)) {
+        import_fs5.default.unlinkSync(sessionPath);
         console.log("\u2705 Deleted legacy session.json");
       }
       await BrowserManager.getInstance().clearData();
@@ -12484,13 +12878,13 @@ function setupIPCHandlers() {
       console.error("\u26A0\uFE0F Failed to delete session.json:", e);
     }
     try {
-      await import_electron5.session.defaultSession.clearStorageData();
+      await import_electron6.session.defaultSession.clearStorageData();
       console.log("\u2705 Cleared default session storage");
     } catch (e) {
       console.error("\u26A0\uFE0F Failed to clear default session storage:", e);
     }
     try {
-      await import_electron5.session.fromPartition(SHARED_PARTITION).clearStorageData();
+      await import_electron6.session.fromPartition(SHARED_PARTITION).clearStorageData();
       console.log("\u2705 Cleared shared partition storage");
     } catch (e) {
       console.error("\u26A0\uFE0F Failed to clear shared partition storage:", e);
@@ -12508,10 +12902,10 @@ function setupIPCHandlers() {
       return false;
     }
     try {
-      const userDataPath = import_electron5.app.getPath("userData");
-      const recordsPath = import_path4.default.join(userDataPath, "analysis_records");
-      if (import_fs4.default.existsSync(recordsPath)) {
-        import_fs4.default.rmSync(recordsPath, { recursive: true, force: true });
+      const userDataPath = import_electron6.app.getPath("userData");
+      const recordsPath = import_path5.default.join(userDataPath, "analysis_records");
+      if (import_fs5.default.existsSync(recordsPath)) {
+        import_fs5.default.rmSync(recordsPath, { recursive: true, force: true });
         console.log("\u2705 Deleted analysis_records folder");
       }
     } catch (e) {
@@ -12520,12 +12914,12 @@ function setupIPCHandlers() {
     console.log("\u{1F389} Session reset complete");
     return true;
   });
-  import_electron5.ipcMain.handle("settings:get", async () => {
+  import_electron6.ipcMain.handle("settings:get", async () => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     return store.get("settings") || {};
   });
-  import_electron5.ipcMain.handle("settings:set", async (_event, newSettings) => {
+  import_electron6.ipcMain.handle("settings:set", async (_event, newSettings) => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     store.set("settings", newSettings);
@@ -12542,7 +12936,7 @@ function setupIPCHandlers() {
           digestFrequency: newSettings.digestFrequency
         };
         store.set("activeSchedule", updatedSchedule);
-        const windows = import_electron5.BrowserWindow.getAllWindows();
+        const windows = import_electron6.BrowserWindow.getAllWindows();
         windows.forEach((win) => {
           win.webContents.send("schedule-updated", updatedSchedule);
         });
@@ -12551,7 +12945,7 @@ function setupIPCHandlers() {
     }
     return true;
   });
-  import_electron5.ipcMain.handle("settings:patch", async (_event, updates) => {
+  import_electron6.ipcMain.handle("settings:patch", async (_event, updates) => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     const current = store.get("settings") || {};
@@ -12567,7 +12961,7 @@ function setupIPCHandlers() {
           digestFrequency: merged.digestFrequency
         };
         store.set("activeSchedule", updatedSchedule);
-        import_electron5.BrowserWindow.getAllWindows().forEach((win) => {
+        import_electron6.BrowserWindow.getAllWindows().forEach((win) => {
           win.webContents.send("schedule-updated", updatedSchedule);
         });
         console.log("\u{1F525} Hot-Patched Daily Snapshot (via Patch):", updatedSchedule);
@@ -12575,24 +12969,24 @@ function setupIPCHandlers() {
     }
     return merged;
   });
-  import_electron5.ipcMain.handle("analyses:get", async () => {
+  import_electron6.ipcMain.handle("analyses:get", async () => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     return store.get("analyses") || [];
   });
-  import_electron5.ipcMain.handle("analyses:set", async (_event, analyses) => {
+  import_electron6.ipcMain.handle("analyses:set", async (_event, analyses) => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     store.set("analyses", analyses);
     return true;
     return true;
   });
-  import_electron5.ipcMain.handle("analyses:get-content", async (_event, id) => {
+  import_electron6.ipcMain.handle("analyses:get-content", async (_event, id) => {
     try {
-      const userDataPath = import_electron5.app.getPath("userData");
-      const filePath = import_path4.default.join(userDataPath, "analysis_records", `${id}.json`);
-      if (import_fs4.default.existsSync(filePath)) {
-        const raw = import_fs4.default.readFileSync(filePath, "utf-8");
+      const userDataPath = import_electron6.app.getPath("userData");
+      const filePath = import_path5.default.join(userDataPath, "analysis_records", `${id}.json`);
+      if (import_fs5.default.existsSync(filePath)) {
+        const raw = import_fs5.default.readFileSync(filePath, "utf-8");
         return JSON.parse(raw);
       }
       return null;
@@ -12601,28 +12995,28 @@ function setupIPCHandlers() {
       return null;
     }
   });
-  import_electron5.ipcMain.handle("settings:get-active-schedule", async () => {
+  import_electron6.ipcMain.handle("settings:get-active-schedule", async () => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     return store.get("activeSchedule") || null;
   });
-  import_electron5.ipcMain.handle("settings:get-wake-time", async () => {
+  import_electron6.ipcMain.handle("settings:get-wake-time", async () => {
     return SchedulerService.getInstance().getLastWakeTime();
   });
-  import_electron5.ipcMain.handle("settings:set-secure", async (_event, { apiKey }) => {
+  import_electron6.ipcMain.handle("settings:set-secure", async (_event, { apiKey }) => {
     return SecureKeyManager.getInstance().setKey(apiKey);
   });
-  import_electron5.ipcMain.handle("settings:check-key-status", async () => {
+  import_electron6.ipcMain.handle("settings:check-key-status", async () => {
     return SecureKeyManager.getInstance().getKeyStatus();
   });
-  import_electron5.ipcMain.handle("settings:get-secure", async () => {
+  import_electron6.ipcMain.handle("settings:get-secure", async () => {
     return SecureKeyManager.getInstance().getKey();
   });
-  import_electron5.ipcMain.handle("auth:login", async (_event, bounds) => {
+  import_electron6.ipcMain.handle("auth:login", async (_event, bounds) => {
     if (!mainWindow) return false;
     return BrowserManager.getInstance().login(bounds, mainWindow);
   });
-  import_electron5.ipcMain.handle("test-headless", async () => {
+  import_electron6.ipcMain.handle("test-headless", async () => {
     try {
       console.log("\u{1F916} Starting BrowserManager (Persistent)...");
       const manager = BrowserManager.getInstance();
@@ -12643,15 +13037,15 @@ function setupIPCHandlers() {
       return `Error: ${error.message}`;
     }
   });
-  import_electron5.ipcMain.handle("clear-instagram-session", async () => {
+  import_electron6.ipcMain.handle("clear-instagram-session", async () => {
     console.log("\u{1F9F9} Clearing Instagram Session only...");
     try {
-      const userDataPath = import_electron5.app.getPath("userData");
-      const sessionPath = import_path4.default.join(userDataPath, "session.json");
-      if (import_fs4.default.existsSync(sessionPath)) {
-        import_fs4.default.unlinkSync(sessionPath);
+      const userDataPath = import_electron6.app.getPath("userData");
+      const sessionPath = import_path5.default.join(userDataPath, "session.json");
+      if (import_fs5.default.existsSync(sessionPath)) {
+        import_fs5.default.unlinkSync(sessionPath);
       }
-      await import_electron5.session.fromPartition(SHARED_PARTITION).clearStorageData();
+      await import_electron6.session.fromPartition(SHARED_PARTITION).clearStorageData();
       await BrowserManager.getInstance().clearData();
       return true;
     } catch (e) {
@@ -12659,21 +13053,21 @@ function setupIPCHandlers() {
       return false;
     }
   });
-  import_electron5.ipcMain.handle("check-instagram-session", async () => {
+  import_electron6.ipcMain.handle("check-instagram-session", async () => {
     try {
-      const userDataPath = import_electron5.app.getPath("userData");
-      const persistentContextPath = import_path4.default.join(userDataPath, "kowalski_browser");
-      if (!import_fs4.default.existsSync(persistentContextPath)) {
+      const userDataPath = import_electron6.app.getPath("userData");
+      const persistentContextPath = import_path5.default.join(userDataPath, "kowalski_browser");
+      if (!import_fs5.default.existsSync(persistentContextPath)) {
         return { isActive: false, reason: "no_profile" };
       }
-      const cookiesDbPath = import_path4.default.join(persistentContextPath, "Default", "Cookies");
-      if (!import_fs4.default.existsSync(cookiesDbPath)) {
+      const cookiesDbPath = import_path5.default.join(persistentContextPath, "Default", "Cookies");
+      if (!import_fs5.default.existsSync(cookiesDbPath)) {
         return { isActive: false, reason: "no_cookies_db" };
       }
       try {
-        const tempDbPath = import_path4.default.join(userDataPath, "cookies_check_temp.db");
+        const tempDbPath = import_path5.default.join(userDataPath, "cookies_check_temp.db");
         console.log("\u{1F50D} Session check: Copying cookies from", cookiesDbPath, "to", tempDbPath);
-        import_fs4.default.copyFileSync(cookiesDbPath, tempDbPath);
+        import_fs5.default.copyFileSync(cookiesDbPath, tempDbPath);
         const Database = require2("better-sqlite3");
         const db = new Database(tempDbPath, { readonly: true });
         const stmt = db.prepare(`
@@ -12691,7 +13085,7 @@ function setupIPCHandlers() {
         }
         db.close();
         try {
-          import_fs4.default.unlinkSync(tempDbPath);
+          import_fs5.default.unlinkSync(tempDbPath);
         } catch {
         }
         if (rows.length > 0) {
@@ -12721,13 +13115,13 @@ function setupIPCHandlers() {
     }
   });
 }
-import_electron5.app.on("window-all-closed", () => {
+import_electron6.app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    import_electron5.app.quit();
+    import_electron6.app.quit();
   }
 });
-import_electron5.app.on("activate", () => {
-  if (import_electron5.BrowserWindow.getAllWindows().length === 0) {
+import_electron6.app.on("activate", () => {
+  if (import_electron6.BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   } else {
     mainWindow?.show();

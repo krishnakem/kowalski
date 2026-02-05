@@ -578,7 +578,7 @@ export class A11yNavigator {
         try {
             cdpSession = await this.page.context().newCDPSession(this.page);
 
-            for (const node of allStoryNodes.slice(0, 10)) {
+            for (const node of allStoryNodes) {
                 if (!node.backendDOMNodeId) continue;
 
                 const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
@@ -640,12 +640,11 @@ export class A11yNavigator {
 
                 // Filter for actual post containers (not tiny nested articles)
                 // Posts are typically >200px wide and >200px tall
-                if (box.width < 200 || box.height < 200) continue;
+                if (box.width < viewport.width * 0.05 || box.height < viewport.height * 0.05) continue;
 
-                // Only include posts that are at least partially visible
-                // (within reasonable distance of viewport)
-                const isNearViewport = box.y < viewport.height + 500 &&
-                                       box.y + box.height > -500;
+                // Only include posts within 1× viewport height margin
+                const isNearViewport = box.y < viewport.height * 2 &&
+                                       box.y + box.height > -viewport.height;
                 if (!isNearViewport) continue;
 
                 posts.push({
@@ -727,11 +726,11 @@ export class A11yNavigator {
                     };
 
                     // Filter for actual posts (not tiny elements)
-                    if (box.width < 200 || box.height < 200) continue;
+                    if (box.width < viewport.width * 0.05 || box.height < viewport.height * 0.05) continue;
 
                     // Check if near viewport
-                    const isNearViewport = box.y < viewport.height + 500 &&
-                                           box.y + box.height > -500;
+                    const isNearViewport = box.y < viewport.height * 2 &&
+                                           box.y + box.height > -viewport.height;
                     if (!isNearViewport) continue;
 
                     posts.push({
@@ -810,6 +809,7 @@ export class A11yNavigator {
     async findAllButtons(): Promise<InteractiveElement[]> {
         return this.withSession(async (cdpSession) => {
             const buttons: InteractiveElement[] = [];
+            const viewport = await this.getViewportInfo();
 
             const response = await cdpSession.send('Accessibility.getFullAXTree') as CDPAXTreeResponse;
             const nodes = response.nodes || [];
@@ -829,8 +829,8 @@ export class A11yNavigator {
                     const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
                     if (!box) continue;
 
-                    // Include even small buttons (story nav buttons may be small)
-                    if (box.width > 10 && box.height > 10) {
+                    // Include even small buttons (proportional to viewport)
+                    if (box.width > viewport.width * 0.005 && box.height > viewport.height * 0.005) {
                         buttons.push({
                             role: 'button',
                             name: node.name?.value || '[unnamed]',
@@ -942,18 +942,17 @@ export class A11yNavigator {
             const name = node.name?.value || '';
 
             // Collect container info (regions, dialogs, etc.)
-            if (['region', 'dialog', 'main', 'navigation', 'complementary', 'alertdialog'].includes(role)) {
-                if (name && name.length > 0) {
-                    containers.push({
-                        role,
-                        name,
-                        childCount: node.childIds?.length || 0
-                    });
-                }
+            if (['region', 'dialog', 'main', 'navigation', 'complementary', 'alertdialog',
+                 'group', 'list', 'form', 'toolbar', 'tablist'].includes(role)) {
+                containers.push({
+                    role,
+                    name: name || '[unnamed]',
+                    childCount: node.childIds?.length || 0
+                });
             }
 
             // Collect input info with parent context
-            if (['textbox', 'searchbox', 'input', 'combobox'].includes(role)) {
+            if (['textbox', 'searchbox', 'input', 'combobox', 'slider', 'spinbutton'].includes(role)) {
                 const parentChain = this.getParentContainerChain(tree, node);
                 inputs.push({
                     role,
@@ -963,7 +962,7 @@ export class A11yNavigator {
             }
 
             // Collect unique landmark names (for context)
-            if (name && name.length > 2 && name.length < 50) {
+            if (name && name.length > 2 && name.length < 120) {
                 landmarkSet.add(name);
             }
         }
@@ -971,7 +970,7 @@ export class A11yNavigator {
         return {
             containers,
             inputs,
-            landmarks: Array.from(landmarkSet).slice(0, 20) // Limit to 20 most relevant
+            landmarks: Array.from(landmarkSet)
         };
     }
 
@@ -983,7 +982,7 @@ export class A11yNavigator {
         const chain: string[] = [];
         let current = node.parentId ? tree.nodeMap.get(node.parentId) : null;
 
-        while (current && chain.length < 5) {
+        while (current && chain.length < 10) {
             const name = current.name?.value;
             const role = current.role?.value?.toLowerCase();
 
@@ -1206,8 +1205,8 @@ export class A11yNavigator {
                 // Extract state from properties array
                 const state = this.extractElementState(node);
 
-                // Skip disabled elements (can't interact)
-                if (state.disabled) continue;
+                // Keep disabled elements visible — state.disabled is in the returned data
+                // LLM benefits from seeing disabled elements (e.g., disabled "Next" = end of carousel)
 
                 // Get bounding box
                 if (!node.backendDOMNodeId) continue;
@@ -1452,17 +1451,21 @@ export class A11yNavigator {
             return highlights;
         }
 
+        const viewport = await this.getViewportInfo();
+        const minHighlight = viewport.width * 0.015;
+        const maxHighlight = viewport.width * 0.15;
+
         let cdpSession: CDPSession | null = null;
         try {
             cdpSession = await this.page.context().newCDPSession(this.page);
 
-            for (const node of highlightNodes.slice(0, 5)) { // Limit to 5 highlights
+            for (const node of highlightNodes) {
                 if (!node.backendDOMNodeId) continue;
 
                 const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
                 if (box && box.width > 0 && box.height > 0) {
-                    // Highlight buttons are typically small circles (40-80px)
-                    if (box.width >= 30 && box.width <= 100 && box.height >= 30 && box.height <= 100) {
+                    // Highlight buttons: proportional size range
+                    if (box.width >= minHighlight && box.width <= maxHighlight && box.height >= minHighlight && box.height <= maxHighlight) {
                         highlights.push({
                             role: node.role?.value || 'button',
                             name: node.name?.value || 'Highlight',
@@ -1619,9 +1622,10 @@ export class A11yNavigator {
                         const buttonCenterY = box.y + box.height / 2;
 
                         const inRightZone = buttonCenterX >= rightZoneStart && buttonCenterX <= rightZoneEnd;
-                        // Allow 20px vertical tolerance for buttons near edges
-                        const inVerticalBounds = buttonCenterY >= contentArea.y - 20 &&
-                                                buttonCenterY <= contentArea.y + contentArea.height + 20;
+                        // Proportional vertical tolerance for buttons near edges
+                        const verticalTolerance = contentArea.height * 0.05;
+                        const inVerticalBounds = buttonCenterY >= contentArea.y - verticalTolerance &&
+                                                buttonCenterY <= contentArea.y + contentArea.height + verticalTolerance;
 
                         return inRightZone && inVerticalBounds;
                     })
@@ -1642,8 +1646,9 @@ export class A11yNavigator {
                         const buttonCenterY = box.y + box.height / 2;
 
                         const inLeftZone = buttonCenterX >= leftZoneStart && buttonCenterX <= leftZoneEnd;
-                        const inVerticalBounds = buttonCenterY >= contentArea.y - 20 &&
-                                                buttonCenterY <= contentArea.y + contentArea.height + 20;
+                        const verticalTolerance = contentArea.height * 0.05;
+                        const inVerticalBounds = buttonCenterY >= contentArea.y - verticalTolerance &&
+                                                buttonCenterY <= contentArea.y + contentArea.height + verticalTolerance;
 
                         return inLeftZone && inVerticalBounds;
                     })
@@ -1760,11 +1765,12 @@ export class A11yNavigator {
         previous: InteractiveElement | null;
     }> {
         const elements = await this.getAllInteractiveElements();
+        const viewport = await this.getViewportInfo();
 
         // Expanded image detection - include figure and graphic roles
         const imageElements = elements.filter(el =>
             (el.role === 'img' || el.role === 'figure' || el.role === 'graphic') &&
-            el.boundingBox && el.boundingBox.width > 100
+            el.boundingBox && el.boundingBox.width > viewport.width * 0.09
         );
 
         // Get the largest image-like element
@@ -1836,7 +1842,7 @@ export class A11yNavigator {
             const name = node.name?.value || '';
 
             // Skip if too short
-            if (name.length < 20) continue;
+            if (name.length < 5) continue;
 
             // Skip if it's an interactive element (button, link, textbox)
             if (role === 'button' || role === 'link' || role === 'textbox') continue;
@@ -1847,7 +1853,7 @@ export class A11yNavigator {
             // Prefer text with hashtags or mentions (strong caption signal)
             if (name.includes('#') || name.includes('@')) {
                 captionCandidates.unshift(name);  // High priority
-            } else if (name.length > 50) {
+            } else if (name.length > 5) {
                 captionCandidates.push(name);  // Lower priority but still valid
             }
         }
@@ -1946,9 +1952,8 @@ export class A11yNavigator {
             const nodeName = node.name?.value || '';
             const nodeRole = node.role?.value?.toLowerCase();
 
-            // Only match interactive roles
-            const interactiveRoles = ['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio'];
-            return interactiveRoles.includes(nodeRole || '') && pattern.test(nodeName);
+            // Use unified INTERACTIVE_ROLES list
+            return this.INTERACTIVE_ROLES.includes(nodeRole || '') && pattern.test(nodeName);
         });
 
         if (matches.length === 0) {
@@ -1959,7 +1964,7 @@ export class A11yNavigator {
         try {
             cdpSession = await this.page.context().newCDPSession(this.page);
 
-            for (const node of matches.slice(0, 20)) { // Limit to 20 results
+            for (const node of matches.slice(0, 100)) {
                 if (!node.backendDOMNodeId) continue;
 
                 const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
@@ -2242,7 +2247,7 @@ export class A11yNavigator {
         try {
             cdpSession = await this.page.context().newCDPSession(this.page);
 
-            for (const node of linkNodes.slice(0, 10)) { // Limit to 10 results
+            for (const node of linkNodes.slice(0, 50)) {
                 if (!node.backendDOMNodeId) continue;
 
                 const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
@@ -3155,7 +3160,7 @@ export class A11yNavigator {
      * @param maxElements - Maximum elements to return (for token efficiency)
      * @returns Array of NavigationElement objects
      */
-    async getNavigationElements(maxElements: number = 30): Promise<NavigationElement[]> {
+    async getNavigationElements(maxElements: number = 1000): Promise<NavigationElement[]> {
         const elements: NavigationElement[] = [];
         const viewport = await this.getViewportInfo();
 
@@ -3169,7 +3174,8 @@ export class A11yNavigator {
         const interactiveNodes: AXTreeNode[] = [];
         const relevantRoles = [
             'button', 'link', 'image', 'img', 'figure', 'article',
-            'heading', 'textbox', 'searchbox', 'menuitem', 'listitem'
+            'heading', 'textbox', 'searchbox', 'menuitem', 'listitem',
+            'tab', 'checkbox', 'radio', 'switch', 'slider', 'combobox'
         ];
 
         for (const node of tree.nodeMap.values()) {
@@ -3196,11 +3202,11 @@ export class A11yNavigator {
                 const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
                 if (!box || box.width <= 0 || box.height <= 0) continue;
 
-                // Skip elements outside viewport
-                if (box.y + box.height < 0 || box.y > viewport.height) continue;
+                // Skip elements far outside viewport (1× viewport margin above and below)
+                if (box.y + box.height < -viewport.height || box.y > viewport.height * 2) continue;
 
-                // Skip very small elements (probably not interactive)
-                if (box.width < 20 || box.height < 20) continue;
+                // Skip very small elements (proportional to viewport)
+                if (box.width < viewport.width * 0.005 || box.height < viewport.height * 0.005) continue;
 
                 const role = node.role?.value || 'unknown';
                 const name = node.name?.value || '';
@@ -3239,7 +3245,7 @@ export class A11yNavigator {
                 elements.push({
                     id: idCounter++,
                     role: role.toLowerCase(),
-                    name: name.slice(0, 50), // Longer names for better context
+                    name: name.slice(0, 300),
                     position: {
                         x: normalizeX(box.x),
                         y: normalizeY(box.y),
@@ -3247,7 +3253,7 @@ export class A11yNavigator {
                         h: normalizeY(box.height)
                     },
                     containerRole: container?.role?.value?.toLowerCase(),
-                    containerName: container?.name?.value?.slice(0, 30),
+                    containerName: container?.name?.value?.slice(0, 200),
                     depth: node.depth,
                     siblingCount,
                     semanticHint: semanticHint !== 'unknown' ? semanticHint : undefined,
@@ -3398,7 +3404,7 @@ export class A11yNavigator {
             // Collect alt text from images
             if ((role === 'image' || role === 'img' || role === 'figure') && description) {
                 if (!altText && description.length > 5) {
-                    altText = description.slice(0, 50);
+                    altText = description.slice(0, 500);
                 }
             }
 
@@ -3413,7 +3419,7 @@ export class A11yNavigator {
             }
 
             // Caption detection (same logic as findPostCaption but localized to this article)
-            if (!captionText && name.length >= 20) {
+            if (!captionText && name.length >= 5) {
                 // Skip interactive elements
                 if (role !== 'button' && role !== 'link' && role !== 'textbox') {
                     // Skip navigation patterns
@@ -3421,7 +3427,7 @@ export class A11yNavigator {
                         // Prefer text with hashtags or mentions
                         if (name.includes('#') || name.includes('@')) {
                             captionText = name;
-                        } else if (name.length > 50) {
+                        } else if (name.length > 5) {
                             captionText = name;
                         }
                     }
@@ -3447,10 +3453,10 @@ export class A11yNavigator {
             return undefined;
         }
 
-        const hashtags = this.extractHashtags(captionText, 5);
+        const hashtags = this.extractHashtags(captionText, 30);
 
         return {
-            captionText: captionText?.slice(0, 100),
+            captionText: captionText?.slice(0, 1000),
             altText,
             engagement: (likes || comments) ? { likes, comments } : undefined,
             hasHashtags: hashtags.length > 0,

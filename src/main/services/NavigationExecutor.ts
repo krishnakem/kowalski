@@ -36,12 +36,14 @@ import { HumanScroll } from './HumanScroll.js';
 import type { A11yNavigator } from './A11yNavigator.js';
 
 /**
- * Scroll amount mapping (LLM speaks in high-level terms).
+ * Scroll amount proportions (fraction of viewport height).
+ * LLM speaks in high-level terms; we scale to actual viewport.
  */
-const SCROLL_AMOUNTS: Record<string, number> = {
-    small: 200,
-    medium: 500,
-    large: 800
+const SCROLL_PROPORTIONS: Record<string, number> = {
+    small: 0.15,   // 15% of viewport
+    medium: 0.40,  // 40% of viewport
+    large: 0.70,   // 70% of viewport
+    xlarge: 1.20   // 120% of viewport
 };
 
 /**
@@ -50,7 +52,8 @@ const SCROLL_AMOUNTS: Record<string, number> = {
 const LINGER_DURATIONS: Record<string, number> = {
     short: 1000,    // 1 second - for navigation, skipping
     medium: 3000,   // 3 seconds - normal engagement
-    long: 6000      // 6 seconds - deep engagement, videos
+    long: 6000,     // 6 seconds - deep engagement, videos
+    xlong: 12000    // 12 seconds - very deep engagement
 };
 
 export class NavigationExecutor {
@@ -131,6 +134,7 @@ export class NavigationExecutor {
     /**
      * Execute a click action with optional gaze anchors.
      * Returns the clicked element info for potential capture.
+     * Includes post-click verification to detect if click caused a state change.
      */
     private async executeClick(
         decision: NavigationDecision,
@@ -139,10 +143,33 @@ export class NavigationExecutor {
     ): Promise<ExecutionResult> {
         const params = decision.params as ClickParams;
 
-        // Find the target element
-        const target = elements.find(e => e.id === params.id);
+        // Find the target element by ID
+        let target = elements.find(e => e.id === params.id);
         if (!target) {
             return this.failureResult(decision, startTime, `Element id=${params.id} not found`);
+        }
+
+        // Pre-click name verification: if the LLM provided an expectedName,
+        // verify it matches the element. If not, search by name instead.
+        // This catches cases where the LLM outputs the wrong ID number.
+        if (params.expectedName) {
+            const expectedLower = params.expectedName.toLowerCase();
+            const targetLower = target.name.toLowerCase();
+            const nameMatches = targetLower.includes(expectedLower) || expectedLower.includes(targetLower);
+
+            if (!nameMatches) {
+                // ID-name mismatch! Try to find the correct element by name
+                const byName = elements.find(e =>
+                    e.name.toLowerCase().includes(expectedLower) ||
+                    expectedLower.includes(e.name.toLowerCase())
+                );
+                if (byName) {
+                    console.warn(`⚠️ Element ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}". Corrected to id:${byName.id} "${byName.name}"`);
+                    target = byName;
+                } else {
+                    console.warn(`⚠️ Element ID mismatch: id:${params.id} is "${target.name}", LLM expected "${params.expectedName}". No name match found, using original ID.`);
+                }
+            }
         }
 
         // Get the bounding box
@@ -151,27 +178,47 @@ export class NavigationExecutor {
             return this.failureResult(decision, startTime, `Element id=${params.id} has no bounding box`);
         }
 
+        // Capture pre-click state for verification
+        const preClickUrl = this.page.url();
+        const preClickState = await this.getQuickDOMSignature();
+
         // Click the element
         await this.ghost.clickElement(boundingBox);
 
         // Small delay after click for page to respond
         await this.humanDelay(200, 500);
 
-        // Record action
-        const record = this.recordAction(decision, true);
+        // Post-click verification
+        const postClickUrl = this.page.url();
+        const postClickState = await this.getQuickDOMSignature();
+
+        let verified: 'url_changed' | 'dom_changed' | 'no_change_detected' = 'no_change_detected';
+        if (preClickUrl !== postClickUrl) {
+            verified = 'url_changed';
+        } else if (preClickState !== postClickState) {
+            verified = 'dom_changed';
+        }
+
+        // Record action with state context and clicked element name
+        const record = this.recordAction(decision, true, undefined, {
+            url: postClickUrl,
+            verified,
+            clickedElementName: target.name
+        });
 
         return {
             success: true,
             actionTaken: 'click',
             params: params,
-            resultingUrl: this.page.url(),
+            resultingUrl: postClickUrl,
             durationMs: Date.now() - startTime,
             // Return the clicked element info for capture
             focusedElement: {
                 id: target.id,
                 boundingBox: boundingBox,
                 name: target.name
-            }
+            },
+            verified
         };
     }
 
@@ -184,8 +231,10 @@ export class NavigationExecutor {
     ): Promise<ExecutionResult> {
         const params = decision.params as ScrollParams;
 
-        // Map high-level amount to pixels
-        const baseDistance = SCROLL_AMOUNTS[params.amount] || SCROLL_AMOUNTS.medium;
+        // Map high-level amount to proportional pixels based on viewport
+        const viewportHeight = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
+        const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
+        const baseDistance = Math.round(viewportHeight * proportion);
 
         if (params.direction === 'left' || params.direction === 'right') {
             // Horizontal scroll using mouse wheel
@@ -202,8 +251,12 @@ export class NavigationExecutor {
             });
         }
 
-        // Record action
-        this.recordAction(decision, true);
+        // Record action with scroll position for stagnation detection
+        const scrollYAfter = await this.scroll.getScrollPosition();
+        this.recordAction(decision, true, undefined, {
+            scrollY: scrollYAfter,
+            url: this.page.url()
+        });
 
         return {
             success: true,
@@ -223,6 +276,34 @@ export class NavigationExecutor {
     ): Promise<ExecutionResult> {
         const params = decision.params as TypeParams;
 
+        // Pre-type check: verify a text input is actually focused
+        const focusedInput = await this.page.evaluate(() => {
+            const el = document.activeElement;
+            if (!el) return null;
+            const tag = el.tagName.toLowerCase();
+            const role = el.getAttribute('role');
+            const isEditable = el.getAttribute('contenteditable') === 'true';
+            const isInput = tag === 'input' || tag === 'textarea' || role === 'textbox' || role === 'searchbox' || role === 'combobox' || isEditable;
+            return isInput ? (el.getAttribute('aria-label') || el.getAttribute('placeholder') || tag) : null;
+        }).catch(() => null);
+
+        if (!focusedInput) {
+            console.warn(`⚠️ Type action failed: no text input is focused. Text "${params.text}" would go nowhere.`);
+            this.recordAction(decision, false, 'No text input focused', { url: this.page.url(), verified: 'no_change_detected' });
+            return {
+                success: false,
+                actionTaken: 'type',
+                params: params,
+                errorMessage: 'No text input focused — click a search/text field first',
+                resultingUrl: this.page.url(),
+                durationMs: Date.now() - startTime,
+                verified: 'no_change_detected'
+            };
+        }
+
+        // Pre-type state for verification
+        const preTypeState = await this.getQuickDOMSignature();
+
         // Type with human-like delays between characters
         for (const char of params.text) {
             await this.page.keyboard.type(char);
@@ -233,15 +314,21 @@ export class NavigationExecutor {
         // Small pause after typing
         await this.humanDelay(300, 600);
 
-        // Record action
-        this.recordAction(decision, true);
+        // Post-type verification: check if DOM changed (indicates text landed in an input)
+        const postTypeState = await this.getQuickDOMSignature();
+        const verified: 'dom_changed' | 'no_change_detected' =
+            preTypeState !== postTypeState ? 'dom_changed' : 'no_change_detected';
+
+        // Record action with verification
+        this.recordAction(decision, true, undefined, { url: this.page.url(), verified });
 
         return {
             success: true,
             actionTaken: 'type',
             params: params,
             resultingUrl: this.page.url(),
-            durationMs: Date.now() - startTime
+            durationMs: Date.now() - startTime,
+            verified
         };
     }
 
@@ -260,7 +347,7 @@ export class NavigationExecutor {
         await this.humanDelay(200, 400);
 
         // Record action
-        this.recordAction(decision, true);
+        this.recordAction(decision, true, undefined, { url: this.page.url() });
 
         return {
             success: true,
@@ -285,7 +372,7 @@ export class NavigationExecutor {
         await new Promise(resolve => setTimeout(resolve, waitMs));
 
         // Record action
-        this.recordAction(decision, true);
+        this.recordAction(decision, true, undefined, { url: this.page.url() });
 
         return {
             success: true,
@@ -306,10 +393,28 @@ export class NavigationExecutor {
     ): Promise<ExecutionResult> {
         const params = decision.params as HoverParams;
 
-        // Find the target element
-        const target = elements.find(e => e.id === params.id);
+        // Find the target element by ID
+        let target = elements.find(e => e.id === params.id);
         if (!target) {
             return this.failureResult(decision, startTime, `Element id=${params.id} not found`);
+        }
+
+        // Pre-hover name verification (same as click verification)
+        if (params.expectedName) {
+            const expectedLower = params.expectedName.toLowerCase();
+            const targetLower = target.name.toLowerCase();
+            const nameMatches = targetLower.includes(expectedLower) || expectedLower.includes(targetLower);
+
+            if (!nameMatches) {
+                const byName = elements.find(e =>
+                    e.name.toLowerCase().includes(expectedLower) ||
+                    expectedLower.includes(e.name.toLowerCase())
+                );
+                if (byName) {
+                    console.warn(`⚠️ Hover ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}". Corrected to id:${byName.id} "${byName.name}"`);
+                    target = byName;
+                }
+            }
         }
 
         const boundingBox = target.boundingBox;
@@ -320,8 +425,8 @@ export class NavigationExecutor {
         // Hover using GhostMouse (human-like with micro-movements)
         await this.ghost.hoverElement(boundingBox);
 
-        // Record action
-        this.recordAction(decision, true);
+        // Record action with hovered element name
+        this.recordAction(decision, true, undefined, { url: this.page.url(), clickedElementName: target.name });
 
         return {
             success: true,
@@ -350,7 +455,7 @@ export class NavigationExecutor {
         await this.humanDelay(500, 1000);
 
         // Record action
-        this.recordAction(decision, true);
+        this.recordAction(decision, true, undefined, { url: this.page.url() });
 
         return {
             success: true,
@@ -378,7 +483,7 @@ export class NavigationExecutor {
         await this.humanDelay(200, 400);
 
         // Record action
-        this.recordAction(decision, true);
+        this.recordAction(decision, true, undefined, { url: this.page.url() });
 
         return {
             success: true,
@@ -410,19 +515,21 @@ export class NavigationExecutor {
     }
 
     /**
-     * Record an action to history.
+     * Record an action to history with optional state context.
      */
     private recordAction(
         decision: NavigationDecision,
         success: boolean,
-        errorMessage?: string
+        errorMessage?: string,
+        stateContext?: { scrollY?: number; url?: string; verified?: string; elementCount?: number; clickedElementName?: string }
     ): ActionRecord {
         const record: ActionRecord = {
             timestamp: Date.now(),
             action: decision.action,
             params: decision.params,
             success,
-            errorMessage
+            errorMessage,
+            ...(stateContext || {})
         };
 
         this.actionHistory.push(record);
@@ -444,23 +551,51 @@ export class NavigationExecutor {
 
     /**
      * Check if we're in a loop (repeating same actions).
+     * Returns severity level for escalating recovery.
      */
-    isInLoop(lookback: number = 6): boolean {
-        if (this.actionHistory.length < lookback) return false;
+    isInLoop(lookback: number = 6): { inLoop: boolean; severity: 'mild' | 'moderate' | 'severe' } {
+        if (this.actionHistory.length < lookback) return { inLoop: false, severity: 'mild' };
 
         const recent = this.actionHistory.slice(-lookback);
 
-        // Check if all recent actions are the same type
-        const allSameAction = recent.every(a => a.action === recent[0].action);
-        if (allSameAction && recent[0].action === 'scroll') {
-            // Multiple scrolls might be intentional, check for failures
-            const failureRate = recent.filter(a => !a.success).length / recent.length;
-            return failureRate > 0.5;
+        // Check 1: Scroll position stagnation (most critical - page isn't moving)
+        const scrollActions = recent.filter(a => a.action === 'scroll' && a.scrollY !== undefined);
+        if (scrollActions.length >= 3) {
+            const positions = scrollActions.map(a => a.scrollY!);
+            const allSamePosition = positions.every(p => p === positions[0]);
+            if (allSamePosition) return { inLoop: true, severity: 'severe' };
         }
 
-        // Check for repeated click failures
+        // Check 2: Repeated no-change actions (clicking/acting with no effect)
+        const noChangeActions = recent.filter(a => a.verified === 'no_change_detected');
+        if (noChangeActions.length >= 4) return { inLoop: true, severity: 'moderate' };
+
+        // Check 3: All same action type with high failure rate
+        const allSameAction = recent.every(a => a.action === recent[0].action);
+        if (allSameAction && recent[0].action !== 'scroll') {
+            const failureRate = recent.filter(a => !a.success).length / recent.length;
+            if (failureRate > 0.5) return { inLoop: true, severity: 'moderate' };
+        }
+
+        // Check 4: Repeated click failures
         const clickFailures = recent.filter(a => a.action === 'click' && !a.success);
-        return clickFailures.length >= 3;
+        if (clickFailures.length >= 3) return { inLoop: true, severity: 'moderate' };
+
+        return { inLoop: false, severity: 'mild' };
+    }
+
+    /**
+     * Get escalating recovery action based on loop severity.
+     */
+    getRecoveryAction(severity: 'mild' | 'moderate' | 'severe'): { action: string; key?: string; reason: string } {
+        switch (severity) {
+            case 'mild':
+                return { action: 'press', key: 'Escape', reason: 'Close any overlay' };
+            case 'moderate':
+                return { action: 'back', reason: 'Navigate back to previous page' };
+            case 'severe':
+                return { action: 'navigate_home', reason: 'Return to feed - page is stuck' };
+        }
     }
 
     /**
@@ -470,6 +605,24 @@ export class NavigationExecutor {
         const baseDelay = minMs + Math.random() * (maxMs - minMs);
         const adjustedDelay = baseDelay * this.sessionDelayMultiplier;
         return new Promise(resolve => setTimeout(resolve, adjustedDelay));
+    }
+
+    /**
+     * Get a quick DOM state signature for click verification.
+     * Captures lightweight signals: dialog count, article count, and scroll position.
+     * Cost: ~1-2ms (single evaluate call)
+     */
+    private async getQuickDOMSignature(): Promise<string> {
+        try {
+            return await this.page.evaluate(() => {
+                const dialogs = document.querySelectorAll('[role="dialog"]').length;
+                const articles = document.querySelectorAll('article').length;
+                const scrollY = Math.round(window.scrollY / (window.innerHeight * 0.05));
+                return `d${dialogs}:a${articles}:s${scrollY}`;
+            });
+        } catch {
+            return 'unknown';
+        }
     }
 
     /**

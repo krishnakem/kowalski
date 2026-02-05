@@ -36,6 +36,8 @@ export class GhostMouse {
     private sessionJitterMultiplier: number;
     // Session-level hesitation probability (3-7% per session, not fixed 5%)
     private sessionHesitationProb: number;
+    // Cached viewport width for proportional calculations
+    private _viewportWidth: number = 0;
 
     constructor(page: Page) {
         this.page = page;
@@ -45,6 +47,13 @@ export class GhostMouse {
         this.sessionJitterMultiplier = 0.6 + Math.random() * 0.8;
         // Vary hesitation probability per session (3-7% range)
         this.sessionHesitationProb = 0.03 + Math.random() * 0.04;
+    }
+
+    /** Get viewport width, cached per session for proportional calculations. */
+    private async getViewportWidth(): Promise<number> {
+        if (this._viewportWidth > 0) return this._viewportWidth;
+        this._viewportWidth = await this.page.evaluate(() => window.innerWidth).catch(() => 1080);
+        return this._viewportWidth;
     }
 
     /**
@@ -93,11 +102,12 @@ export class GhostMouse {
      * Includes variable velocity (acceleration/deceleration).
      */
     async moveTo(target: Point, config: MovementConfig = {}): Promise<void> {
+        const vw = await this.getViewportWidth();
         const {
             minSpeed = 2,
             maxSpeed = 8,
             overshootProbability = 0.15,
-            jitterAmount = 2
+            jitterAmount = Math.max(1, Math.round(vw * 0.002))
         } = config;
 
         // Calculate movement distance for physics-based overshoot
@@ -270,8 +280,9 @@ export class GhostMouse {
      */
     private async overshootAndCorrect(target: Point, movementDistance: number = 100): Promise<void> {
         // Physics-based overshoot: faster/longer movements = more overshoot
-        // Range: 5-30px based on movement distance (8% of distance, clamped)
-        const baseOvershoot = Math.min(30, Math.max(5, movementDistance * 0.08));
+        // Proportional to viewport width (was hardcoded 5-30px)
+        const vw = await this.getViewportWidth();
+        const baseOvershoot = Math.min(vw * 0.028, Math.max(vw * 0.005, movementDistance * 0.08));
         // Add randomization: ±50% of base overshoot
         const overshootAmount = baseOvershoot * (0.5 + Math.random());
 
@@ -288,9 +299,10 @@ export class GhostMouse {
 
         // Use micro-curve for correction instead of straight line
         // Humans don't move in perfect straight lines, even for small corrections
+        const correctionOffset = vw * 0.007;
         const midpoint: Point = {
-            x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * 8,
-            y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * 8
+            x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * correctionOffset,
+            y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * correctionOffset
         };
 
         // Move through midpoint with slight curve
@@ -329,10 +341,11 @@ export class GhostMouse {
 
         while (elapsed < jitterDuration) {
             await this.microDelay(jitterInterval * 0.8, jitterInterval * 1.2);
-            // Tiny micro-movements during hover (1-3px)
+            // Tiny micro-movements during hover (proportional to viewport)
+            const hoverJitter = (await this.getViewportWidth()) * 0.003;
             const microMove = {
-                x: target.x + (Math.random() - 0.5) * 3,
-                y: target.y + (Math.random() - 0.5) * 3
+                x: target.x + (Math.random() - 0.5) * hoverJitter,
+                y: target.y + (Math.random() - 0.5) * hoverJitter
             };
             await this.page.mouse.move(microMove.x, microMove.y);
             elapsed += jitterInterval;
@@ -365,14 +378,16 @@ export class GhostMouse {
             y: boundingBox.y + offsetY
         };
 
-        // Ensure we're within the element (safety clamp with 5px margin)
+        // Ensure we're within the element (proportional safety margin)
+        const marginX = Math.max(2, boundingBox.width * 0.05);
+        const marginY = Math.max(2, boundingBox.height * 0.05);
         hoverPoint.x = Math.max(
-            boundingBox.x + 5,
-            Math.min(hoverPoint.x, boundingBox.x + boundingBox.width - 5)
+            boundingBox.x + marginX,
+            Math.min(hoverPoint.x, boundingBox.x + boundingBox.width - marginX)
         );
         hoverPoint.y = Math.max(
-            boundingBox.y + 5,
-            Math.min(hoverPoint.y, boundingBox.y + boundingBox.height - 5)
+            boundingBox.y + marginY,
+            Math.min(hoverPoint.y, boundingBox.y + boundingBox.height - marginY)
         );
 
         await this.hover(hoverPoint, durationMs);
@@ -401,14 +416,16 @@ export class GhostMouse {
             y: boundingBox.y + offsetY
         };
 
-        // Ensure we're still within the element (safety clamp with 5px margin)
+        // Ensure we're still within the element (proportional safety margin)
+        const marginX = Math.max(2, boundingBox.width * 0.05);
+        const marginY = Math.max(2, boundingBox.height * 0.05);
         clickPoint.x = Math.max(
-            boundingBox.x + 5,
-            Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
+            boundingBox.x + marginX,
+            Math.min(clickPoint.x, boundingBox.x + boundingBox.width - marginX)
         );
         clickPoint.y = Math.max(
-            boundingBox.y + 5,
-            Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
+            boundingBox.y + marginY,
+            Math.min(clickPoint.y, boundingBox.y + boundingBox.height - marginY)
         );
 
         await this.click(clickPoint);
@@ -557,14 +574,16 @@ export class GhostMouse {
             y: boundingBox.y + offsetY
         };
 
-        // Safety clamp with 5px margin
+        // Proportional safety margin
+        const marginX = Math.max(2, boundingBox.width * 0.05);
+        const marginY = Math.max(2, boundingBox.height * 0.05);
         clickPoint.x = Math.max(
-            boundingBox.x + 5,
-            Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
+            boundingBox.x + marginX,
+            Math.min(clickPoint.x, boundingBox.x + boundingBox.width - marginX)
         );
         clickPoint.y = Math.max(
-            boundingBox.y + 5,
-            Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
+            boundingBox.y + marginY,
+            Math.min(clickPoint.y, boundingBox.y + boundingBox.height - marginY)
         );
 
         await this.clickWithRole(clickPoint, role);

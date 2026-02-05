@@ -25,10 +25,24 @@ export class HumanScroll {
     // Session-level timing multiplier for cross-session variance
     private sessionTimingMultiplier: number;
 
+    // Cached viewport height for proportional calculations (avoids repeated CDP calls)
+    private cachedViewportHeight: number = 0;
+
     constructor(page: Page) {
         this.page = page;
         // Vary timing by ±30% per session (0.7 to 1.3)
         this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
+    }
+
+    /**
+     * Get viewport height, using cache to avoid repeated CDP calls.
+     * Refreshes once per scroll operation.
+     */
+    private async getViewportHeight(): Promise<number> {
+        if (this.cachedViewportHeight > 0) return this.cachedViewportHeight;
+        const vh = await this.cdpEvaluate<number>('window.innerHeight');
+        this.cachedViewportHeight = vh || 1920;
+        return this.cachedViewportHeight;
     }
 
     /**
@@ -100,8 +114,12 @@ export class HumanScroll {
      * - Reading pauses
      */
     async scroll(config: ScrollConfig = {}): Promise<void> {
+        // Refresh viewport cache at start of each scroll operation
+        this.cachedViewportHeight = 0;
+        const vh = await this.getViewportHeight();
+
         const {
-            baseDistance = 400,
+            baseDistance = Math.round(vh * 0.4),
             variability = 0.3,
             microAdjustProb = 0.25,
             readingPauseMs = [2000, 5000]
@@ -164,8 +182,9 @@ export class HumanScroll {
      * we overshoot, then scroll back to find what we want.
      */
     private async microAdjust(): Promise<void> {
-        // Scroll down a bit more (overshoot)
-        const overshoot = 50 + Math.random() * 100;
+        // Scroll down a bit more (overshoot) — proportional to viewport
+        const vh = await this.getViewportHeight();
+        const overshoot = vh * 0.05 + Math.random() * vh * 0.1;
         await this.page.mouse.wheel(0, overshoot);
         await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 300));
 
@@ -204,8 +223,8 @@ export class HumanScroll {
             const viewportCenter = viewportHeight / 2;
             const scrollNeeded = elementCenter - viewportCenter;
 
-            // Only scroll if significant movement needed
-            if (Math.abs(scrollNeeded) > 50) {
+            // Only scroll if significant movement needed (5% of viewport)
+            if (Math.abs(scrollNeeded) > viewportHeight * 0.05) {
                 // Use precise scroll for centering (no variability)
                 await this.preciseScroll(scrollNeeded);
             }
@@ -234,8 +253,14 @@ export class HumanScroll {
         backendNodeId: number,
         maxRetries: number = 2
     ): Promise<{ success: boolean; finalOffset: number }> {
-        // STEALTH: Variable tolerance (80-120px, not fixed) to avoid detection patterns
-        const TOLERANCE = 80 + Math.random() * 40;
+        // Get viewport height first for proportional tolerance
+        const vh = await this.cdpEvaluate<number>('window.innerHeight');
+        if (!vh) {
+            return { success: false, finalOffset: Infinity };
+        }
+
+        // STEALTH: Variable tolerance (8-12% of viewport, not fixed px) to avoid detection patterns
+        const TOLERANCE = vh * 0.08 + Math.random() * vh * 0.04;
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             let cdpSession: CDPSession | null = null;
@@ -248,11 +273,7 @@ export class HumanScroll {
                     return { success: false, finalOffset: Infinity };
                 }
 
-                // Get viewport info
-                const viewportHeight = await this.cdpEvaluate<number>('window.innerHeight');
-                if (!viewportHeight) {
-                    return { success: false, finalOffset: Infinity };
-                }
+                const viewportHeight = vh;
 
                 // Calculate current offset from center
                 // box.y is viewport-relative
@@ -387,12 +408,14 @@ export class HumanScroll {
      * Check if we're near the bottom of the page via CDP (undetectable).
      * Useful for detecting "infinite scroll loaded more content".
      */
-    async isNearBottom(threshold: number = 200): Promise<boolean> {
+    async isNearBottom(threshold?: number): Promise<boolean> {
+        // Use proportional default: 20% of viewport height
+        const effectiveThreshold = threshold ?? Math.round(await this.getViewportHeight() * 0.2);
         const result = await this.cdpEvaluate<boolean>(`(function() {
             const scrollTop = window.scrollY;
             const scrollHeight = document.documentElement.scrollHeight;
             const clientHeight = window.innerHeight;
-            return scrollTop + clientHeight >= scrollHeight - ${threshold};
+            return scrollTop + clientHeight >= scrollHeight - ${effectiveThreshold};
         })()`);
         return result ?? false;
     }
@@ -420,25 +443,28 @@ export class HumanScroll {
      *
      * All values are randomized within ranges - NO fixed values.
      */
-    private getScrollParamsForContent(contentType: ContentType): {
+    private async getScrollParamsForContent(contentType: ContentType): Promise<{
         distance: number;
         pauseMs: [number, number];
-    } {
+    }> {
+        const vh = await this.getViewportHeight();
+
+        // Proportional scroll distances based on viewport height
         const params: Record<ContentType, {
             distance: [number, number];
             pause: [number, number];
         }> = {
             'text-heavy': {
-                distance: [200, 300],    // Smaller scrolls for reading
-                pause: [3000, 6000]      // Longer pauses to read
+                distance: [vh * 0.20, vh * 0.30],    // 20-30% of viewport for reading
+                pause: [3000, 6000]
             },
             'image-heavy': {
-                distance: [500, 700],    // Larger scrolls for visual scanning
-                pause: [1500, 3000]      // Shorter pauses (quick visual scan)
+                distance: [vh * 0.50, vh * 0.70],    // 50-70% of viewport for visual scanning
+                pause: [1500, 3000]
             },
             'mixed': {
-                distance: [350, 450],    // Balanced scrolls
-                pause: [2000, 5000]      // Moderate pauses
+                distance: [vh * 0.35, vh * 0.45],    // 35-45% of viewport balanced
+                pause: [2000, 5000]
             }
         };
 
@@ -473,8 +499,8 @@ export class HumanScroll {
         const contentDensity = await navigator.analyzeContentDensity();
         const contentType = contentDensity.type;
 
-        // Get adaptive scroll parameters
-        const adaptiveParams = this.getScrollParamsForContent(contentType);
+        // Get adaptive scroll parameters (proportional to viewport)
+        const adaptiveParams = await this.getScrollParamsForContent(contentType);
 
         // Allow config overrides but default to adaptive values
         const {

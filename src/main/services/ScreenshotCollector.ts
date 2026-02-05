@@ -28,21 +28,21 @@ interface CollectorConfig {
 }
 
 const DEFAULT_CONFIG: CollectorConfig = {
-    maxCaptures: 60,          // Capture more, filter later with ImageTagger
+    maxCaptures: 200,         // Generous limit — LLM controls capture decisions
     jpegQuality: 85,          // Good balance of quality and size
-    minScrollDelta: 200       // Must scroll at least 200px for new capture
+    minScrollDelta: 100       // Must scroll at least 100px for new capture
 };
 
 /**
- * Story UI dimensions to crop out (approximate values for standard mobile viewport)
- * Instagram stories have:
- * - Top: Progress bar (~8px) + Header (~52px) = ~60px
- * - Bottom: Reply box (~60px)
+ * Story UI crop proportions (fraction of viewport height).
+ * Instagram stories have progress bar + header at top, reply box at bottom.
  */
-const STORY_CROP_CONFIG = {
-    topMargin: 65,    // Crop out progress bar and header
-    bottomMargin: 70  // Crop out reply box
-};
+function getStoryCropMargins(viewportHeight: number) {
+    return {
+        topMargin: Math.round(viewportHeight * 0.034),   // ~3.4% of viewport
+        bottomMargin: Math.round(viewportHeight * 0.036)  // ~3.6% of viewport
+    };
+}
 
 export class ScreenshotCollector {
     private page: Page;
@@ -121,13 +121,12 @@ export class ScreenshotCollector {
             return false;
         }
 
-        // POSITION-BASED DEDUP: Track by absolute scroll position (150px buckets)
+        // POSITION-BASED DEDUP: Track by proportional scroll position buckets
         // This catches the same viewport being captured multiple times even with different sources
         // Exception: carousel slides and stories share position but show different content (rely on hash dedup)
-        // - Carousel: multiple slides at same scroll position
-        // - Stories: modal overlay always at scrollPosition=0
-        // NOTE: 150px buckets align better with centering tolerance (80-120px variance)
-        const positionBucket = Math.round(scrollPosition / 150);
+        const vpSize = this.page.viewportSize();
+        const bucketSize = vpSize ? Math.round(vpSize.height * 0.078) : 75;
+        const positionBucket = Math.round(scrollPosition / bucketSize);
         if (source !== 'carousel' && source !== 'story' && this.capturedPositions.has(positionBucket)) {
             console.log(`📸 Skipping duplicate position: bucket ${positionBucket} (scroll ~${scrollPosition}px)`);
             return false;
@@ -146,19 +145,20 @@ export class ScreenshotCollector {
 
             // For stories, crop out the Instagram UI chrome (progress bar, header, reply box)
             if (source === 'story' && viewport) {
-                const clipHeight = viewport.height - STORY_CROP_CONFIG.topMargin - STORY_CROP_CONFIG.bottomMargin;
+                const storyCrop = getStoryCropMargins(viewport.height);
+                const clipHeight = viewport.height - storyCrop.topMargin - storyCrop.bottomMargin;
 
                 screenshot = await this.page.screenshot({
                     type: 'jpeg',
                     quality: this.config.jpegQuality,
                     clip: {
                         x: 0,
-                        y: STORY_CROP_CONFIG.topMargin,
+                        y: storyCrop.topMargin,
                         width: viewport.width,
-                        height: Math.max(clipHeight, 100)  // Ensure minimum height
+                        height: Math.max(clipHeight, Math.round(viewport.height * 0.05))
                     }
                 });
-                console.log(`📸 Story cropped: removed top ${STORY_CROP_CONFIG.topMargin}px and bottom ${STORY_CROP_CONFIG.bottomMargin}px`);
+                console.log(`📸 Story cropped: removed top ${storyCrop.topMargin}px and bottom ${storyCrop.bottomMargin}px`);
             } else {
                 // Regular viewport screenshot for feed/search/profile
                 screenshot = await this.page.screenshot({
@@ -241,14 +241,17 @@ export class ScreenshotCollector {
         }
 
         if (!viewport) {
-            // Fallback: use reasonable default dimensions
-            console.log('📸 Viewport unavailable, using default dimensions (1080x1920)');
-            viewport = { width: 1080, height: 1920 };
+            // Fallback: query actual window dimensions via page.evaluate
+            const dims = await this.page.evaluate(() => ({
+                width: window.innerWidth, height: window.innerHeight
+            })).catch(() => ({ width: 1080, height: 1920 }));
+            console.log(`📸 Viewport unavailable from viewportSize(), using evaluate: ${dims.width}x${dims.height}`);
+            viewport = dims;
         }
 
         try {
-            // Calculate capture region with padding for context
-            const padding = 30;  // 30px padding around element
+            // Calculate capture region with proportional padding for context
+            const padding = Math.round(viewport.width * 0.046);
             const captureRegion = {
                 x: Math.max(0, elementBox.x - padding),
                 y: Math.max(0, elementBox.y - padding),
@@ -264,15 +267,9 @@ export class ScreenshotCollector {
                 captureRegion.height = viewport.height - captureRegion.y;
             }
 
-            // Ensure minimum dimensions
-            captureRegion.width = Math.max(captureRegion.width, 100);
-            captureRegion.height = Math.max(captureRegion.height, 100);
-
-            // Log capture intent
-            console.log(`\n📸 === INTENTIONAL CAPTURE ===`);
-            console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
-            console.log(`   Reason: ${reason || 'LLM focus'}`);
-            console.log(`   Crop: ${captureRegion.width}x${captureRegion.height}px`);
+            // Ensure minimum dimensions (proportional to viewport)
+            captureRegion.width = Math.max(captureRegion.width, Math.round(viewport.width * 0.09));
+            captureRegion.height = Math.max(captureRegion.height, Math.round(viewport.height * 0.05));
 
             // Take cropped screenshot focused on the element
             const screenshot = await this.page.screenshot({
@@ -284,8 +281,7 @@ export class ScreenshotCollector {
             // Hash-based deduplication
             const hash = this.computeImageHash(screenshot);
             if (this.capturedHashes.has(hash)) {
-                console.log(`   Status: Skipped (duplicate hash)`);
-                console.log(`==============================\n`);
+                console.log(`  📸 Capture skipped (duplicate hash)`);
                 return null;
             }
             this.capturedHashes.add(hash);
@@ -294,8 +290,7 @@ export class ScreenshotCollector {
             const postId = this.extractPostId();
             if (postId) {
                 if (this.capturedPostIds.has(postId)) {
-                    console.log(`   Status: Skipped (duplicate postId: ${postId})`);
-                    console.log(`==============================\n`);
+                    console.log(`  📸 Capture skipped (duplicate postId: ${postId})`);
                     return null;
                 }
                 this.capturedPostIds.add(postId);
@@ -318,7 +313,12 @@ export class ScreenshotCollector {
             // Save to disk for debugging if configured
             this.saveScreenshotToDisk(screenshot, source, captured.id);
 
-            console.log(`   Status: Captured #${captured.id} (${source}${interest ? `: ${interest}` : ''})`);
+            // Log ONLY after capture is actually stored
+            console.log(`\n📸 === CAPTURED #${captured.id} ===`);
+            console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
+            console.log(`   Reason: ${reason || 'LLM focus'}`);
+            console.log(`   Crop: ${captureRegion.width}x${captureRegion.height}px`);
+            console.log(`   Source: ${source}${interest ? `: ${interest}` : ''}`);
             console.log(`==============================\n`);
 
             return captured;

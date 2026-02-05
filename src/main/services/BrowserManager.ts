@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, screen } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { chromium } from 'playwright-extra';
@@ -94,8 +94,10 @@ export class BrowserManager {
                 extraArgs.push(`--window-position=${config.bounds.x},${config.bounds.y}`);
                 extraArgs.push(`--window-size=${config.bounds.width},${config.bounds.height}`);
             } else {
-                // Default window size for headless/no bounds - ensures consistent viewport
-                extraArgs.push('--window-size=1080,1920');
+                // Randomized window size per session for fingerprint diversity
+                const windowSize = BrowserManager.generateWindowSize(config.headless);
+                extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
+                console.log(`📐 BrowserManager: Window size ${windowSize.width}x${windowSize.height} (headless=${config.headless})`);
             }
 
             // 2. Launch Persistent Context
@@ -189,6 +191,24 @@ export class BrowserManager {
                     return getParameterProto2.call(this, parameter);
                 };
             }, selectedGpu);
+
+            // Log actual viewport dimensions for verification
+            try {
+                const pages = this.browserContext.pages();
+                const verifyPage = pages.length > 0 ? pages[0] : await this.browserContext.newPage();
+                const actualViewport = await verifyPage.evaluate(() => ({
+                    innerWidth: window.innerWidth,
+                    innerHeight: window.innerHeight,
+                    outerWidth: window.outerWidth,
+                    outerHeight: window.outerHeight,
+                    devicePixelRatio: window.devicePixelRatio
+                })).catch(() => null);
+                if (actualViewport) {
+                    console.log(`📐 BrowserManager: Actual viewport: ${actualViewport.innerWidth}x${actualViewport.innerHeight} (outer: ${actualViewport.outerWidth}x${actualViewport.outerHeight}, DPR: ${actualViewport.devicePixelRatio})`);
+                }
+            } catch (viewportErr) {
+                console.warn('📐 Could not verify viewport:', viewportErr);
+            }
 
             // 2.5 MIGRATION: Sync Session from Onboarding (session.json) -> Persistent Context
             // The user logs in via the Electron Webview (Onboarding), which saves to "session.json".
@@ -408,6 +428,46 @@ export class BrowserManager {
             console.error('❌ Session validation error:', error.message);
             return { valid: false, reason: error.message };
         }
+    }
+
+    // =========================================================================
+    // Window Size Randomization
+    // =========================================================================
+
+    /**
+     * Generate randomized window dimensions per session for fingerprint diversity.
+     * Derives from actual screen size with random 70-92% scaling.
+     */
+    private static generateWindowSize(headless: boolean): { width: number; height: number } {
+        let screenWidth: number;
+        let screenHeight: number;
+
+        if (headless) {
+            screenWidth = 1920;
+            screenHeight = 1080;
+        } else {
+            try {
+                const workArea = screen.getPrimaryDisplay().workAreaSize;
+                screenWidth = workArea.width;
+                screenHeight = workArea.height;
+            } catch {
+                screenWidth = 1920;
+                screenHeight = 1080;
+            }
+        }
+
+        // Random 70-92% of screen for each dimension (independent)
+        const widthRatio = 0.70 + Math.random() * 0.22;
+        const heightRatio = 0.70 + Math.random() * 0.22;
+
+        let width = Math.round(screenWidth * widthRatio);
+        let height = Math.round(screenHeight * heightRatio);
+
+        // Floor: Instagram desktop needs ~1000px wide, ~700px tall
+        width = Math.max(width, 1024);
+        height = Math.max(height, 700);
+
+        return { width, height };
     }
 
     // =========================================================================

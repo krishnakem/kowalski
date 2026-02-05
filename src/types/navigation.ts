@@ -18,7 +18,7 @@ import { Point, BoundingBox, ContentState } from './instagram.js';
  * High-level goal the navigation system is trying to achieve.
  */
 export interface NavigationGoal {
-    type: 'search_interest' | 'watch_stories' | 'browse_feed' | 'explore_profile' | 'general_browse';
+    type: 'search_interest' | 'watch_stories' | 'browse_feed' | 'explore_profile' | 'general_browse' | 'analyze_account';
     target?: string;           // Interest term, username, etc.
     minItems?: number;         // Minimum items to collect
     timeAllocatedMs?: number;  // Time budget for this goal
@@ -89,6 +89,20 @@ export interface NavigationContext {
             parentContainers: string[];
         }>;
         landmarks: string[];
+    };
+
+    // Stagnation awareness
+    scrollPosition?: number;            // Current scrollY in pixels
+    elementFingerprint?: string;        // Hash of current elements for freshness detection
+
+    // Cross-session memory digest (from SessionMemory)
+    sessionMemoryDigest?: string;
+
+    // Loop detection warning (injected into LLM context so it can self-recover)
+    loopWarning?: {
+        severity: 'mild' | 'moderate' | 'severe';
+        reason: string;
+        consecutiveWarnings: number;   // How many times LLM has been warned without recovering
     };
 }
 
@@ -231,6 +245,7 @@ export type NavigationAction =
  */
 export interface ClickParams {
     id: number;                              // Element ID to click
+    expectedName?: string;                   // Element name for verification (LLM outputs this)
 }
 
 /**
@@ -267,6 +282,7 @@ export interface WaitParams {
  */
 export interface HoverParams {
     id: number;                              // Element ID to hover over
+    expectedName?: string;                   // Element name for verification (LLM outputs this)
 }
 
 /**
@@ -344,6 +360,13 @@ export interface ActionRecord {
     success: boolean;
     resultingView?: ContentState['currentView'];
     errorMessage?: string;
+    // State context for stagnation detection
+    scrollY?: number;
+    url?: string;
+    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified';
+    elementCount?: number;
+    // What element was actually acted on (for LLM feedback)
+    clickedElementName?: string;
 }
 
 // ============================================================================
@@ -371,6 +394,7 @@ export interface ExecutionResult {
     errorMessage?: string;
     durationMs: number;
     focusedElement?: FocusedElement;         // Element that was clicked (for capture)
+    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified';
 }
 
 /**

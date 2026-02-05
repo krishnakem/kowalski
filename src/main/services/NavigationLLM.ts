@@ -36,8 +36,8 @@ import { Point } from '../../types/instagram.js';
  */
 const DEFAULT_CONFIG: Partial<NavigationLLMConfig> = {
     model: 'gpt-4o-mini',
-    maxTokens: 400,  // Increased for richer context
-    temperature: 0.3
+    maxTokens: 800,
+    temperature: 0.5
 };
 
 export class NavigationLLM {
@@ -73,6 +73,26 @@ export class NavigationLLM {
 YOU CONTROL:
 1. TACTICAL: What action to take next (click, scroll, type, press, wait)
 2. STRATEGIC: When to switch phases, when to capture, when to terminate
+
+WEB UI REASONING:
+You can understand ANY web page by analyzing the accessibility tree structure:
+
+1. LAYOUT DETECTION: Elements in "navigation" containers are nav menus. Elements in "main" are primary content. Elements in "complementary" are sidebars. Use container roles to understand page layout.
+
+2. NAVIGATION DISCOVERY: Look for links/buttons inside "navigation" containers — these let you move between sections. Read their names to understand where they lead.
+
+3. PAGE CONTEXT: Infer your location from container names, URL, and element patterns:
+   - Many "article" containers = content feed
+   - A grid of images = gallery/explore view
+   - Profile stats (followers, posts) = user profile
+   - A dialog/modal container = overlay on top of main content
+
+4. WORKFLOW COMPLETION: When performing multi-step tasks (like searching), complete the full workflow:
+   - After typing in a search field, WAIT for results to appear as links, then CLICK one
+   - After opening content, explore it before moving on
+   - Use navigation links to move between sections, don't just scroll hoping to find things
+
+5. SPATIAL REASONING: Use Y position to understand vertical layout. Elements at Y < 100 are likely headers/nav. Elements at Y > 900 are footers. Group elements by similar Y values to understand rows.
 
 UNDERSTANDING THE ACCESSIBILITY TREE:
 Elements are grouped by their container from the accessibility tree:
@@ -131,7 +151,7 @@ EXAMPLE: User interests: ["coffee", "travel", "photography"]
 AVAILABLE TACTICAL ACTIONS:
 - click(id): Click element by ID
 - hover(id): Hover over element (reveals hidden menus, tooltips, preview content)
-- scroll(direction, amount): direction='up'|'down'|'left'|'right', amount='small'|'medium'|'large'
+- scroll(direction, amount): direction='up'|'down'|'left'|'right', amount='small'|'medium'|'large'|'xlarge'
 - type(text): Type text into focused input
 - press(key): Press any key - Escape, Enter, Backspace, Delete, Space, ArrowRight, ArrowLeft, ArrowUp, ArrowDown, Tab, Home, End, PageUp, PageDown
 - clear(): Clear the currently focused input field (select all + delete)
@@ -150,11 +170,10 @@ USE CASES:
 STRATEGIC DECISIONS (YOU CONTROL THESE):
 Include a "strategic" field to make session-level decisions:
 
-1. PHASE SWITCHING - You decide when to change activities:
-   - "switchPhase": "search" → go search for user interests
-   - "switchPhase": "stories" → go watch stories
-   - "switchPhase": "feed" → go browse the feed
-   - Leave null to stay in current phase
+1. APPROACH — You have full freedom to explore this account however you see fit:
+   - Browse the feed, watch stories, search for topics, explore profiles
+   - Any combination, any order — allocate your time based on what you find
+   - Use "switchPhase" to log what you're doing: "search" | "stories" | "feed"
 
 2. SESSION TERMINATION - You decide when you're done:
    - "terminateSession": true → end the session (content exhausted, time's up, goal achieved)
@@ -163,14 +182,8 @@ Include a "strategic" field to make session-level decisions:
    - "captureNow": true → take a screenshot of current view
 
 4. PACING CONTROL - You decide how long to linger:
-   - "lingerDuration": "short" (1s) | "medium" (3s) | "long" (6s)
+   - "lingerDuration": "short" (1s) | "medium" (3s) | "long" (6s) | "xlong" (12s)
    - Use "long" for interesting content, "short" for navigation
-
-WHEN TO SWITCH PHASES:
-- Switch to "search" when: you have unsearched interests AND time permits
-- Switch to "stories" when: you see story circles AND haven't watched many stories
-- Switch to "feed" when: search/stories are done OR you want to explore organic content
-- DON'T switch constantly - spend quality time in each phase
 
 WHEN TO TERMINATE:
 - ✅ Time is almost up (< 30 seconds remaining)
@@ -190,14 +203,20 @@ When you see a video playing (videoState in context):
 - Use lingerDuration: "long" for interesting videos, "short" for ads
 - Capture multiple frames by staying on video (system auto-captures)
 
-ALWAYS SKIP ADS:
-- If you detect sponsored content ("Sponsored", "Paid partnership", "Shop now", "Learn more")
-- Scroll past ads quickly - use lingerDuration: "short" and scroll
-- Don't capture ads
+ADS:
+- Ads rarely contain useful content — skip them unless they relate to user interests.
+- Sponsored indicators: "Sponsored", "Paid partnership", "Shop now", "Learn more"
+- Use lingerDuration: "short" and scroll past when not relevant
 
 FORBIDDEN ACTIONS:
 - NEVER click: like_button, comment_button, share_button, save_button, follow_button
 - Read-only browsing only
+
+STAGNATION DETECTION:
+- Check RECENT ACTIONS for scrollY values. If scrollY is unchanged across 2+ scrolls, you are STUCK at the page bottom or blocked by an overlay.
+- If stuck scrolling: try press(Escape) to close overlays, back() to go to previous page, or click a navigation link (Home, Explore) to change context.
+- If "no change detected" appears 3+ times in recent actions, STOP repeating the same action and switch strategy completely.
+- If SESSION MEMORY is available, use past session patterns to avoid known dead-ends.
 
 DEEP ENGAGEMENT:
 You can engage deeply with posts to understand them better. This is OPTIONAL but encouraged for interesting content.
@@ -227,10 +246,10 @@ WHEN TO ENGAGE DEEPLY (signals):
 ❌ Ad or sponsored content
 ❌ Time pressure (need to cover more ground)
 
-ENGAGEMENT DEPTH LEVELS:
-- QUICK LOOK: Open modal, view main image/video, close (10-15s total)
-- MODERATE: Open, navigate all carousel slides, skim comments (30-60s)
-- DEEP DIVE: Full carousel, read comments thoroughly, maybe visit profile (60-120s)
+ENGAGEMENT DEPTH:
+- Adjust engagement time based on content relevance
+- A few seconds for irrelevant content, longer for high-value content
+- You decide the duration — there are no fixed time buckets
 
 Include engagement decisions in your strategic field:
 - "engageDepth": "quick" | "moderate" | "deep" | null
@@ -298,11 +317,27 @@ Typing → seeing result links → scrolling away or typing again
 WHY: You never clicked a result, so you never navigated anywhere!
 FIX: After typing, look for links with follower counts and CLICK one.
 
+PROFILE EXPLORATION (after clicking a search result):
+When you land on a profile page, generally explore it before leaving:
+1. Scroll down to see the profile's posts grid
+2. Capture screenshots of interesting content (use captureNow: true)
+3. Click individual posts to see them in detail, capture, then close (Escape)
+4. Keep scrolling and capturing until you've collected enough content
+5. Leaving too quickly wastes the navigation effort it took to get here
+
+COMMON PROFILE FAILURE:
+Search → click profile → immediately go back → search again (infinite loop!)
+WHY: You left the profile before exploring it. The search is useless without capturing content.
+FIX: Explore the profile and capture content before navigating away.
+
 OUTPUT FORMAT (JSON only):
 {
   "reasoning": "Explain your decision",
   "action": "click|hover|scroll|type|press|clear|back|wait",
   "params": { ... },
+  NOTE: For click/hover, params MUST include "expectedName" — the element name you expect to interact with.
+  Example: "params": {"id": 5, "expectedName": "Search"}
+  This prevents clicking the wrong element if you mix up IDs.
   "expectedOutcome": "What should happen",
   "confidence": 0.0-1.0,
   "capture": {
@@ -314,7 +349,7 @@ OUTPUT FORMAT (JSON only):
     "switchPhase": "search"|"stories"|"feed"|null,
     "terminateSession": false,
     "captureNow": true,
-    "lingerDuration": "short"|"medium"|"long",
+    "lingerDuration": "short"|"medium"|"long"|"xlong",
     "engageDepth": "quick"|"moderate"|"deep"|null,
     "closeEngagement": false,
     "reason": "Strategic reasoning"
@@ -327,7 +362,7 @@ STRATEGIC DECISION EXAMPLES:
 {
   "reasoning": "Session just started, will search for user interests first",
   "action": "click",
-  "params": {"id": 3},
+  "params": {"id": 3, "expectedName": "Search"},
   "expectedOutcome": "Search panel opens",
   "strategic": {
     "switchPhase": "search",
@@ -377,7 +412,7 @@ STRATEGIC DECISION EXAMPLES:
 {
   "reasoning": "Post has 5,234 likes and is a carousel with 4 slides - worth exploring",
   "action": "click",
-  "params": {"id": 12},
+  "params": {"id": 12, "expectedName": "Photo by username"},
   "expectedOutcome": "Post modal opens for detailed view",
   "strategic": {
     "engageDepth": "moderate",
@@ -421,10 +456,19 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
         context: NavigationContext,
         elements: NavigationElement[]
     ): string {
-        // Format recent actions for context
+        // Format recent actions with state context for stagnation detection
+        // Include clicked element name so LLM knows what it ACTUALLY interacted with
         const recentActionsStr = context.recentActions
-            .slice(-5)
-            .map((a, i) => `${i + 1}. ${a.action}(${JSON.stringify(a.params)}) → ${a.success ? 'success' : 'failed'}`)
+            .slice(-15)
+            .map((a, i) => {
+                let line = `${i + 1}. ${a.action}(${JSON.stringify(a.params)}) → ${a.success ? 'success' : 'FAILED'}`;
+                const parts: string[] = [];
+                if (a.clickedElementName) parts.push(`element="${a.clickedElementName}"`);
+                if (a.verified && a.verified !== 'not_verified') parts.push(a.verified.replace(/_/g, ' '));
+                if (a.scrollY !== undefined) parts.push(`scrollY=${a.scrollY}`);
+                if (parts.length > 0) line += ` [${parts.join(', ')}]`;
+                return line;
+            })
             .join('\n') || 'None yet';
 
         // Format goal description based on current phase
@@ -442,12 +486,15 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
             case 'explore_profile':
                 goalDesc = `Explore profile: ${context.currentGoal.target}`;
                 break;
+            case 'analyze_account':
+                goalDesc = 'Create a comprehensive digest of this account — you decide the approach';
+                break;
             default:
                 goalDesc = 'General browsing - YOU decide what to do';
         }
 
         // Group elements by container for LLM pattern discovery
-        const elementsByContainer = this.groupElementsByContainer(elements.slice(0, 30));
+        const elementsByContainer = this.groupElementsByContainer(elements);
 
         // Detect active dialog overlays (basic - LLM reasons about the rest)
         const overlays = this.detectActiveOverlays(elements);
@@ -460,16 +507,10 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
         const targetSec = Math.round(context.targetDurationMs / 1000);
         const remainingSec = Math.max(0, targetSec - elapsedSec);
 
-        // Format user interests
+        // Format user interests as context (not a checklist)
         const interestsStr = context.userInterests.length > 0
             ? context.userInterests.join(', ')
             : 'None specified';
-        const searchedStr = context.interestsSearched.length > 0
-            ? context.interestsSearched.join(', ')
-            : 'None yet';
-        const unsearchedInterests = context.userInterests.filter(
-            i => !context.interestsSearched.includes(i)
-        );
 
         // Phase history
         let phaseHistoryStr = 'None yet';
@@ -497,36 +538,40 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
 
         return `YOU HAVE FULL STRATEGIC CONTROL. Decide what to do next.
 
-USER INTERESTS: ${interestsStr}
-- Searched: ${searchedStr}
-- Not yet searched: ${unsearchedInterests.length > 0 ? unsearchedInterests.join(', ') : 'All searched'}
+CURRENT GOAL: ${goalDesc}
+
+USER INTERESTS (topics the user cares about): ${interestsStr}
 
 SESSION STATUS:
-- Current phase: ${context.currentPhase || 'not set'}
+- Current activity: ${context.currentPhase || 'exploring'}
 - Time: ${elapsedSec}s elapsed, ${remainingSec}s remaining (of ${targetSec}s total)
 - Collected: ${context.postsCollected} posts, ${context.storiesWatched} stories
 - Captures: ${context.captureCount || 0} screenshots taken
 
-PHASE HISTORY: ${phaseHistoryStr}
+ACTIVITY HISTORY: ${phaseHistoryStr}
 
 CURRENT STATE:
 - URL: ${context.url}
 - View: ${context.view}
 - Video: ${videoStr}
 - Content: ${contentStatsStr}
+- Scroll position: ${context.scrollPosition !== undefined ? `${context.scrollPosition}px from top` : 'unknown'}
+- Content freshness: ${context.elementFingerprint || 'unknown'}
 ${overlayInfo}
 ${this.formatTreeContext(context)}
 
 ENGAGEMENT STATE:
 ${this.formatEngagementState(context)}
-
+${context.sessionMemoryDigest ? `\nSESSION MEMORY (from past sessions):\n${context.sessionMemoryDigest}\n` : ''}
 ACCESSIBILITY TREE (${elements.length} elements, grouped by container):
 ${elementsByContainer}
 
 RECENT ACTIONS:
 ${recentActionsStr}
-
-Make your decision. Include strategic decisions if you want to switch phases, terminate, or adjust pacing.`;
+${context.loopWarning ? `\n⚠️ LOOP DETECTED (${context.loopWarning.severity}): ${context.loopWarning.reason}
+WARNING #${context.loopWarning.consecutiveWarnings} — You are repeating actions with no effect. Change your approach NOW.
+${context.loopWarning.consecutiveWarnings >= 2 ? 'CRITICAL: Auto-recovery will override your next action if you do not change strategy.' : ''}\n` : ''}
+Make your decision. Include strategic decisions to signal captures, activity changes, or session termination.`;
     }
 
     /**
@@ -628,7 +673,7 @@ Make your decision. Include strategic decisions if you want to switch phases, te
         // Containers
         if (ts.containers.length > 0) {
             lines.push('\nContainers found:');
-            for (const c of ts.containers.slice(0, 10)) { // Limit to 10
+            for (const c of ts.containers) {
                 lines.push(`- ${c.role}: "${c.name}" (${c.childCount} children)`);
             }
         }
@@ -646,7 +691,7 @@ Make your decision. Include strategic decisions if you want to switch phases, te
 
         // Key landmarks
         if (ts.landmarks.length > 0) {
-            lines.push(`\nKey landmarks: ${ts.landmarks.slice(0, 10).join(', ')}`);
+            lines.push(`\nKey landmarks: ${ts.landmarks.join(', ')}`);
         }
 
         return lines.join('\n');
@@ -674,9 +719,6 @@ Make your decision. Include strategic decisions if you want to switch phases, te
         // Build grouped output
         const parts: string[] = [];
 
-        // Track which containers we've shown content for (avoid duplication)
-        const shownContentForContainer = new Set<string>();
-
         for (const [containerKey, elems] of containers) {
             // Show container with item count
             const siblingInfo = elems[0]?.siblingCount ? ` (${elems[0].siblingCount} siblings)` : '';
@@ -687,11 +729,11 @@ Make your decision. Include strategic decisions if you want to switch phases, te
                 const depth = e.depth !== undefined ? ` depth=${e.depth}` : '';
                 parts.push(`  id:${e.id} ${e.role} "${e.name}" Y=${e.position.y}${hint}${depth}`);
 
-                // Show content preview for this element (only once per container)
-                if (e.contentPreview && !shownContentForContainer.has(containerKey)) {
+                // Show content preview for every element that has one
+                if (e.contentPreview) {
                     const cp = e.contentPreview;
                     if (cp.captionText) {
-                        parts.push(`    Caption: "${cp.captionText}${cp.captionText.length >= 100 ? '...' : ''}"`);
+                        parts.push(`    Caption: "${cp.captionText}"`);
                     }
                     if (cp.engagement) {
                         const engParts = [];
@@ -707,7 +749,6 @@ Make your decision. Include strategic decisions if you want to switch phases, te
                     if (cp.altText) {
                         parts.push(`    Alt: "${cp.altText}"`);
                     }
-                    shownContentForContainer.add(containerKey);
                 }
             }
             parts.push(''); // Empty line between containers
@@ -733,50 +774,57 @@ Make your decision. Include strategic decisions if you want to switch phases, te
         }
 
         try {
-            const decision = await this.callLLM(context, elements);
+            const rawDecision = await this.callLLM(context, elements);
 
             // Track calls for cost logging
             this.decisionCount++;
             const estimatedCost = this.decisionCount * 0.001;
 
-            // Log the LLM's reasoning
+            // Validate and sanitize BEFORE logging so terminal reflects actual execution
+            const validated = this.validateDecision(rawDecision, elements);
+
+            // Log AFTER validation so terminal matches what actually happens
             if (this.debug) {
                 console.log('\n🧠 === LLM REASONING ===');
                 console.log(`Decision #${this.decisionCount} (est. cost: $${estimatedCost.toFixed(4)})`);
-                console.log(`Action: ${decision.action}`);
-                console.log(`Reasoning: ${decision.reasoning}`);
-                console.log(`Expected: ${decision.expectedOutcome}`);
-                console.log(`Confidence: ${decision.confidence ?? 'N/A'}`);
+
+                // Show modification if validation changed the action
+                if (rawDecision.action !== validated.action) {
+                    console.log(`Action: ${rawDecision.action} → ${validated.action} (safety modified)`);
+                } else {
+                    console.log(`Action: ${validated.action}`);
+                }
+
+                console.log(`Reasoning: ${validated.reasoning}`);
+                console.log(`Expected: ${validated.expectedOutcome}`);
+                console.log(`Confidence: ${validated.confidence ?? 'N/A'}`);
                 // Log capture intent
-                if (decision.capture) {
-                    console.log(`📸 Capture: ${decision.capture.shouldCapture ? 'YES' : 'NO'} - ${decision.capture.reason || 'no reason'}`);
+                if (validated.capture) {
+                    console.log(`📸 Capture: ${validated.capture.shouldCapture ? 'YES' : 'NO'} - ${validated.capture.reason || 'no reason'}`);
                 } else {
                     console.log(`📸 Capture: NOT SIGNALED`);
                 }
                 // Log strategic decisions
-                if (decision.strategic) {
+                if (validated.strategic) {
                     console.log('🎯 === STRATEGIC DECISIONS ===');
-                    if (decision.strategic.switchPhase) {
-                        console.log(`  Phase: SWITCH TO ${decision.strategic.switchPhase}`);
+                    if (validated.strategic.switchPhase) {
+                        console.log(`  Phase: SWITCH TO ${validated.strategic.switchPhase}`);
                     }
-                    if (decision.strategic.terminateSession) {
+                    if (validated.strategic.terminateSession) {
                         console.log(`  ⏹️ TERMINATE SESSION`);
                     }
-                    if (decision.strategic.captureNow) {
+                    if (validated.strategic.captureNow) {
                         console.log(`  📸 Capture viewport NOW`);
                     }
-                    if (decision.strategic.lingerDuration) {
-                        console.log(`  ⏱️ Linger: ${decision.strategic.lingerDuration}`);
+                    if (validated.strategic.lingerDuration) {
+                        console.log(`  ⏱️ Linger: ${validated.strategic.lingerDuration}`);
                     }
-                    if (decision.strategic.reason) {
-                        console.log(`  Reason: ${decision.strategic.reason}`);
+                    if (validated.strategic.reason) {
+                        console.log(`  Reason: ${validated.strategic.reason}`);
                     }
                 }
                 console.log('========================\n');
             }
-
-            // Validate and sanitize the decision
-            const validated = this.validateDecision(decision, elements);
 
             return validated;
         } catch (error) {
@@ -872,36 +920,13 @@ Make your decision. Include strategic decisions if you want to switch phases, te
                 'like_button', 'comment_button', 'share_button', 'save_button', 'follow_button'
             ];
             if (targetElement.semanticHint && forbiddenHints.includes(targetElement.semanticHint)) {
-                console.warn(`[Safety Net] Blocked click on ${targetElement.semanticHint}`);
+                console.log(`  🛡️ Safety: click on ${targetElement.semanticHint} → scroll (forbidden element)`);
                 return {
                     ...decision,
                     action: 'scroll',
                     params: { direction: 'down', amount: 'small' } as ScrollParams,
                     reasoning: `SAFETY: Blocked interaction with ${targetElement.semanticHint}, scrolling instead`
                 };
-            }
-
-            // SAFETY NET: Block clicks on interactive action elements by name
-            const name = targetElement.name?.toLowerCase() || '';
-            const interactivePatterns = [
-                'like', 'love', 'heart',
-                'comment', 'reply',
-                'share', 'send',
-                'save', 'bookmark',
-                'follow', 'unfollow',
-                'accept', 'decline', 'confirm',
-                'post', 'submit'
-            ];
-            for (const pattern of interactivePatterns) {
-                if (name === pattern || name.startsWith(pattern + ' ')) {
-                    console.warn(`[Safety Net] Blocked click on interactive element: "${name}"`);
-                    return {
-                        ...decision,
-                        action: 'scroll',
-                        params: { direction: 'down', amount: 'small' } as ScrollParams,
-                        reasoning: `SAFETY: Blocked interactive action "${name}", scrolling instead`
-                    };
-                }
             }
 
             // Auto-add capture for post-like elements if LLM forgot to include it
@@ -937,7 +962,7 @@ Make your decision. Include strategic decisions if you want to switch phases, te
                         containerName.includes('direct') ||
                         containerName.includes('inbox') ||
                         containerName.includes('chat')) {
-                        console.warn(`[Safety Net] Blocked typing in message context: "${elem.containerName}"`);
+                        console.log(`  🛡️ Safety: type in "${elem.containerName}" → Escape (message context)`);
                         return {
                             ...decision,
                             action: 'press',
@@ -951,7 +976,7 @@ Make your decision. Include strategic decisions if you want to switch phases, te
                         inputName.includes('comment') ||
                         inputName.includes('reply') ||
                         inputName.includes('add a comment')) {
-                        console.warn(`[Safety Net] Blocked typing in comment context: "${inputName}"`);
+                        console.log(`  🛡️ Safety: type in "${inputName}" → Escape (comment context)`);
                         return {
                             ...decision,
                             action: 'press',
@@ -969,7 +994,7 @@ Make your decision. Include strategic decisions if you want to switch phases, te
             if (!['up', 'down', 'left', 'right'].includes(scrollParams.direction)) {
                 scrollParams.direction = 'down';
             }
-            if (!['small', 'medium', 'large'].includes(scrollParams.amount)) {
+            if (!['small', 'medium', 'large', 'xlarge'].includes(scrollParams.amount)) {
                 scrollParams.amount = 'medium';
             }
         }
@@ -1017,24 +1042,42 @@ Make your decision. Include strategic decisions if you want to switch phases, te
 
     /**
      * Fallback decision when LLM fails or is unavailable.
+     * Uses escalating strategies based on recent action patterns.
      */
     private fallbackDecision(
         context: NavigationContext,
         elements: NavigationElement[],
         reason: string
     ): NavigationDecision {
-        // If we have recent failed scrolls, try escape
-        const recentScrollFails = context.recentActions
-            .slice(-3)
-            .filter(a => a.action === 'scroll' && !a.success).length;
+        const recent = context.recentActions.slice(-15);
 
-        if (recentScrollFails >= 2) {
+        // Check for scroll position stagnation
+        const scrollPositions = recent
+            .filter(a => a.scrollY !== undefined)
+            .map(a => a.scrollY!);
+        const scrollStagnant = scrollPositions.length >= 2 &&
+            scrollPositions.every(p => p === scrollPositions[0]);
+
+        // Tier 1: Scroll stagnant - try Escape
+        if (scrollStagnant) {
             return {
-                reasoning: `Fallback: ${reason}. Recent scrolls failed, trying escape.`,
+                reasoning: `Fallback: ${reason}. Scroll position stuck, trying escape.`,
                 action: 'press',
                 params: { key: 'Escape' } as PressParams,
-                expectedOutcome: 'Close any modal or overlay',
+                expectedOutcome: 'Close any blocking overlay',
                 confidence: 0.3
+            };
+        }
+
+        // Tier 2: Multiple failures - go back
+        const recentFailures = recent.filter(a => !a.success).length;
+        if (recentFailures >= 3) {
+            return {
+                reasoning: `Fallback: ${reason}. Multiple failures, navigating back.`,
+                action: 'back',
+                params: {} as BackParams,
+                expectedOutcome: 'Return to previous page',
+                confidence: 0.2
             };
         }
 

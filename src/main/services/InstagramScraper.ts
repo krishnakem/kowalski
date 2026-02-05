@@ -46,6 +46,8 @@ import {
 import { NavigationLLM } from './NavigationLLM.js';
 import { NavigationExecutor } from './NavigationExecutor.js';
 import { DebugOverlay, DebugState } from './DebugOverlay.js';
+import { SessionMemory } from './SessionMemory.js';
+import { SessionSummary, StagnationEvent } from '../../types/session-memory.js';
 
 // ============================================================================
 // DEBUGGING & AUDIT TRAIL TYPES
@@ -112,6 +114,7 @@ export class InstagramScraper {
     private navigationLLM!: NavigationLLM;
     private navigationExecutor!: NavigationExecutor;
     private debugOverlay?: DebugOverlay;
+    private sessionMemory: SessionMemory = new SessionMemory();
 
     // Track current view for gaze planning
     private lastKnownView: ContentState['currentView'] = 'unknown';
@@ -141,13 +144,13 @@ export class InstagramScraper {
     /**
      * Main scraping entry point - Research Sequence.
      *
-     * Executes three phases:
-     * 1. Active Search - Search each interest, capture results
-     * 2. Story Watch - Watch available stories
-     * 3. Feed Scroll - Browse main feed
+     * [LEGACY] Hardcoded three-phase flow. Still used by SchedulerService for text-extraction pipeline.
+     * TODO: Migrate SchedulerService to browseAndCapture() + screenshot-based analysis.
+     * Once migrated, this method and all its helpers can be removed.
      *
      * @param targetMinutes - Total browsing time (human-paced), split across phases
      * @param userInterests - Topics to search for in Phase A
+     * @deprecated Use browseAndCapture() for AI-driven navigation
      */
     async scrapeFeedAndStories(
         targetMinutes: number,
@@ -331,9 +334,9 @@ export class InstagramScraper {
         this.navigator = new A11yNavigator(this.page);
         this.vision = new ContentVision(this.apiKey);
         this.screenshotCollector = new ScreenshotCollector(this.page, {
-            maxCaptures: 60,
+            maxCaptures: 150,
             jpegQuality: 85,
-            minScrollDelta: 200,
+            minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.10),
             saveToDirectory: path.join(os.homedir(), 'Documents', 'Kowalski', 'debug-screenshots')
         });
         this.contentReadiness = new ContentReadiness(this.page);
@@ -783,7 +786,7 @@ export class InstagramScraper {
 
         while (Date.now() < endTime) {
             // Check capture limit
-            if (this.screenshotCollector.getCaptureCount() >= 60) {
+            if (this.screenshotCollector.getCaptureCount() >= 150) {
                 console.log('📸 Max captures reached, stopping browse');
                 break;
             }
@@ -810,7 +813,8 @@ export class InstagramScraper {
                 // Using 20px buckets for precision (was 50px, caused duplicates)
                 // Using 100px buckets to prevent same post being "discovered" multiple times
                 // due to DOM reflow or position drift (was 20px, too small)
-                const absoluteY = Math.round((currentScrollY + post.boundingBox.y) / 100);
+                const positionBucketSize = Math.round((this.page.viewportSize()?.height || 1920) * 0.052);
+                const absoluteY = Math.round((currentScrollY + post.boundingBox.y) / positionBucketSize);
 
                 // Check if post is at least partially visible in viewport
                 const postTop = post.boundingBox.y;
@@ -831,8 +835,9 @@ export class InstagramScraper {
                 );
 
                 if (!centerResult.success) {
+                    const fallbackVh = this.page.viewportSize()?.height || 1920;
                     console.log(`  ⚠️ Centering incomplete (offset: ${Math.round(centerResult.finalOffset)}px), using fallback`);
-                    await this.scroll.scroll({ baseDistance: 350 });
+                    await this.scroll.scroll({ baseDistance: Math.round(fallbackVh * 0.18) });
                 }
 
                 // STATE-BASED READINESS: Wait for images to load instead of fixed delay
@@ -857,9 +862,10 @@ export class InstagramScraper {
                 const exploration = await this.explorePostDeeply();
 
                 // POSITION RE-VERIFICATION: Check if element drifted during exploration
+                const driftVh = this.page.viewportSize()?.height || 1920;
                 const driftCheck = await this.contentReadiness.checkElementDrift(
                     targetPost.backendNodeId,
-                    80  // tolerance: 80px (matches centering tolerance)
+                    Math.round(driftVh * 0.04)  // 4% of viewport (proportional)
                 );
 
                 if (driftCheck?.drifted) {
@@ -878,7 +884,8 @@ export class InstagramScraper {
 
                 // Human-like reading pause (varies by estimated content)
                 const postHeight = targetPost.boundingBox.height;
-                const readingTime = postHeight > 600
+                const readingVh = this.page.viewportSize()?.height || 1920;
+                const readingTime = postHeight > readingVh * 0.31
                     ? 2500 + Math.random() * 3000   // 2.5-5.5s for tall posts
                     : 1500 + Math.random() * 2000;  // 1.5-3.5s for shorter posts
 
@@ -906,9 +913,10 @@ export class InstagramScraper {
                     break;
                 }
 
+                const scrollVh = this.page.viewportSize()?.height || 1920;
                 console.log(`  📜 No new posts visible, scrolling down (attempt ${consecutiveEmpty}/${maxConsecutiveEmpty})...`);
                 await this.scroll.scrollWithIntent(this.navigator, {
-                    baseDistance: 500,
+                    baseDistance: Math.round(scrollVh * 0.26),
                     variability: 0.2,
                     microAdjustProb: 0.15
                 });
@@ -1674,16 +1682,22 @@ export class InstagramScraper {
         // Check for repeated actions (last 3 actions identical)
         const last3 = this.loopDetection.lastActions.slice(-3);
         if (last3.length === 3) {
+            // Proportional tolerances based on viewport size
+            const loopVw = this.page.viewportSize()?.width || 1080;
+            const loopVh = this.page.viewportSize()?.height || 1920;
+            const coordTolerance = Math.round(loopVw * 0.046);
+            const scrollTolerance = Math.round(loopVh * 0.026);
+
             const allSame = last3.every(a => {
                 const first = last3[0];
                 const actionMatch = a.action === first.action;
                 const coordMatch = (!a.coordinate && !first.coordinate) ||
                     (a.coordinate && first.coordinate &&
-                     Math.abs(a.coordinate.x - first.coordinate.x) < 50 &&
-                     Math.abs(a.coordinate.y - first.coordinate.y) < 50);
+                     Math.abs(a.coordinate.x - first.coordinate.x) < coordTolerance &&
+                     Math.abs(a.coordinate.y - first.coordinate.y) < coordTolerance);
                 const scrollMatch = a.scrollPosition === undefined ||
                     first.scrollPosition === undefined ||
-                    Math.abs((a.scrollPosition || 0) - (first.scrollPosition || 0)) < 50;
+                    Math.abs((a.scrollPosition || 0) - (first.scrollPosition || 0)) < scrollTolerance;
 
                 return actionMatch && coordMatch && scrollMatch;
             });
@@ -1877,9 +1891,9 @@ export class InstagramScraper {
         this.navigator = new A11yNavigator(this.page);
         this.vision = new ContentVision(this.apiKey);
         this.screenshotCollector = new ScreenshotCollector(this.page, {
-            maxCaptures: 60,
+            maxCaptures: 150,
             jpegQuality: 85,
-            minScrollDelta: 200,
+            minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.10),
             saveToDirectory: path.join(os.homedir(), 'Documents', 'Kowalski', 'debug-screenshots')
         });
         this.contentReadiness = new ContentReadiness(this.page);
@@ -1905,7 +1919,7 @@ export class InstagramScraper {
         // Default loop configuration
         // LLM has full strategic control - 5 minute default for debugging
         const loopConfig: NavigationLoopConfig = {
-            maxActions: config?.maxActions || 200,  // Higher limit - LLM controls termination
+            maxActions: config?.maxActions || 500,  // LLM controls termination via strategic decisions
             maxDurationMs: config?.maxDurationMs || 5 * 60 * 1000,  // 5 minutes default
             minPostsForCompletion: config?.minPostsForCompletion || 5,  // LLM decides actual completion
             actionDelayMs: config?.actionDelayMs || [300, 1000]  // Faster - LLM controls pacing via linger
@@ -1931,11 +1945,16 @@ export class InstagramScraper {
             console.log('🤖 AI NAVIGATION MODE ACTIVE');
             console.log('🤖 ═══════════════════════════════════════\n');
 
-            // 3. Run AI navigation loop
+            // 3. Load cross-session memory for LLM context
+            await this.sessionMemory.loadMemory();
+            const sessionMemoryDigest = this.sessionMemory.generateDigest();
+
+            // 4. Run AI navigation loop
             await this.runNavigationLoop(
                 userInterests,
                 loopConfig,
-                startTime
+                startTime,
+                sessionMemoryDigest
             );
 
         } catch (error: any) {
@@ -1982,15 +2001,16 @@ export class InstagramScraper {
     private async runNavigationLoop(
         userInterests: string[],
         config: NavigationLoopConfig,
-        startTime: number
+        startTime: number,
+        sessionMemoryDigest?: string
     ): Promise<void> {
         let actionCount = 0;
         let postsCollected = 0;
         let storiesWatched = 0;
         const interestsSearched: string[] = [];
 
-        // Phase tracking (LLM controls transitions)
-        let currentPhase: BrowsingPhase = 'search';
+        // Phase tracking (LLM controls transitions — neutral start, LLM decides approach)
+        let currentPhase: BrowsingPhase = 'feed';
         const phaseHistory: Array<{ phase: BrowsingPhase; durationMs: number; itemsCollected: number }> = [];
         let phaseStartTime = Date.now();
         let phaseItemsCollected = 0;
@@ -1999,6 +2019,12 @@ export class InstagramScraper {
         let totalPostsSeen = 0;
         const uniquePosts = new Set<string>();
         let adsSkipped = 0;
+
+        // Stagnation events (for cross-session memory)
+        const stagnationEvents: StagnationEvent[] = [];
+
+        // Loop warning tracking (LLM gets warned before auto-recovery kicks in)
+        let consecutiveLoopWarnings = 0;
 
         // Deep engagement state (LLM-controlled)
         const engagementState: EngagementState = {
@@ -2019,9 +2045,25 @@ export class InstagramScraper {
                 break;
             }
 
+            // Check loop status BEFORE LLM call (inject warning into context)
+            const loopStatus = this.navigationExecutor.isInLoop();
+            let loopWarning: NavigationContext['loopWarning'] = undefined;
+            if (loopStatus.inLoop) {
+                consecutiveLoopWarnings++;
+                const recovery = this.navigationExecutor.getRecoveryAction(loopStatus.severity);
+                loopWarning = {
+                    severity: loopStatus.severity,
+                    reason: recovery.reason,
+                    consecutiveWarnings: consecutiveLoopWarnings
+                };
+                console.log(`  ⚠️ Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity}): ${recovery.reason}`);
+            } else {
+                consecutiveLoopWarnings = 0;
+            }
+
             // Get current state
             const state = await this.navigator.getContentState();
-            const elements = await this.navigator.getNavigationElements(30);
+            const elements = await this.navigator.getNavigationElements();
 
             // Get tree summary for LLM dynamic page awareness
             const treeSummary = await this.navigator.buildTreeSummaryForLLM();
@@ -2033,13 +2075,13 @@ export class InstagramScraper {
                 targetDurationMs: config.maxDurationMs,
                 url: this.page.url(),
                 view: state.currentView,
-                currentGoal: this.getGoalForPhase(currentPhase, userInterests, interestsSearched),
+                currentGoal: this.getGoalForPhase(currentPhase, userInterests, interestsSearched, state.currentView, this.page.url()),
                 userInterests,
                 postsCollected,
                 storiesWatched,
                 interestsSearched,
                 actionsRemaining: config.maxActions - actionCount,
-                recentActions: this.navigationExecutor.getRecentActions(5),
+                recentActions: this.navigationExecutor.getRecentActions(15),
 
                 // Strategic context for LLM decision-making
                 timeRemainingMs: config.maxDurationMs - elapsed,
@@ -2061,7 +2103,17 @@ export class InstagramScraper {
                 engagementState,
 
                 // Tree summary for dynamic page awareness
-                treeSummary
+                treeSummary,
+
+                // Stagnation awareness
+                scrollPosition: await this.scroll.getScrollPosition(),
+                elementFingerprint: elements.slice(0, 25).map(e => `${e.role}:${e.name?.slice(0, 30)}`).join('|'),
+
+                // Cross-session memory
+                sessionMemoryDigest,
+
+                // Loop warning (LLM decides recovery, auto-recovery only as last resort)
+                loopWarning
             };
 
             // Get LLM decision (includes strategic decisions)
@@ -2181,18 +2233,44 @@ export class InstagramScraper {
             }
 
             if (result.success) {
-                console.log(`  ✅ Action succeeded`);
+                // Log with action type and verification status
+                if (result.verified) {
+                    const verifyLabel = result.verified === 'url_changed' ? 'URL changed'
+                        : result.verified === 'dom_changed' ? 'DOM changed'
+                        : result.verified === 'no_change_detected' ? 'no state change detected'
+                        : '';
+                    console.log(`  ✅ Action succeeded (${result.actionTaken}${verifyLabel ? ` - ${verifyLabel}` : ''})`);
+                } else {
+                    console.log(`  ✅ Action succeeded (${result.actionTaken})`);
+                }
 
-                // Track content seen
-                totalPostsSeen++;
-                const postId = `${result.resultingUrl}-${actionCount}`;
-                uniquePosts.add(postId);
+                // Track content seen - only count actual post/story views, not every action
+                const currentUrl = result.resultingUrl || '';
+                const isPostView = currentUrl.includes('/p/') || currentUrl.includes('/reel/');
+                const isStoryView = currentUrl.includes('/stories/');
+                const isCaptureAction = decision.capture?.shouldCapture || decision.strategic?.captureNow;
 
-                // Track story watching
+                if (isPostView || isStoryView || isCaptureAction) {
+                    totalPostsSeen++;
+                    const postId = this.extractPostIdFromUrl(currentUrl) || `action-${actionCount}`;
+                    uniquePosts.add(postId);
+                }
+
+                // Track story watching and profile navigation
                 const newState = await this.navigator.getContentState();
                 if (newState.currentView === 'story') {
                     storiesWatched++;
                     phaseItemsCollected++;
+                }
+
+                // Detect profile page navigation: mark interest as searched
+                // so we don't re-search the same interest in a loop
+                if (newState.currentView === 'profile') {
+                    const currentInterest = userInterests.find(i => !interestsSearched.includes(i));
+                    if (currentInterest && !interestsSearched.includes(currentInterest)) {
+                        interestsSearched.push(currentInterest);
+                        console.log(`  📍 Landed on profile — marked "${currentInterest}" as searched (${interestsSearched.length}/${userInterests.length})`);
+                    }
                 }
 
                 // LLM-driven capture: Either through capture intent OR strategic captureNow
@@ -2317,11 +2395,31 @@ export class InstagramScraper {
 
             actionCount++;
 
-            // Check for stuck/loop detection (safety net)
-            if (this.navigationExecutor.isInLoop()) {
-                console.log('  ⚠️ Loop detected, attempting recovery');
-                await this.page.keyboard.press('Escape');
+            // Last-resort auto-recovery: only if LLM failed to self-recover after 3+ warnings
+            if (consecutiveLoopWarnings >= 3) {
+                const recovery = this.navigationExecutor.getRecoveryAction(loopStatus.severity);
+                console.log(`  🚨 Auto-recovery (LLM failed to recover after ${consecutiveLoopWarnings} warnings): ${recovery.reason}`);
+
+                const scrollYBefore = await this.scroll.getScrollPosition();
+
+                if (recovery.action === 'press' && recovery.key) {
+                    await this.page.keyboard.press(recovery.key);
+                } else if (recovery.action === 'back') {
+                    await this.page.goBack({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+                } else if (recovery.action === 'navigate_home') {
+                    await this.page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+                }
                 await this.humanDelay(1000, 2000);
+                consecutiveLoopWarnings = 0;  // Reset after forced recovery
+
+                // Track stagnation event for cross-session memory
+                const scrollYAfter = await this.scroll.getScrollPosition();
+                stagnationEvents.push({
+                    scrollY: scrollYBefore,
+                    phase: currentPhase,
+                    recoveryAction: recovery.action,
+                    recoveredSuccessfully: scrollYAfter !== scrollYBefore || recovery.action === 'navigate_home'
+                });
             }
 
             // Minimal delay between actions (LLM controls pacing via linger)
@@ -2346,6 +2444,34 @@ export class InstagramScraper {
         console.log(`   Unique content ratio: ${(uniquePosts.size / Math.max(totalPostsSeen, 1) * 100).toFixed(0)}%`);
         console.log(`   Posts deeply explored: ${engagementState.deeplyExploredPostUrls.length}`);
         console.log(`   Phase history: ${phaseHistory.map(p => `${p.phase}(${(p.durationMs/1000).toFixed(0)}s)`).join(' → ')}`);
+
+        // Save cross-session memory
+        const sessionSummary: SessionSummary = {
+            id: `session-${startTime}`,
+            timestamp: startTime,
+            durationMs: Date.now() - startTime,
+            interestResults: userInterests.map(interest => {
+                const searchedAt = interestsSearched.indexOf(interest);
+                return {
+                    interest,
+                    captureCount: Math.round(postsCollected / Math.max(userInterests.length, 1)),
+                    searchTimeMs: searchedAt >= 0 ? (phaseHistory.find(p => p.phase === 'search')?.durationMs || 0) : 0,
+                    quality: (postsCollected / Math.max(userInterests.length, 1)) >= 5 ? 'high' as const
+                        : (postsCollected / Math.max(userInterests.length, 1)) >= 2 ? 'medium' as const
+                        : 'low' as const
+                };
+            }),
+            phaseBreakdown: phaseHistory.map(p => ({
+                phase: p.phase,
+                durationMs: p.durationMs,
+                capturesProduced: p.itemsCollected
+            })),
+            stagnationEvents,
+            totalCaptures: postsCollected,
+            totalActions: actionCount,
+            uniqueContentRatio: uniquePosts.size / Math.max(totalPostsSeen, 1)
+        };
+        await this.sessionMemory.saveSession(sessionSummary);
     }
 
     /**
@@ -2359,6 +2485,15 @@ export class InstagramScraper {
     }
 
     /**
+     * Extract post ID from a URL string.
+     * Matches instagram.com/p/{ID}/ or /reel/{ID}/ patterns.
+     */
+    private extractPostIdFromUrl(url: string): string | null {
+        const match = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+        return match ? match[2] : null;
+    }
+
+    /**
      * Get the navigation goal for a given phase.
      * Note: Time allocation is now fully LLM-controlled.
      * These goals provide hints but LLM decides actual duration.
@@ -2366,30 +2501,22 @@ export class InstagramScraper {
     private getGoalForPhase(
         phase: BrowsingPhase,
         userInterests: string[],
-        interestsSearched: string[]
+        interestsSearched: string[],
+        currentView?: string,
+        currentUrl?: string
     ): NavigationGoal {
-        switch (phase) {
-            case 'search':
-                // Find next unsearched interest
-                const nextInterest = userInterests.find(i => !interestsSearched.includes(i));
-                if (nextInterest) {
-                    return {
-                        type: 'search_interest',
-                        target: nextInterest
-                    };
-                }
-                // Fall through to general browse if all interests searched
-                return { type: 'general_browse' };
-
-            case 'stories':
-                return { type: 'watch_stories' };
-
-            case 'feed':
-                return { type: 'browse_feed' };
-
-            default:
-                return { type: 'general_browse' };
+        // If we're on a profile page, signal to explore it
+        // (prevents search → click → back → search loops)
+        if (currentView === 'profile') {
+            const username = this.navigator.getProfileUsername() || 'this profile';
+            return {
+                type: 'explore_profile',
+                target: username
+            };
         }
+
+        // Broad analytical goal — LLM decides approach freely
+        return { type: 'analyze_account' };
     }
 
     // NOTE: shouldTransitionPhase() and getNextPhase() removed
