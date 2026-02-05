@@ -427,12 +427,4 @@ export interface NavigationLoopConfig {
  */
 export type BrowsingPhase = 'search' | 'stories' | 'feed' | 'complete';
 
-/**
- * Phase transition information.
- */
-export interface PhaseTransition {
-    from: BrowsingPhase;
-    to: BrowsingPhase;
-    reason: 'goal_completed' | 'time_exceeded' | 'stuck' | 'manual';
-    postsCollectedInPhase: number;
-}
+

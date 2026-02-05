@@ -13,7 +13,6 @@
 import { Bezier } from 'bezier-js';
 import { Page } from 'playwright';
 import { Point, MovementConfig, BoundingBox } from '../../types/instagram.js';
-import { ease } from '../../lib/animations.js';
 
 /**
  * Control points for a cubic Bezier curve.
@@ -76,17 +75,6 @@ export class GhostMouse {
 
         this.cursorVisible = true;
         console.log('👁️ Visible cursor enabled (CSS mode)');
-    }
-
-    /**
-     * Disable visible cursor.
-     * Note: CSS cannot be easily removed, so this is a no-op.
-     * The cursor will reset on page navigation.
-     */
-    async disableVisibleCursor(): Promise<void> {
-        // CSS cursor styles persist until page reload
-        // For debug sessions this is fine
-        this.cursorVisible = false;
     }
 
     /**
@@ -476,20 +464,6 @@ export class GhostMouse {
         return new Promise(resolve => setTimeout(resolve, sessionAdjustedDelay));
     }
 
-    /**
-     * Get current mouse position.
-     */
-    getPosition(): Point {
-        return { ...this.currentPosition };
-    }
-
-    /**
-     * Set current position (for initialization or after page navigation).
-     */
-    setPosition(position: Point): void {
-        this.currentPosition = { ...position };
-    }
-
     // =========================================================================
     // Gaze-Lag Execution System (Human-like "Look, then Move")
     // =========================================================================
@@ -589,10 +563,4 @@ export class GhostMouse {
         await this.clickWithRole(clickPoint, role);
     }
 
-    /**
-     * Get the session timing multiplier (for external coordination).
-     */
-    getSessionTimingMultiplier(): number {
-        return this.sessionTimingMultiplier;
-    }
 }

@@ -66,7 +66,6 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
 
     // 2. Focus Trigger (Updates immediately when user wakes/tabs back to app)
     const onFocus = () => {
-      // console.log("👁️ App Focused: Refreshing UI time...");
       setTick(t => t + 1);
       refreshSnapshot(); // FORCE RE-FETCH from Backend
     };

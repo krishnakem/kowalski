@@ -266,15 +266,6 @@ export interface AutomationError {
     nextRetry?: string;  // Human-readable time like "9:30 AM"
 }
 
-/**
- * Insufficient content information.
- */
-export interface InsufficientContentInfo {
-    collected: number;
-    required: number;
-    reason: string;
-    nextRetry: string;
-}
 
 // ============================================================================
 // Screenshot-First Digest Types

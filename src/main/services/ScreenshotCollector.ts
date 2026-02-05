@@ -382,13 +382,6 @@ export class ScreenshotCollector {
     }
 
     /**
-     * Reset scroll tracking (useful when navigating to new context).
-     */
-    resetScrollTracking(): void {
-        this.lastScrollPosition = 0;
-    }
-
-    /**
      * Capture multiple frames during video playback.
      * Called when video content is detected. Simulates natural video watching
      * by capturing frames at intervals during the watch duration.

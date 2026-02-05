@@ -206,12 +206,4 @@ export class ChromiumVersionHelper {
         }
     }
 
-    /**
-     * Clears all cached values (useful for testing or forced refresh)
-     */
-    static clearCache(): void {
-        this.cachedVersion = null;
-        this.cachedRevision = null;
-        this.cachedUserAgent = null;
-    }
 }

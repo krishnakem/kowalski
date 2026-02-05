@@ -30,7 +30,7 @@ import {
     ClearParams,
     StrategicDecision
 } from '../../types/navigation.js';
-import { BoundingBox, Point, ContentState } from '../../types/instagram.js';
+
 import { GhostMouse } from './GhostMouse.js';
 import { HumanScroll } from './HumanScroll.js';
 import type { A11yNavigator } from './A11yNavigator.js';
@@ -626,21 +626,6 @@ export class NavigationExecutor {
     }
 
     /**
-     * Reset executor state (for new session).
-     */
-    reset(): void {
-        this.actionHistory = [];
-        this.sessionDelayMultiplier = 0.75 + Math.random() * 0.5;
-    }
-
-    /**
-     * Get action history for debugging.
-     */
-    getActionHistory(): ActionRecord[] {
-        return [...this.actionHistory];
-    }
-
-    /**
      * Execute linger duration from strategic decision.
      * This is the LLM-controlled pacing mechanism.
      *
@@ -660,14 +645,4 @@ export class NavigationExecutor {
         await new Promise(resolve => setTimeout(resolve, duration));
     }
 
-    /**
-     * Get the linger duration in milliseconds for a given level.
-     *
-     * @param level - 'short' | 'medium' | 'long'
-     * @returns Duration in milliseconds with session variance
-     */
-    getLingerDurationMs(level: 'short' | 'medium' | 'long'): number {
-        const baseDuration = LINGER_DURATIONS[level] || LINGER_DURATIONS.medium;
-        return baseDuration * this.sessionDelayMultiplier;
-    }
 }

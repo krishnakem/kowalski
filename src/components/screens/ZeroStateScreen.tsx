@@ -231,7 +231,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
     }
   };
 
-  // const webviewRef = useRef<Electron.WebviewTag>(null);
   const loginTargetRef = useRef<HTMLDivElement>(null);
   const hasLaunchedRef = useRef(false);
 

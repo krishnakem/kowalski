@@ -2,14 +2,11 @@ import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { SectionCard } from "./SectionCard";
 import { parseSection, getSectionVariant } from "@/lib/contentParser";
-import type { AnalysisObject, DigestImage, StoryHighlight } from "@/types/analysis";
+import type { AnalysisObject } from "@/types/analysis";
 
 interface DigestViewProps {
     data: AnalysisObject;
     recordId: string;
-    images?: DigestImage[];
-    featuredIds?: number[];
-    storyHighlights?: StoryHighlight[];
 }
 
 /**

@@ -603,77 +603,11 @@ export class A11yNavigator {
     }
 
     /**
-     * Find Instagram post elements (<article>) in the viewport.
-     * Used for post-centered scrolling - each screenshot should contain ONE post.
-     *
-     * Returns posts sorted by vertical position (top to bottom).
-     * Includes backendNodeId for CDP scroll-to-element operations.
-     *
-     * @returns Array of InteractiveElements representing posts with bounding boxes
-     */
-    async findPostElements(): Promise<InteractiveElement[]> {
-        const posts: InteractiveElement[] = [];
-        const nodes = await this.getAccessibilityTree();
-
-        // Instagram posts are <article> elements with role="article"
-        // They contain the post content, username, like count, etc.
-        const articleNodes = nodes.filter(node => {
-            if (node.ignored) return false;
-            const role = node.role?.value?.toLowerCase();
-            return role === 'article';
-        });
-
-        if (articleNodes.length === 0) {
-            return posts;
-        }
-
-        let cdpSession: CDPSession | null = null;
-        try {
-            cdpSession = await this.page.context().newCDPSession(this.page);
-            const viewport = await this.getViewportInfo();
-
-            for (const node of articleNodes) {
-                if (!node.backendDOMNodeId) continue;
-
-                const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
-                if (!box || box.width <= 0 || box.height <= 0) continue;
-
-                // Filter for actual post containers (not tiny nested articles)
-                // Posts are typically >200px wide and >200px tall
-                if (box.width < viewport.width * 0.05 || box.height < viewport.height * 0.05) continue;
-
-                // Only include posts within 1× viewport height margin
-                const isNearViewport = box.y < viewport.height * 2 &&
-                                       box.y + box.height > -viewport.height;
-                if (!isNearViewport) continue;
-
-                posts.push({
-                    role: 'article',
-                    name: node.name?.value || 'Post',
-                    selector: '',  // No selector - we use coordinates only
-                    boundingBox: box,
-                    backendNodeId: node.backendDOMNodeId
-                });
-            }
-        } catch (error) {
-            console.warn('Failed to get post bounding boxes:', error);
-        } finally {
-            if (cdpSession) {
-                await cdpSession.detach().catch(() => {});
-            }
-        }
-
-        // Sort by Y position (top to bottom)
-        return posts.sort((a, b) => (a.boundingBox?.y || 0) - (b.boundingBox?.y || 0));
-    }
-
-    /**
      * Find post elements with bounding boxes in a SINGLE CDP session.
      * Prevents staleness between tree query and box retrieval.
      *
      * This is the recommended method for post-centered scrolling.
-     * Unlike findPostElements(), this uses withSession() to ensure
-     * all operations happen atomically.
+     * Uses withSession() to ensure all operations happen atomically.
      *
      * @returns Posts with fresh bounding boxes from same CDP session
      */
@@ -1317,16 +1251,6 @@ export class A11yNavigator {
             );
         }
         console.log('===================================================\n');
-    }
-
-    // Legacy alias for backward compatibility
-    async findAllInteractiveElements(): Promise<InteractiveElement[]> {
-        return this.getAllInteractiveElements();
-    }
-
-    // Legacy alias for backward compatibility
-    async dumpAllButtonsForDiscovery(): Promise<void> {
-        return this.dumpInteractiveElements();
     }
 
     /**
@@ -3032,113 +2956,6 @@ export class A11yNavigator {
 
         searchMetadata(container.nodeId);
         return metadata;
-    }
-
-    /**
-     * Dump the full accessibility tree to console for debugging.
-     * Shows exactly what a screen reader would see.
-     */
-    async dumpAccessibilityTree(): Promise<void> {
-        const nodes = await this.getAccessibilityTree();
-
-        console.log('\n========== ACCESSIBILITY TREE DUMP ==========\n');
-        console.log(`Total nodes: ${nodes.length}\n`);
-
-        // Group by role for easier reading
-        const byRole = new Map<string, CDPAXNode[]>();
-        for (const node of nodes) {
-            if (node.ignored) continue;
-            const role = node.role?.value || 'unknown';
-            if (!byRole.has(role)) {
-                byRole.set(role, []);
-            }
-            byRole.get(role)!.push(node);
-        }
-
-        // Print summary by role
-        console.log('=== SUMMARY BY ROLE ===');
-        for (const [role, roleNodes] of byRole.entries()) {
-            console.log(`  ${role}: ${roleNodes.length} elements`);
-        }
-
-        // Print details for interactive elements
-        console.log('\n=== INTERACTIVE ELEMENTS ===');
-        const interactiveRoles = ['button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'menuitem'];
-        for (const role of interactiveRoles) {
-            const roleNodes = byRole.get(role) || [];
-            if (roleNodes.length > 0) {
-                console.log(`\n[${role.toUpperCase()}] (${roleNodes.length} found)`);
-                for (const node of roleNodes.slice(0, 20)) { // Limit to 20 for readability
-                    const name = node.name?.value || '[no name]';
-                    const hasBox = !!node.backendDOMNodeId;
-                    console.log(`  • "${name.slice(0, 50)}${name.length > 50 ? '...' : ''}" ${hasBox ? '✓' : '✗'}`);
-                }
-                if (roleNodes.length > 20) {
-                    console.log(`  ... and ${roleNodes.length - 20} more`);
-                }
-            }
-        }
-
-        console.log('\n========== END DUMP ==========\n');
-    }
-
-    /**
-     * Draw a simple marker at a specific point (for debugging click locations).
-     *
-     * @param point - Point to mark
-     * @param color - CSS color for the marker
-     * @param label - Optional label text
-     */
-    async drawPointMarker(
-        point: { x: number; y: number },
-        color: string = 'yellow',
-        label?: string
-    ): Promise<void> {
-        try {
-            await this.page.evaluate(({ x, y, markerColor, markerLabel }) => {
-                const marker = document.createElement('div');
-                marker.style.cssText = `
-                    position: fixed;
-                    left: ${x - 8}px;
-                    top: ${y - 8}px;
-                    width: 16px;
-                    height: 16px;
-                    border: 2px solid ${markerColor};
-                    border-radius: 50%;
-                    background: rgba(255, 255, 0, 0.3);
-                    pointer-events: none;
-                    z-index: 999998;
-                `;
-
-                if (markerLabel) {
-                    const labelEl = document.createElement('div');
-                    labelEl.style.cssText = `
-                        position: fixed;
-                        left: ${x + 12}px;
-                        top: ${y - 8}px;
-                        background: rgba(0, 0, 0, 0.8);
-                        color: ${markerColor};
-                        padding: 2px 4px;
-                        border-radius: 2px;
-                        font-size: 10px;
-                        font-family: monospace;
-                        pointer-events: none;
-                        z-index: 999998;
-                    `;
-                    labelEl.textContent = markerLabel;
-                    document.body.appendChild(labelEl);
-
-                    setTimeout(() => labelEl.remove(), 1500);
-                }
-
-                document.body.appendChild(marker);
-                setTimeout(() => marker.remove(), 1500);
-
-            }, { x: point.x, y: point.y, markerColor: color, markerLabel: label });
-
-        } catch {
-            // Silently fail
-        }
     }
 
     // =========================================================================

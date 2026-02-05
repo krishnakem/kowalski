@@ -6,13 +6,11 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useSettings } from "@/hooks/useSettings";
-// import { useFromScreen } from "@/hooks/useFromScreen"; // Unused
 import SettingsLayout from "@/components/layouts/SettingsLayout";
 import { InstagramConnectModal } from "@/components/modals/InstagramConnectModal";
 
 const PersonalSettings = () => {
   const navigate = useNavigate();
-  // const { navigateBack } = useFromScreen();
   const { settings, isLoaded, patchSettings } = useSettings();
 
   const [editName, setEditName] = useState("");

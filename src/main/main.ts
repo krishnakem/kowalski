@@ -200,12 +200,6 @@ app.on('ready', () => {
 
   createWindow();
 
-  // Fresh Start Logic - DISABLED
-  // We now persist session.json to keep Instagram logged in.
-  // const userDataPath = app.getPath('userData');
-  // ...
-  console.log('Session persistence enabled.');
-
   console.log('Session persistence enabled.');
 
   // Initialize Usage Service (Checks for monthly reset)

@@ -198,14 +198,6 @@ var ChromiumVersionHelper = class {
       );
     }
   }
-  /**
-   * Clears all cached values (useful for testing or forced refresh)
-   */
-  static clearCache() {
-    this.cachedVersion = null;
-    this.cachedRevision = null;
-    this.cachedUserAgent = null;
-  }
 };
 
 // src/main/services/BrowserManager.ts
@@ -266,7 +258,9 @@ var BrowserManager = class _BrowserManager {
         extraArgs.push(`--window-position=${config.bounds.x},${config.bounds.y}`);
         extraArgs.push(`--window-size=${config.bounds.width},${config.bounds.height}`);
       } else {
-        extraArgs.push("--window-size=1080,1920");
+        const windowSize = _BrowserManager.generateWindowSize(config.headless);
+        extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
+        console.log(`\u{1F4D0} BrowserManager: Window size ${windowSize.width}x${windowSize.height} (headless=${config.headless})`);
       }
       const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
       console.log("\u{1F50D} DEBUG: Custom executable path:", customExecutablePath);
@@ -341,6 +335,22 @@ var BrowserManager = class _BrowserManager {
           return getParameterProto2.call(this, parameter);
         };
       }, selectedGpu);
+      try {
+        const pages = this.browserContext.pages();
+        const verifyPage = pages.length > 0 ? pages[0] : await this.browserContext.newPage();
+        const actualViewport = await verifyPage.evaluate(() => ({
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          outerWidth: window.outerWidth,
+          outerHeight: window.outerHeight,
+          devicePixelRatio: window.devicePixelRatio
+        })).catch(() => null);
+        if (actualViewport) {
+          console.log(`\u{1F4D0} BrowserManager: Actual viewport: ${actualViewport.innerWidth}x${actualViewport.innerHeight} (outer: ${actualViewport.outerWidth}x${actualViewport.outerHeight}, DPR: ${actualViewport.devicePixelRatio})`);
+        }
+      } catch (viewportErr) {
+        console.warn("\u{1F4D0} Could not verify viewport:", viewportErr);
+      }
       try {
         const sessionPath = import_path2.default.join(userDataPath, "session.json");
         if (import_fs2.default.existsSync(sessionPath)) {
@@ -503,6 +513,37 @@ var BrowserManager = class _BrowserManager {
       console.error("\u274C Session validation error:", error.message);
       return { valid: false, reason: error.message };
     }
+  }
+  // =========================================================================
+  // Window Size Randomization
+  // =========================================================================
+  /**
+   * Generate randomized window dimensions per session for fingerprint diversity.
+   * Derives from actual screen size with random 70-92% scaling.
+   */
+  static generateWindowSize(headless) {
+    let screenWidth;
+    let screenHeight;
+    if (headless) {
+      screenWidth = 1920;
+      screenHeight = 1080;
+    } else {
+      try {
+        const workArea = import_electron2.screen.getPrimaryDisplay().workAreaSize;
+        screenWidth = workArea.width;
+        screenHeight = workArea.height;
+      } catch {
+        screenWidth = 1920;
+        screenHeight = 1080;
+      }
+    }
+    const widthRatio = 0.7 + Math.random() * 0.22;
+    const heightRatio = 0.7 + Math.random() * 0.22;
+    let width = Math.round(screenWidth * widthRatio);
+    let height = Math.round(screenHeight * heightRatio);
+    width = Math.max(width, 1024);
+    height = Math.max(height, 700);
+    return { width, height };
   }
   // =========================================================================
   // CDP-Based Login Detection (Undetectable)
@@ -755,13 +796,6 @@ var UsageService = class _UsageService {
     return current + estimatedCost >= cap;
   }
   /**
-   * Returns current usage data.
-   */
-  async getUsage() {
-    const store = await this.getStore();
-    return store.get("usageData") || { currentMonthSpend: 0, lastResetDate: (/* @__PURE__ */ new Date()).toISOString() };
-  }
-  /**
    * Returns remaining budget and estimated API calls available.
    * Used for smart session planning.
    */
@@ -788,81 +822,6 @@ var import_electron5 = require("electron");
 var import_fs4 = __toESM(require("fs"), 1);
 var import_path4 = __toESM(require("path"), 1);
 var import_child_process = require("child_process");
-
-// src/main/services/LoremIpsumGenerator.ts
-var LoremIpsumGenerator = class {
-  static TITLES = [
-    "The Digital Frontier",
-    "Silicon Valley Morning",
-    "The Cupertino Dispatch",
-    "Tech & Culture Weekly",
-    "The Midnight Protocol",
-    "Future Tense",
-    "The Analog Revival"
-  ];
-  static SUBTITLES = [
-    "Exploring the intersection of humanity and algorithms.",
-    "A deep dive into the week's events and their impact.",
-    "Why the next big thing might be smaller than you think.",
-    "Reflections on privacy, connection, and the digital self.",
-    "Navigating the noise of the information age."
-  ];
-  static HEADINGS = [
-    "The AI Revolution",
-    "Market Shifts",
-    "Global Perspectives",
-    "Design Patterns",
-    "Community & Core",
-    "The New Normal",
-    "Sustainable Futures"
-  ];
-  static PARAGRAPHS = [
-    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-    "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
-    "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.",
-    "At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.",
-    "Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est, omnis dolor repellendus."
-  ];
-  static getRandom(array) {
-    return array[Math.floor(Math.random() * array.length)];
-  }
-  static generateSection() {
-    const numParagraphs = Math.floor(Math.random() * 3) + 1;
-    const content = [];
-    for (let i = 0; i < numParagraphs; i++) {
-      content.push(this.getRandom(this.PARAGRAPHS));
-    }
-    return {
-      heading: this.getRandom(this.HEADINGS),
-      content
-    };
-  }
-  static generate(options) {
-    const numSections = Math.floor(Math.random() * 2) + 2;
-    const sections = [];
-    for (let i = 0; i < numSections; i++) {
-      sections.push(this.generateSection());
-    }
-    const date = options?.targetDate ? new Date(options.targetDate) : /* @__PURE__ */ new Date();
-    const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
-    let title = `The ${dayName} Analysis`;
-    if (options?.userName && options.userName.trim().length > 0) {
-      const name = options.userName.trim();
-      title = `${name}'s ${dayName} Analysis`;
-    }
-    const location = options?.location || "";
-    return {
-      title,
-      subtitle: this.getRandom(this.SUBTITLES),
-      date: date.toISOString(),
-      location,
-      scheduledTime: options?.scheduledTime || "8:00 AM",
-      sections
-    };
-  }
-};
-
-// src/main/services/SchedulerService.ts
 var import_uuid = require("uuid");
 
 // node_modules/bezier-js/src/utils.js
@@ -2134,7 +2093,7 @@ var Bezier = class _Bezier {
       }
       return s;
     }).reverse();
-    const fs8 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils.makeline(bs, fs8), le = utils.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
+    const fs7 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils.makeline(bs, fs7), le = utils.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
     return new PolyBezier(segments);
   }
   outlineshapes(d1, d2, curveIntersectionThreshold) {
@@ -2278,11 +2237,19 @@ var GhostMouse = class {
   sessionJitterMultiplier;
   // Session-level hesitation probability (3-7% per session, not fixed 5%)
   sessionHesitationProb;
+  // Cached viewport width for proportional calculations
+  _viewportWidth = 0;
   constructor(page) {
     this.page = page;
     this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
     this.sessionJitterMultiplier = 0.6 + Math.random() * 0.8;
     this.sessionHesitationProb = 0.03 + Math.random() * 0.04;
+  }
+  /** Get viewport width, cached per session for proportional calculations. */
+  async getViewportWidth() {
+    if (this._viewportWidth > 0) return this._viewportWidth;
+    this._viewportWidth = await this.page.evaluate(() => window.innerWidth).catch(() => 1080);
+    return this._viewportWidth;
   }
   /**
    * Enable visible cursor for debugging.
@@ -2302,14 +2269,6 @@ var GhostMouse = class {
     console.log("\u{1F441}\uFE0F Visible cursor enabled (CSS mode)");
   }
   /**
-   * Disable visible cursor.
-   * Note: CSS cannot be easily removed, so this is a no-op.
-   * The cursor will reset on page navigation.
-   */
-  async disableVisibleCursor() {
-    this.cursorVisible = false;
-  }
-  /**
    * Update the visible cursor position.
    * With CSS cursor mode, no update needed - cursor follows mouse automatically.
    */
@@ -2320,11 +2279,12 @@ var GhostMouse = class {
    * Includes variable velocity (acceleration/deceleration).
    */
   async moveTo(target, config = {}) {
+    const vw = await this.getViewportWidth();
     const {
       minSpeed = 2,
       maxSpeed = 8,
       overshootProbability = 0.15,
-      jitterAmount = 2
+      jitterAmount = Math.max(1, Math.round(vw * 2e-3))
     } = config;
     const movementDistance = Math.hypot(
       target.x - this.currentPosition.x,
@@ -2453,7 +2413,8 @@ var GhostMouse = class {
    * @param movementDistance - Distance traveled to reach target (affects overshoot magnitude)
    */
   async overshootAndCorrect(target, movementDistance = 100) {
-    const baseOvershoot = Math.min(30, Math.max(5, movementDistance * 0.08));
+    const vw = await this.getViewportWidth();
+    const baseOvershoot = Math.min(vw * 0.028, Math.max(vw * 5e-3, movementDistance * 0.08));
     const overshootAmount = baseOvershoot * (0.5 + Math.random());
     const overshootAngle = Math.random() * Math.PI * 2;
     const overshoot = {
@@ -2463,9 +2424,10 @@ var GhostMouse = class {
     await this.page.mouse.move(overshoot.x, overshoot.y);
     await this.updateVisibleCursor(overshoot.x, overshoot.y);
     await this.microDelay(50, 180);
+    const correctionOffset = vw * 7e-3;
     const midpoint = {
-      x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * 8,
-      y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * 8
+      x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * correctionOffset,
+      y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * correctionOffset
     };
     await this.page.mouse.move(midpoint.x, midpoint.y);
     await this.updateVisibleCursor(midpoint.x, midpoint.y);
@@ -2498,9 +2460,10 @@ var GhostMouse = class {
     let elapsed = 0;
     while (elapsed < jitterDuration) {
       await this.microDelay(jitterInterval * 0.8, jitterInterval * 1.2);
+      const hoverJitter = await this.getViewportWidth() * 3e-3;
       const microMove = {
-        x: target.x + (Math.random() - 0.5) * 3,
-        y: target.y + (Math.random() - 0.5) * 3
+        x: target.x + (Math.random() - 0.5) * hoverJitter,
+        y: target.y + (Math.random() - 0.5) * hoverJitter
       };
       await this.page.mouse.move(microMove.x, microMove.y);
       elapsed += jitterInterval;
@@ -2523,13 +2486,15 @@ var GhostMouse = class {
       x: boundingBox.x + offsetX,
       y: boundingBox.y + offsetY
     };
+    const marginX = Math.max(2, boundingBox.width * 0.05);
+    const marginY = Math.max(2, boundingBox.height * 0.05);
     hoverPoint.x = Math.max(
-      boundingBox.x + 5,
-      Math.min(hoverPoint.x, boundingBox.x + boundingBox.width - 5)
+      boundingBox.x + marginX,
+      Math.min(hoverPoint.x, boundingBox.x + boundingBox.width - marginX)
     );
     hoverPoint.y = Math.max(
-      boundingBox.y + 5,
-      Math.min(hoverPoint.y, boundingBox.y + boundingBox.height - 5)
+      boundingBox.y + marginY,
+      Math.min(hoverPoint.y, boundingBox.y + boundingBox.height - marginY)
     );
     await this.hover(hoverPoint, durationMs);
   }
@@ -2548,13 +2513,15 @@ var GhostMouse = class {
       x: boundingBox.x + offsetX,
       y: boundingBox.y + offsetY
     };
+    const marginX = Math.max(2, boundingBox.width * 0.05);
+    const marginY = Math.max(2, boundingBox.height * 0.05);
     clickPoint.x = Math.max(
-      boundingBox.x + 5,
-      Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
+      boundingBox.x + marginX,
+      Math.min(clickPoint.x, boundingBox.x + boundingBox.width - marginX)
     );
     clickPoint.y = Math.max(
-      boundingBox.y + 5,
-      Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
+      boundingBox.y + marginY,
+      Math.min(clickPoint.y, boundingBox.y + boundingBox.height - marginY)
     );
     await this.click(clickPoint);
   }
@@ -2590,18 +2557,6 @@ var GhostMouse = class {
     const baseDelay = min2 + Math.random() * (max2 - min2);
     const sessionAdjustedDelay = baseDelay * this.sessionTimingMultiplier;
     return new Promise((resolve) => setTimeout(resolve, sessionAdjustedDelay));
-  }
-  /**
-   * Get current mouse position.
-   */
-  getPosition() {
-    return { ...this.currentPosition };
-  }
-  /**
-   * Set current position (for initialization or after page navigation).
-   */
-  setPosition(position) {
-    this.currentPosition = { ...position };
   }
   // =========================================================================
   // Gaze-Lag Execution System (Human-like "Look, then Move")
@@ -2679,21 +2634,17 @@ var GhostMouse = class {
       x: boundingBox.x + offsetX,
       y: boundingBox.y + offsetY
     };
+    const marginX = Math.max(2, boundingBox.width * 0.05);
+    const marginY = Math.max(2, boundingBox.height * 0.05);
     clickPoint.x = Math.max(
-      boundingBox.x + 5,
-      Math.min(clickPoint.x, boundingBox.x + boundingBox.width - 5)
+      boundingBox.x + marginX,
+      Math.min(clickPoint.x, boundingBox.x + boundingBox.width - marginX)
     );
     clickPoint.y = Math.max(
-      boundingBox.y + 5,
-      Math.min(clickPoint.y, boundingBox.y + boundingBox.height - 5)
+      boundingBox.y + marginY,
+      Math.min(clickPoint.y, boundingBox.y + boundingBox.height - marginY)
     );
     await this.clickWithRole(clickPoint, role);
-  }
-  /**
-   * Get the session timing multiplier (for external coordination).
-   */
-  getSessionTimingMultiplier() {
-    return this.sessionTimingMultiplier;
   }
 };
 
@@ -2702,9 +2653,21 @@ var HumanScroll = class {
   page;
   // Session-level timing multiplier for cross-session variance
   sessionTimingMultiplier;
+  // Cached viewport height for proportional calculations (avoids repeated CDP calls)
+  cachedViewportHeight = 0;
   constructor(page) {
     this.page = page;
     this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
+  }
+  /**
+   * Get viewport height, using cache to avoid repeated CDP calls.
+   * Refreshes once per scroll operation.
+   */
+  async getViewportHeight() {
+    if (this.cachedViewportHeight > 0) return this.cachedViewportHeight;
+    const vh = await this.cdpEvaluate("window.innerHeight");
+    this.cachedViewportHeight = vh || 1920;
+    return this.cachedViewportHeight;
   }
   /**
    * Randomized value within a range - NO fixed values allowed.
@@ -2767,8 +2730,10 @@ var HumanScroll = class {
    * - Reading pauses
    */
   async scroll(config = {}) {
+    this.cachedViewportHeight = 0;
+    const vh = await this.getViewportHeight();
     const {
-      baseDistance = 400,
+      baseDistance = Math.round(vh * 0.4),
       variability = 0.3,
       microAdjustProb = 0.25,
       readingPauseMs = [2e3, 5e3]
@@ -2812,7 +2777,8 @@ var HumanScroll = class {
    * we overshoot, then scroll back to find what we want.
    */
   async microAdjust() {
-    const overshoot = 50 + Math.random() * 100;
+    const vh = await this.getViewportHeight();
+    const overshoot = vh * 0.05 + Math.random() * vh * 0.1;
     await this.page.mouse.wheel(0, overshoot);
     await new Promise((resolve) => setTimeout(resolve, 200 + Math.random() * 300));
     const correction = overshoot * (0.8 + Math.random() * 0.4);
@@ -2838,7 +2804,7 @@ var HumanScroll = class {
       const elementCenter = box.y + box.height / 2;
       const viewportCenter = viewportHeight / 2;
       const scrollNeeded = elementCenter - viewportCenter;
-      if (Math.abs(scrollNeeded) > 50) {
+      if (Math.abs(scrollNeeded) > viewportHeight * 0.05) {
         await this.preciseScroll(scrollNeeded);
       }
       return true;
@@ -2862,7 +2828,11 @@ var HumanScroll = class {
    * @returns Object with success status and final offset from center
    */
   async scrollToElementCentered(backendNodeId, maxRetries = 2) {
-    const TOLERANCE = 80 + Math.random() * 40;
+    const vh = await this.cdpEvaluate("window.innerHeight");
+    if (!vh) {
+      return { success: false, finalOffset: Infinity };
+    }
+    const TOLERANCE = vh * 0.08 + Math.random() * vh * 0.04;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       let cdpSession = null;
       try {
@@ -2871,10 +2841,7 @@ var HumanScroll = class {
         if (!box) {
           return { success: false, finalOffset: Infinity };
         }
-        const viewportHeight = await this.cdpEvaluate("window.innerHeight");
-        if (!viewportHeight) {
-          return { success: false, finalOffset: Infinity };
-        }
+        const viewportHeight = vh;
         const elementCenterY = box.y + box.height / 2;
         const viewportCenterY = viewportHeight / 2;
         const offset = elementCenterY - viewportCenterY;
@@ -2981,12 +2948,13 @@ var HumanScroll = class {
    * Check if we're near the bottom of the page via CDP (undetectable).
    * Useful for detecting "infinite scroll loaded more content".
    */
-  async isNearBottom(threshold = 200) {
+  async isNearBottom(threshold) {
+    const effectiveThreshold = threshold ?? Math.round(await this.getViewportHeight() * 0.2);
     const result = await this.cdpEvaluate(`(function() {
             const scrollTop = window.scrollY;
             const scrollHeight = document.documentElement.scrollHeight;
             const clientHeight = window.innerHeight;
-            return scrollTop + clientHeight >= scrollHeight - ${threshold};
+            return scrollTop + clientHeight >= scrollHeight - ${effectiveThreshold};
         })()`);
     return result ?? false;
   }
@@ -3011,25 +2979,23 @@ var HumanScroll = class {
    *
    * All values are randomized within ranges - NO fixed values.
    */
-  getScrollParamsForContent(contentType) {
+  async getScrollParamsForContent(contentType) {
+    const vh = await this.getViewportHeight();
     const params = {
       "text-heavy": {
-        distance: [200, 300],
-        // Smaller scrolls for reading
+        distance: [vh * 0.2, vh * 0.3],
+        // 20-30% of viewport for reading
         pause: [3e3, 6e3]
-        // Longer pauses to read
       },
       "image-heavy": {
-        distance: [500, 700],
-        // Larger scrolls for visual scanning
+        distance: [vh * 0.5, vh * 0.7],
+        // 50-70% of viewport for visual scanning
         pause: [1500, 3e3]
-        // Shorter pauses (quick visual scan)
       },
       "mixed": {
-        distance: [350, 450],
-        // Balanced scrolls
+        distance: [vh * 0.35, vh * 0.45],
+        // 35-45% of viewport balanced
         pause: [2e3, 5e3]
-        // Moderate pauses
       }
     };
     const { distance, pause } = params[contentType];
@@ -3056,7 +3022,7 @@ var HumanScroll = class {
   async scrollWithIntent(navigator, config = {}) {
     const contentDensity = await navigator.analyzeContentDensity();
     const contentType = contentDensity.type;
-    const adaptiveParams = this.getScrollParamsForContent(contentType);
+    const adaptiveParams = await this.getScrollParamsForContent(contentType);
     const {
       baseDistance = adaptiveParams.distance,
       variability = 0.3,
@@ -3092,34 +3058,6 @@ var HumanScroll = class {
       actualDelta,
       scrollFailed
     };
-  }
-  /**
-   * Multiple intent-driven scrolls with cumulative content analysis.
-   * Useful for browsing sessions where content type may change.
-   *
-   * @param navigator - A11yNavigator instance for content analysis
-   * @param count - Number of scrolls to perform
-   * @param config - Optional scroll configuration overrides
-   */
-  async scrollMultipleWithIntent(navigator, count, config = {}) {
-    const contentTypes = [];
-    let totalDistance = 0;
-    for (let i = 0; i < count; i++) {
-      const result = await this.scrollWithIntent(navigator, config);
-      contentTypes.push(result.contentType);
-      totalDistance += result.scrollDistance;
-    }
-    return {
-      scrollCount: count,
-      contentTypes,
-      totalDistance
-    };
-  }
-  /**
-   * Get the session timing multiplier (for external coordination).
-   */
-  getSessionTimingMultiplier() {
-    return this.sessionTimingMultiplier;
   }
 };
 
@@ -3528,62 +3466,11 @@ var A11yNavigator = class {
     return stories;
   }
   /**
-   * Find Instagram post elements (<article>) in the viewport.
-   * Used for post-centered scrolling - each screenshot should contain ONE post.
-   *
-   * Returns posts sorted by vertical position (top to bottom).
-   * Includes backendNodeId for CDP scroll-to-element operations.
-   *
-   * @returns Array of InteractiveElements representing posts with bounding boxes
-   */
-  async findPostElements() {
-    const posts = [];
-    const nodes = await this.getAccessibilityTree();
-    const articleNodes = nodes.filter((node) => {
-      if (node.ignored) return false;
-      const role = node.role?.value?.toLowerCase();
-      return role === "article";
-    });
-    if (articleNodes.length === 0) {
-      return posts;
-    }
-    let cdpSession = null;
-    try {
-      cdpSession = await this.page.context().newCDPSession(this.page);
-      const viewport = await this.getViewportInfo();
-      for (const node of articleNodes) {
-        if (!node.backendDOMNodeId) continue;
-        const box = await this.getNodeBoundingBox(cdpSession, node.backendDOMNodeId);
-        if (!box || box.width <= 0 || box.height <= 0) continue;
-        if (box.width < viewport.width * 0.05 || box.height < viewport.height * 0.05) continue;
-        const isNearViewport = box.y < viewport.height * 2 && box.y + box.height > -viewport.height;
-        if (!isNearViewport) continue;
-        posts.push({
-          role: "article",
-          name: node.name?.value || "Post",
-          selector: "",
-          // No selector - we use coordinates only
-          boundingBox: box,
-          backendNodeId: node.backendDOMNodeId
-        });
-      }
-    } catch (error) {
-      console.warn("Failed to get post bounding boxes:", error);
-    } finally {
-      if (cdpSession) {
-        await cdpSession.detach().catch(() => {
-        });
-      }
-    }
-    return posts.sort((a, b) => (a.boundingBox?.y || 0) - (b.boundingBox?.y || 0));
-  }
-  /**
    * Find post elements with bounding boxes in a SINGLE CDP session.
    * Prevents staleness between tree query and box retrieval.
    *
    * This is the recommended method for post-centered scrolling.
-   * Unlike findPostElements(), this uses withSession() to ensure
-   * all operations happen atomically.
+   * Uses withSession() to ensure all operations happen atomically.
    *
    * @returns Posts with fresh bounding boxes from same CDP session
    */
@@ -4101,14 +3988,6 @@ var A11yNavigator = class {
     }
     console.log("===================================================\n");
   }
-  // Legacy alias for backward compatibility
-  async findAllInteractiveElements() {
-    return this.getAllInteractiveElements();
-  }
-  // Legacy alias for backward compatibility
-  async dumpAllButtonsForDiscovery() {
-    return this.dumpInteractiveElements();
-  }
   /**
    * Detect if current viewport contains video content.
    * Uses STRICT criteria to avoid false positives on stories.
@@ -4328,7 +4207,8 @@ var A11yNavigator = class {
           const buttonCenterX = box.x + box.width / 2;
           const buttonCenterY = box.y + box.height / 2;
           const inRightZone = buttonCenterX >= rightZoneStart && buttonCenterX <= rightZoneEnd;
-          const inVerticalBounds = buttonCenterY >= contentArea.y - 20 && buttonCenterY <= contentArea.y + contentArea.height + 20;
+          const verticalTolerance = contentArea.height * 0.05;
+          const inVerticalBounds = buttonCenterY >= contentArea.y - verticalTolerance && buttonCenterY <= contentArea.y + contentArea.height + verticalTolerance;
           return inRightZone && inVerticalBounds;
         }).sort((a, b) => b.boundingBox.x - a.boundingBox.x);
         if (rightButtons.length > 0) {
@@ -4343,7 +4223,8 @@ var A11yNavigator = class {
           const buttonCenterX = box.x + box.width / 2;
           const buttonCenterY = box.y + box.height / 2;
           const inLeftZone = buttonCenterX >= leftZoneStart && buttonCenterX <= leftZoneEnd;
-          const inVerticalBounds = buttonCenterY >= contentArea.y - 20 && buttonCenterY <= contentArea.y + contentArea.height + 20;
+          const verticalTolerance = contentArea.height * 0.05;
+          const inVerticalBounds = buttonCenterY >= contentArea.y - verticalTolerance && buttonCenterY <= contentArea.y + contentArea.height + verticalTolerance;
           return inLeftZone && inVerticalBounds;
         }).sort((a, b) => a.boundingBox.x - b.boundingBox.x);
         if (leftButtons.length > 0) {
@@ -4416,8 +4297,9 @@ var A11yNavigator = class {
    */
   async findCarouselControls() {
     const elements = await this.getAllInteractiveElements();
+    const viewport = await this.getViewportInfo();
     const imageElements = elements.filter(
-      (el) => (el.role === "img" || el.role === "figure" || el.role === "graphic") && el.boundingBox && el.boundingBox.width > 100
+      (el) => (el.role === "img" || el.role === "figure" || el.role === "graphic") && el.boundingBox && el.boundingBox.width > viewport.width * 0.09
     );
     let mainImage;
     let maxArea = 0;
@@ -5382,95 +5264,6 @@ var A11yNavigator = class {
     searchMetadata(container.nodeId);
     return metadata;
   }
-  /**
-   * Dump the full accessibility tree to console for debugging.
-   * Shows exactly what a screen reader would see.
-   */
-  async dumpAccessibilityTree() {
-    const nodes = await this.getAccessibilityTree();
-    console.log("\n========== ACCESSIBILITY TREE DUMP ==========\n");
-    console.log(`Total nodes: ${nodes.length}
-`);
-    const byRole = /* @__PURE__ */ new Map();
-    for (const node of nodes) {
-      if (node.ignored) continue;
-      const role = node.role?.value || "unknown";
-      if (!byRole.has(role)) {
-        byRole.set(role, []);
-      }
-      byRole.get(role).push(node);
-    }
-    console.log("=== SUMMARY BY ROLE ===");
-    for (const [role, roleNodes] of byRole.entries()) {
-      console.log(`  ${role}: ${roleNodes.length} elements`);
-    }
-    console.log("\n=== INTERACTIVE ELEMENTS ===");
-    const interactiveRoles = ["button", "link", "textbox", "searchbox", "checkbox", "radio", "menuitem"];
-    for (const role of interactiveRoles) {
-      const roleNodes = byRole.get(role) || [];
-      if (roleNodes.length > 0) {
-        console.log(`
-[${role.toUpperCase()}] (${roleNodes.length} found)`);
-        for (const node of roleNodes.slice(0, 20)) {
-          const name = node.name?.value || "[no name]";
-          const hasBox = !!node.backendDOMNodeId;
-          console.log(`  \u2022 "${name.slice(0, 50)}${name.length > 50 ? "..." : ""}" ${hasBox ? "\u2713" : "\u2717"}`);
-        }
-        if (roleNodes.length > 20) {
-          console.log(`  ... and ${roleNodes.length - 20} more`);
-        }
-      }
-    }
-    console.log("\n========== END DUMP ==========\n");
-  }
-  /**
-   * Draw a simple marker at a specific point (for debugging click locations).
-   *
-   * @param point - Point to mark
-   * @param color - CSS color for the marker
-   * @param label - Optional label text
-   */
-  async drawPointMarker(point, color = "yellow", label) {
-    try {
-      await this.page.evaluate(({ x, y, markerColor, markerLabel }) => {
-        const marker = document.createElement("div");
-        marker.style.cssText = `
-                    position: fixed;
-                    left: ${x - 8}px;
-                    top: ${y - 8}px;
-                    width: 16px;
-                    height: 16px;
-                    border: 2px solid ${markerColor};
-                    border-radius: 50%;
-                    background: rgba(255, 255, 0, 0.3);
-                    pointer-events: none;
-                    z-index: 999998;
-                `;
-        if (markerLabel) {
-          const labelEl = document.createElement("div");
-          labelEl.style.cssText = `
-                        position: fixed;
-                        left: ${x + 12}px;
-                        top: ${y - 8}px;
-                        background: rgba(0, 0, 0, 0.8);
-                        color: ${markerColor};
-                        padding: 2px 4px;
-                        border-radius: 2px;
-                        font-size: 10px;
-                        font-family: monospace;
-                        pointer-events: none;
-                        z-index: 999998;
-                    `;
-          labelEl.textContent = markerLabel;
-          document.body.appendChild(labelEl);
-          setTimeout(() => labelEl.remove(), 1500);
-        }
-        document.body.appendChild(marker);
-        setTimeout(() => marker.remove(), 1500);
-      }, { x: point.x, y: point.y, markerColor: color, markerLabel: label });
-    } catch {
-    }
-  }
   // =========================================================================
   // AI NAVIGATION SUPPORT (NavigationLLM Integration)
   // =========================================================================
@@ -6040,12 +5833,14 @@ var DEFAULT_CONFIG = {
   minScrollDelta: 100
   // Must scroll at least 100px for new capture
 };
-var STORY_CROP_CONFIG = {
-  topMargin: 65,
-  // Crop out progress bar and header
-  bottomMargin: 70
-  // Crop out reply box
-};
+function getStoryCropMargins(viewportHeight) {
+  return {
+    topMargin: Math.round(viewportHeight * 0.034),
+    // ~3.4% of viewport
+    bottomMargin: Math.round(viewportHeight * 0.036)
+    // ~3.6% of viewport
+  };
+}
 var ScreenshotCollector = class {
   page;
   captures = [];
@@ -6107,7 +5902,9 @@ var ScreenshotCollector = class {
       console.log(`\u{1F4F8} Skipping duplicate post: ${postId}`);
       return false;
     }
-    const positionBucket = Math.round(scrollPosition / 75);
+    const vpSize = this.page.viewportSize();
+    const bucketSize = vpSize ? Math.round(vpSize.height * 0.078) : 75;
+    const positionBucket = Math.round(scrollPosition / bucketSize);
     if (source !== "carousel" && source !== "story" && this.capturedPositions.has(positionBucket)) {
       console.log(`\u{1F4F8} Skipping duplicate position: bucket ${positionBucket} (scroll ~${scrollPosition}px)`);
       return false;
@@ -6120,19 +5917,19 @@ var ScreenshotCollector = class {
       const viewport = this.page.viewportSize();
       let screenshot;
       if (source === "story" && viewport) {
-        const clipHeight = viewport.height - STORY_CROP_CONFIG.topMargin - STORY_CROP_CONFIG.bottomMargin;
+        const storyCrop = getStoryCropMargins(viewport.height);
+        const clipHeight = viewport.height - storyCrop.topMargin - storyCrop.bottomMargin;
         screenshot = await this.page.screenshot({
           type: "jpeg",
           quality: this.config.jpegQuality,
           clip: {
             x: 0,
-            y: STORY_CROP_CONFIG.topMargin,
+            y: storyCrop.topMargin,
             width: viewport.width,
-            height: Math.max(clipHeight, 100)
-            // Ensure minimum height
+            height: Math.max(clipHeight, Math.round(viewport.height * 0.05))
           }
         });
-        console.log(`\u{1F4F8} Story cropped: removed top ${STORY_CROP_CONFIG.topMargin}px and bottom ${STORY_CROP_CONFIG.bottomMargin}px`);
+        console.log(`\u{1F4F8} Story cropped: removed top ${storyCrop.topMargin}px and bottom ${storyCrop.bottomMargin}px`);
       } else {
         screenshot = await this.page.screenshot({
           type: "jpeg",
@@ -6193,11 +5990,15 @@ var ScreenshotCollector = class {
       viewport = this.page.viewportSize();
     }
     if (!viewport) {
-      console.log("\u{1F4F8} Viewport unavailable, using default dimensions (1080x1920)");
-      viewport = { width: 1080, height: 1920 };
+      const dims = await this.page.evaluate(() => ({
+        width: window.innerWidth,
+        height: window.innerHeight
+      })).catch(() => ({ width: 1080, height: 1920 }));
+      console.log(`\u{1F4F8} Viewport unavailable from viewportSize(), using evaluate: ${dims.width}x${dims.height}`);
+      viewport = dims;
     }
     try {
-      const padding = 50;
+      const padding = Math.round(viewport.width * 0.046);
       const captureRegion = {
         x: Math.max(0, elementBox.x - padding),
         y: Math.max(0, elementBox.y - padding),
@@ -6210,8 +6011,8 @@ var ScreenshotCollector = class {
       if (captureRegion.y + captureRegion.height > viewport.height) {
         captureRegion.height = viewport.height - captureRegion.y;
       }
-      captureRegion.width = Math.max(captureRegion.width, 100);
-      captureRegion.height = Math.max(captureRegion.height, 100);
+      captureRegion.width = Math.max(captureRegion.width, Math.round(viewport.width * 0.09));
+      captureRegion.height = Math.max(captureRegion.height, Math.round(viewport.height * 0.05));
       const screenshot = await this.page.screenshot({
         type: "jpeg",
         quality: this.config.jpegQuality,
@@ -6301,12 +6102,6 @@ var ScreenshotCollector = class {
     this.capturedHashes.clear();
     this.capturedPositions.clear();
     console.log("\u{1F4F8} Collector cleared");
-  }
-  /**
-   * Reset scroll tracking (useful when navigating to new context).
-   */
-  resetScrollTracking() {
-    this.lastScrollPosition = 0;
   }
   /**
    * Capture multiple frames during video playback.
@@ -6967,10 +6762,8 @@ var ContentReadiness = class {
 };
 
 // src/main/services/InstagramScraper.ts
-var fs5 = __toESM(require("fs"), 1);
 var path5 = __toESM(require("path"), 1);
 var os = __toESM(require("os"), 1);
-var import_crypto2 = require("crypto");
 
 // src/main/services/NavigationLLM.ts
 var DEFAULT_CONFIG3 = {
@@ -7895,21 +7688,18 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
   getEstimatedCost() {
     return this.decisionCount * 1e-3;
   }
-  /**
-   * Reset decision count (for new session).
-   */
-  reset() {
-    this.decisionCount = 0;
-    this.sessionJitter = 0.85 + Math.random() * 0.3;
-  }
 };
 
 // src/main/services/NavigationExecutor.ts
-var SCROLL_AMOUNTS = {
-  small: 150,
-  medium: 400,
-  large: 700,
-  xlarge: 1200
+var SCROLL_PROPORTIONS = {
+  small: 0.15,
+  // 15% of viewport
+  medium: 0.4,
+  // 40% of viewport
+  large: 0.7,
+  // 70% of viewport
+  xlarge: 1.2
+  // 120% of viewport
 };
 var LINGER_DURATIONS = {
   short: 1e3,
@@ -8048,7 +7838,9 @@ var NavigationExecutor = class {
    */
   async executeScroll(decision, startTime) {
     const params = decision.params;
-    const baseDistance = SCROLL_AMOUNTS[params.amount] || SCROLL_AMOUNTS.medium;
+    const viewportHeight = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
+    const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
+    const baseDistance = Math.round(viewportHeight * proportion);
     if (params.direction === "left" || params.direction === "right") {
       const deltaX = params.direction === "right" ? baseDistance : -baseDistance;
       await this.page.mouse.wheel(deltaX, 0);
@@ -8319,25 +8111,12 @@ var NavigationExecutor = class {
       return await this.page.evaluate(() => {
         const dialogs = document.querySelectorAll('[role="dialog"]').length;
         const articles = document.querySelectorAll("article").length;
-        const scrollY = Math.round(window.scrollY / 50);
+        const scrollY = Math.round(window.scrollY / (window.innerHeight * 0.05));
         return `d${dialogs}:a${articles}:s${scrollY}`;
       });
     } catch {
       return "unknown";
     }
-  }
-  /**
-   * Reset executor state (for new session).
-   */
-  reset() {
-    this.actionHistory = [];
-    this.sessionDelayMultiplier = 0.75 + Math.random() * 0.5;
-  }
-  /**
-   * Get action history for debugging.
-   */
-  getActionHistory() {
-    return [...this.actionHistory];
   }
   /**
    * Execute linger duration from strategic decision.
@@ -8353,16 +8132,6 @@ var NavigationExecutor = class {
     const duration = baseDuration * this.sessionDelayMultiplier;
     console.log(`  \u23F1\uFE0F Lingering for ${(duration / 1e3).toFixed(1)}s (${strategic.lingerDuration})`);
     await new Promise((resolve) => setTimeout(resolve, duration));
-  }
-  /**
-   * Get the linger duration in milliseconds for a given level.
-   *
-   * @param level - 'short' | 'medium' | 'long'
-   * @returns Duration in milliseconds with session variance
-   */
-  getLingerDurationMs(level) {
-    const baseDuration = LINGER_DURATIONS[level] || LINGER_DURATIONS.medium;
-    return baseDuration * this.sessionDelayMultiplier;
   }
 };
 
@@ -8732,79 +8501,6 @@ var DebugOverlay = class {
     }
   }
   /**
-   * Draw trajectory arrow from current position to target.
-   */
-  async showTrajectory(from, to) {
-    if (!this.enabled) return;
-    try {
-      await this.page.evaluate(({ from: from2, to: to2 }) => {
-        const canvas = document.getElementById("kowalski-debug-canvas");
-        if (!canvas) return;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.strokeStyle = "rgba(255, 255, 0, 0.6)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([8, 4]);
-        ctx.beginPath();
-        ctx.moveTo(from2.x, from2.y);
-        ctx.lineTo(to2.x, to2.y);
-        ctx.stroke();
-        const angle = Math.atan2(to2.y - from2.y, to2.x - from2.x);
-        const arrowSize = 12;
-        ctx.setLineDash([]);
-        ctx.fillStyle = "rgba(255, 255, 0, 0.8)";
-        ctx.beginPath();
-        ctx.moveTo(to2.x, to2.y);
-        ctx.lineTo(
-          to2.x - arrowSize * Math.cos(angle - Math.PI / 6),
-          to2.y - arrowSize * Math.sin(angle - Math.PI / 6)
-        );
-        ctx.lineTo(
-          to2.x - arrowSize * Math.cos(angle + Math.PI / 6),
-          to2.y - arrowSize * Math.sin(angle + Math.PI / 6)
-        );
-        ctx.closePath();
-        ctx.fill();
-      }, { from, to });
-    } catch (error) {
-    }
-  }
-  /**
-   * Highlight multiple elements (for showing all visible elements).
-   */
-  async highlightAllElements(elements) {
-    if (!this.enabled || !this.config.showElementHighlights) return;
-    try {
-      await this.page.evaluate((els) => {
-        const canvas = document.getElementById("kowalski-debug-canvas");
-        if (!canvas) return;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        for (const el of els) {
-          if (!el.boundingBox) continue;
-          let color = "rgba(100, 100, 100, 0.3)";
-          if (el.role === "button") color = "rgba(0, 255, 255, 0.3)";
-          else if (el.role === "link") color = "rgba(255, 255, 0, 0.3)";
-          else if (el.role === "textbox") color = "rgba(255, 100, 100, 0.3)";
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([]);
-          ctx.strokeRect(
-            el.boundingBox.x,
-            el.boundingBox.y,
-            el.boundingBox.width,
-            el.boundingBox.height
-          );
-          ctx.font = "9px monospace";
-          ctx.fillStyle = color;
-          ctx.fillText(`#${el.id}`, el.boundingBox.x + 2, el.boundingBox.y + 10);
-        }
-      }, elements);
-    } catch (error) {
-    }
-  }
-  /**
    * Clear all highlights from the canvas.
    */
   async clearHighlights() {
@@ -8820,45 +8516,6 @@ var DebugOverlay = class {
       });
     } catch (error) {
     }
-  }
-  /**
-   * Show a temporary message on the canvas.
-   */
-  async showMessage(message, type = "info") {
-    if (!this.enabled) return;
-    const colors = {
-      info: "#00ffff",
-      success: "#00ff00",
-      warning: "#ffff00",
-      error: "#ff4444"
-    };
-    try {
-      await this.page.evaluate(({ message: message2, color }) => {
-        const canvas = document.getElementById("kowalski-debug-canvas");
-        if (!canvas) return;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.font = "bold 14px monospace";
-        const textWidth = ctx.measureText(message2).width;
-        const x = (canvas.width - textWidth) / 2;
-        const y = canvas.height - 40;
-        ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
-        ctx.fillRect(x - 12, y - 18, textWidth + 24, 28);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x - 12, y - 18, textWidth + 24, 28);
-        ctx.fillStyle = color;
-        ctx.fillText(message2, x, y);
-      }, { message, color: colors[type] });
-      setTimeout(() => this.clearHighlights(), 2e3);
-    } catch (error) {
-    }
-  }
-  /**
-   * Check if overlay is enabled.
-   */
-  isEnabled() {
-    return this.enabled;
   }
   /**
    * Truncate string for display.
@@ -8950,17 +8607,6 @@ var SessionMemory = class {
     lines.push(`- Avg session: ${avgCaptures.toFixed(1)} captures in ${avgActions.toFixed(0)} actions`);
     return lines.join("\n");
   }
-  /**
-   * Get interest productivity rankings.
-   */
-  getInterestPriority() {
-    const stats = this.getInterestStats(this.summaries.slice(-DIGEST_SUMMARIES));
-    const priority = /* @__PURE__ */ new Map();
-    for (const stat of stats) {
-      priority.set(stat.interest, stat.avgCaptures);
-    }
-    return priority;
-  }
   getInterestStats(summaries) {
     const interestMap = /* @__PURE__ */ new Map();
     for (const session2 of summaries) {
@@ -9041,116 +8687,12 @@ var InstagramScraper = class {
   // Metrics
   visionApiCalls = 0;
   skippedViewports = 0;
-  // =========================================================================
-  // DEBUGGING & LOOP DETECTION STATE
-  // =========================================================================
-  loopDetection = {
-    lastActions: [],
-    repeatCount: 0
-  };
-  decisionLog = [];
-  diagnosticsDir = "";
   constructor(context, apiKey, usageCap, debugMode = false) {
     this.context = context;
     this.apiKey = apiKey;
     this.usageCap = usageCap;
     this.usageService = UsageService.getInstance();
     this.debugMode = debugMode;
-  }
-  /**
-   * Main scraping entry point - Research Sequence.
-   *
-   * [LEGACY] Hardcoded three-phase flow. Still used by SchedulerService for text-extraction pipeline.
-   * TODO: Migrate SchedulerService to browseAndCapture() + screenshot-based analysis.
-   * Once migrated, this method and all its helpers can be removed.
-   *
-   * @param targetMinutes - Total browsing time (human-paced), split across phases
-   * @param userInterests - Topics to search for in Phase A
-   * @deprecated Use browseAndCapture() for AI-driven navigation
-   */
-  async scrapeFeedAndStories(targetMinutes, userInterests) {
-    const budget = await this.usageService.getBudgetStatus(this.usageCap);
-    console.log(`\u{1F4B0} Budget Status: $${budget.currentSpend.toFixed(2)} spent, $${budget.remaining.toFixed(2)} remaining (~${budget.estimatedCallsRemaining} calls)`);
-    if (budget.estimatedCallsRemaining < 3) {
-      console.warn("\u{1F4B8} Budget too low for meaningful session (need at least 3 Vision calls)");
-      throw new Error("BUDGET_EXCEEDED");
-    }
-    const ANALYSIS_RESERVE = 0.02;
-    const availableForVision = Math.max(0, budget.remaining - ANALYSIS_RESERVE);
-    const maxVisionCalls = Math.floor(availableForVision / 0.01);
-    console.log(`\u{1F4CA} Session budget: max ${maxVisionCalls} Vision API calls`);
-    const startTime = Date.now();
-    const existingPages = this.context.pages();
-    this.page = existingPages.length > 0 ? existingPages[0] : await this.context.newPage();
-    this.ghost = new GhostMouse(this.page);
-    this.scroll = new HumanScroll(this.page);
-    this.navigator = new A11yNavigator(this.page);
-    this.vision = new ContentVision(this.apiKey);
-    if (this.debugMode) {
-      await this.ghost.enableVisibleCursor();
-    }
-    const feedContent = [];
-    const storiesContent = [];
-    const searchContent = [];
-    try {
-      console.log("\u{1F310} Navigating to Instagram...");
-      await this.page.goto("https://www.instagram.com/", {
-        waitUntil: "domcontentloaded"
-      });
-      await this.humanDelay(2e3, 4e3);
-      const state = await this.navigator.getContentState();
-      console.log("\u{1F4CA} Content State:", state);
-      if (state.currentView === "login") {
-        throw new Error("SESSION_EXPIRED");
-      }
-      const searchBudget = Math.min(userInterests.length, 5);
-      const storyBudget = 5;
-      const feedBudget = Math.max(0, maxVisionCalls - searchBudget - storyBudget);
-      console.log(`\u{1F4CA} Budget allocation: Search=${searchBudget}, Stories=${storyBudget}, Feed=${feedBudget}`);
-      if (userInterests.length > 0 && this.visionApiCalls < maxVisionCalls) {
-        console.log("\n\u{1F50D} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-        console.log("\u{1F50D} PHASE A: ACTIVE SEARCH");
-        console.log("\u{1F50D} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
-        const searchResults = await this.executeSearchPhase(userInterests, searchBudget);
-        for (const result of searchResults) {
-          searchContent.push(...result.posts);
-        }
-      }
-      if (state.hasStories && this.visionApiCalls < maxVisionCalls) {
-        console.log("\n\u{1F3AC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-        console.log("\u{1F3AC} PHASE B: STORY WATCH");
-        console.log("\u{1F3AC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
-        await this.returnToHome();
-        const stories = await this.exploreStories(storyBudget);
-        storiesContent.push(...stories);
-      }
-      if (this.visionApiCalls < maxVisionCalls) {
-        console.log("\n\u{1F4DC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-        console.log("\u{1F4DC} PHASE C: FEED SCROLL");
-        console.log("\u{1F4DC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
-        await this.returnToHome();
-        const elapsedMinutes = (Date.now() - startTime) / 6e4;
-        const remainingMinutes = Math.max(2, targetMinutes - elapsedMinutes);
-        const feed = await this.exploreFeed(remainingMinutes, feedBudget);
-        feedContent.push(...feed);
-      }
-    } catch (error) {
-      console.error("\u274C Scraping error:", error.message);
-      if (["SESSION_EXPIRED", "RATE_LIMITED", "VISION_RATE_LIMITED", "BUDGET_EXCEEDED"].includes(error.message)) {
-        throw error;
-      }
-    } finally {
-      await this.page.close();
-    }
-    const combinedFeed = [...searchContent, ...feedContent];
-    return {
-      feedContent: combinedFeed,
-      storiesContent,
-      sessionDuration: Date.now() - startTime,
-      visionApiCalls: this.visionApiCalls,
-      skippedViewports: this.skippedViewports,
-      scrapedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
   }
   // =========================================================================
   // SCREENSHOT-FIRST BROWSING (NEW ARCHITECTURE)
@@ -9168,1042 +8710,6 @@ var InstagramScraper = class {
    */
   async browseAndCapture(targetMinutes, userInterests) {
     return this.browseWithAINavigation(targetMinutes, userInterests);
-  }
-  /**
-   * [DEPRECATED] Original hardcoded browsing session.
-   * Kept for reference but no longer used.
-   */
-  async browseAndCaptureHardcoded(targetMinutes, userInterests) {
-    const startTime = Date.now();
-    this.page = await this.context.newPage();
-    this.ghost = new GhostMouse(this.page);
-    this.scroll = new HumanScroll(this.page);
-    this.navigator = new A11yNavigator(this.page);
-    this.vision = new ContentVision(this.apiKey);
-    this.screenshotCollector = new ScreenshotCollector(this.page, {
-      maxCaptures: 150,
-      jpegQuality: 85,
-      minScrollDelta: 200,
-      saveToDirectory: path5.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
-    });
-    this.contentReadiness = new ContentReadiness(this.page);
-    if (this.debugMode) {
-      await this.ghost.enableVisibleCursor();
-    }
-    try {
-      console.log("\u{1F310} Navigating to Instagram...");
-      await this.page.goto("https://www.instagram.com/", {
-        waitUntil: "domcontentloaded"
-      });
-      await this.humanDelay(2e3, 4e3);
-      const state = await this.navigator.getContentState();
-      console.log("\u{1F4CA} Content State:", state);
-      if (state.currentView === "login") {
-        throw new Error("SESSION_EXPIRED");
-      }
-      if (userInterests.length > 0) {
-        console.log("\n\u{1F50D} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-        console.log("\u{1F50D} PHASE A: INTEREST SEARCH (Screenshot-First)");
-        console.log("\u{1F50D} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
-        for (const interest of userInterests.slice(0, 3)) {
-          await this.searchAndCaptureScreenshot(interest);
-        }
-      }
-      if (state.hasStories) {
-        console.log("\n\u{1F3AC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-        console.log("\u{1F3AC} PHASE B: STORY WATCH (Screenshot-First)");
-        console.log("\u{1F3AC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
-        await this.returnToHome();
-        await this.watchAndCaptureStories();
-      }
-      console.log("\n\u{1F4DC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-      console.log("\u{1F4DC} PHASE C: FEED BROWSE (Screenshot-First)");
-      console.log("\u{1F4DC} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
-      await this.returnToHome();
-      const elapsedMinutes = (Date.now() - startTime) / 6e4;
-      const remainingMinutes = Math.max(2, targetMinutes - elapsedMinutes);
-      await this.browseFeedWithCapture(remainingMinutes);
-    } catch (error) {
-      console.error("\u274C Browsing error:", error.message);
-      if (["SESSION_EXPIRED", "RATE_LIMITED"].includes(error.message)) {
-        throw error;
-      }
-    } finally {
-      this.screenshotCollector.logSummary();
-      await this.page.close();
-    }
-    return {
-      captures: this.screenshotCollector.getCaptures(),
-      sessionDuration: Date.now() - startTime,
-      captureCount: this.screenshotCollector.getCaptureCount(),
-      scrapedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-  }
-  /**
-   * Search for an interest and capture screenshot (no Vision API).
-   */
-  async searchAndCaptureScreenshot(interest) {
-    console.log(`\u{1F50D} Searching for: "${interest}"`);
-    try {
-      const searchButton = await this.navigator.findSearchButton();
-      if (!searchButton?.boundingBox) {
-        console.log("  \u26A0\uFE0F Search button not found, skipping");
-        return;
-      }
-      await this.clickWithGaze(searchButton.boundingBox, "link", "search");
-      await this.humanDelay(1e3, 2e3);
-      const searchInput = await this.navigator.findSearchInput();
-      if (!searchInput?.boundingBox) {
-        console.log("  \u26A0\uFE0F Search input not found, skipping");
-        await this.navigator.pressEscape();
-        return;
-      }
-      await this.ghost.clickElementWithRole(searchInput.boundingBox, "searchbox", 0.5);
-      await this.humanDelay(300, 600);
-      const searchResult = await this.navigator.enterSearchTerm(interest, this.ghost);
-      if (searchResult.matchedResult) {
-        console.log(`  \u2705 Clicked dropdown result: "${searchResult.matchedResult}"`);
-      }
-      await this.humanDelay(3e3, 5e3);
-      await this.contentReadiness.ensureViewportClear();
-      const currentView = await this.navigator.getContentState();
-      if (currentView.currentView === "profile") {
-        console.log(`  \u{1F4CD} On profile page, capturing...`);
-        await this.screenshotCollector.captureCurrentPost("profile", interest);
-        for (let i = 0; i < 2; i++) {
-          await this.scroll.scrollWithIntent(this.navigator);
-          await this.humanDelay(1500, 3e3);
-          await this.screenshotCollector.captureCurrentPost("profile", interest);
-        }
-      } else {
-        await this.screenshotCollector.captureCurrentPost("search", interest);
-        await this.scroll.scrollWithIntent(this.navigator);
-        await this.humanDelay(1500, 2500);
-        await this.screenshotCollector.captureCurrentPost("search", interest);
-      }
-      await this.navigator.pressEscape();
-      await this.humanDelay(1e3, 2e3);
-    } catch (error) {
-      console.error(`  \u274C Search error for "${interest}":`, error.message);
-      await this.navigator.pressEscape().catch(() => {
-      });
-      await this.humanDelay(500, 1e3);
-    }
-  }
-  /**
-   * Watch stories and capture each one (no Vision API).
-   */
-  async watchAndCaptureStories(maxStories = 8) {
-    console.log("\u{1F3AC} Watching stories...");
-    const storyCircles = await this.navigator.findStoryCircles();
-    if (storyCircles.length === 0 || !storyCircles[0].boundingBox) {
-      console.log("  No stories found");
-      return;
-    }
-    await this.clickWithGaze(storyCircles[0].boundingBox, "button", "watch_story");
-    await this.humanDelay(2e3, 3e3);
-    if (this.debugMode) {
-      console.log("  \u{1F50D} Discovering story viewer buttons...");
-      await this.navigator.dumpInteractiveElements();
-    }
-    let lastStoryHash = "";
-    let stuckCount = 0;
-    let storiesWatched = 0;
-    for (let i = 0; i < maxStories; i++) {
-      if (!this.navigator.isInStoryViewer()) {
-        console.log("  \u{1F4F1} Exited story viewer");
-        break;
-      }
-      const currentHash = await this.getQuickViewportHash();
-      if (currentHash === lastStoryHash) {
-        stuckCount++;
-        console.log(`  \u26A0\uFE0F Same story as before (${stuckCount}/3)`);
-        if (stuckCount >= 3) {
-          console.log("  \u{1F4F1} Stuck on same story, exiting");
-          break;
-        }
-        await this.advanceStory();
-        await this.humanDelay(800, 1200);
-        continue;
-      }
-      stuckCount = 0;
-      lastStoryHash = currentHash;
-      await this.contentReadiness.ensureViewportClear();
-      const videoInfo = await this.navigator.detectVideoContent();
-      if (videoInfo.isVideo) {
-        console.log(`  \u{1F3AC} Video story - capturing frames`);
-        const watchDuration = 3e3 + Math.random() * 2e3;
-        await this.screenshotCollector.captureVideoFrames("story", watchDuration, 1500);
-      } else {
-        await this.screenshotCollector.captureCurrentPost("story");
-        await this.humanDelay(500, 1e3);
-      }
-      storiesWatched++;
-      console.log(`  \u{1F4F8} Story ${storiesWatched} captured`);
-      const advanced = await this.advanceStory();
-      if (!advanced) {
-        console.log("  \u{1F4F1} Could not advance, may be at end of stories");
-        stuckCount++;
-      }
-      await this.humanDelay(800, 1200);
-    }
-    await this.navigator.pressEscape();
-    await this.humanDelay(500, 1e3);
-    console.log(`\u2705 Stories complete: ${storiesWatched} captured`);
-  }
-  /**
-   * Advance to next story by clicking the right arrow button.
-   * Falls back to keyboard if button not found.
-   *
-   * @returns true if advancement was attempted
-   */
-  async advanceStory() {
-    const storyContainer = await this.navigator.findStoryViewerContainer();
-    const nextBtn = await this.navigator.findEdgeButton("right", {
-      containerNodeId: storyContainer || void 0
-    });
-    if (nextBtn?.boundingBox) {
-      console.log(`  \u27A1\uFE0F Clicking next: "${nextBtn.name}" at x=${Math.round(nextBtn.boundingBox.x)}`);
-      await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
-      return true;
-    }
-    console.log("  \u27A1\uFE0F Button not found, trying arrow key");
-    await this.page.keyboard.press("ArrowRight");
-    return true;
-  }
-  /**
-   * Quick viewport hash for change detection (low quality = fast).
-   * Used to detect if story/content actually changed after navigation.
-   */
-  async getQuickViewportHash() {
-    const screenshot = await this.page.screenshot({
-      type: "jpeg",
-      quality: 20,
-      // Low quality for speed
-      fullPage: false
-    });
-    return (0, import_crypto2.createHash)("md5").update(screenshot).digest("hex").slice(0, 12);
-  }
-  /**
-   * Explore a post deeply before capturing.
-   *
-   * This method implements "deep exploration" as requested:
-   * 1. Expand truncated captions (click "more" button)
-   * 2. Check for carousel posts and capture all slides
-   *
-   * @returns Object with number of slides captured (1 if not a carousel) and whether it's a carousel
-   */
-  async explorePostDeeply() {
-    let capturedSlides = 0;
-    let isCarousel = false;
-    let isVideo = false;
-    const moreButton = await this.navigator.findMoreButton();
-    if (moreButton?.boundingBox) {
-      console.log("  \u{1F4DD} Expanding truncated caption...");
-      await this.ghost.clickElement(moreButton.boundingBox, 0.3);
-      await this.humanDelay(800, 1200);
-      const stillTruncated = await this.navigator.findMoreButton();
-      if (stillTruncated?.boundingBox) {
-        console.log("  \u{1F4DD} Caption still truncated, trying again...");
-        await this.ghost.clickElement(stillTruncated.boundingBox, 0.3);
-        await this.humanDelay(500, 800);
-      }
-    }
-    const videoInfo = await this.navigator.detectVideoContent();
-    if (videoInfo.isVideo) {
-      isVideo = true;
-      console.log(`  \u{1F3AC} Video post detected${videoInfo.hasAudio ? " (with audio)" : ""}`);
-      const watchDuration = 8e3 + Math.random() * 12e3;
-      const frames = await this.screenshotCollector.captureVideoFrames("feed", watchDuration);
-      capturedSlides = frames;
-      return { capturedSlides, isCarousel, isVideo };
-    }
-    const { next: carouselNext } = await this.navigator.findCarouselControls();
-    if (!carouselNext) {
-      const elements = await this.navigator.getAllInteractiveElements();
-      const buttons = elements.filter((e) => e.role === "button").map((e) => `"${e.name}"`).slice(0, 8);
-      if (buttons.length > 0) {
-        console.log(`  \u{1F4CB} Available buttons: ${buttons.join(", ")}`);
-      }
-    }
-    if (carouselNext?.boundingBox) {
-      isCarousel = true;
-      console.log(`  \u{1F3A0} Carousel detected: "${carouselNext.name}" [${carouselNext.role}]`);
-      await this.screenshotCollector.captureCurrentPost("carousel");
-      capturedSlides++;
-      const maxSlides = 10;
-      let slideCount = 1;
-      let previousSlideIndicator = await this.navigator.getCarouselSlideIndicator();
-      if (previousSlideIndicator) {
-        console.log(`  \u{1F3A0} Starting at slide ${previousSlideIndicator.current} of ${previousSlideIndicator.total}`);
-      }
-      while (slideCount < maxSlides) {
-        const { next: nextBtn } = await this.navigator.findCarouselControls();
-        if (!nextBtn?.boundingBox) {
-          console.log(`  \u{1F3A0} No next button found via spatial discovery`);
-          break;
-        }
-        await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
-        const transitionStart = Date.now();
-        const maxTransitionWait = 3e3;
-        let slideTransitioned = false;
-        while (Date.now() - transitionStart < maxTransitionWait) {
-          const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
-          if (currentSlideIndicator && previousSlideIndicator && currentSlideIndicator.current !== previousSlideIndicator.current) {
-            const readiness = await this.contentReadiness.waitForImagesLoaded(2e3);
-            if (!readiness.ready) {
-              console.log(`  \u{1F3A0} Slide image not fully loaded (${readiness.details})`);
-            }
-            previousSlideIndicator = currentSlideIndicator;
-            slideTransitioned = true;
-            break;
-          }
-          await this.humanDelay(100, 200);
-        }
-        if (!slideTransitioned) {
-          console.log(`  \u{1F3A0} Slide unchanged after ${maxTransitionWait}ms, stopping carousel`);
-          break;
-        }
-        await this.humanDelay(200, 400);
-        await this.screenshotCollector.captureCurrentPost("carousel");
-        slideCount++;
-        capturedSlides++;
-      }
-      console.log(`  \u{1F3A0} Captured ${capturedSlides} carousel slides`);
-    }
-    return { capturedSlides, isCarousel, isVideo };
-  }
-  /**
-   * Browse feed with POST-CENTERED capture and DEEP EXPLORATION (no Vision API).
-   *
-   * This method ensures each screenshot contains ONE post only by:
-   * 1. Detecting post elements via accessibility tree
-   * 2. Centering each post in the viewport before capturing
-   * 3. Tracking captured posts by ABSOLUTE position (scroll + element Y) to avoid duplicates
-   * 4. Deep exploration: expanding captions, exploring carousel slides
-   *
-   * FIXES APPLIED:
-   * - Uses absolute Y position (scrollY + element.y) for deduplication (stable across scrolls)
-   * - Single centering calculation (let scrollToElementByCDP handle it)
-   * - Scroll verification to detect stuck situations
-   */
-  async browseFeedWithCapture(targetMinutes) {
-    const startTime = Date.now();
-    const endTime = startTime + targetMinutes * 60 * 1e3;
-    const capturedPostAbsoluteYs = /* @__PURE__ */ new Set();
-    let consecutiveEmpty = 0;
-    const maxConsecutiveEmpty = 3;
-    console.log(`\u{1F504} Browsing feed (deep exploration mode) for ${targetMinutes.toFixed(1)} minutes...`);
-    await this.scroll.scrollToTop();
-    await this.humanDelay(1e3, 2e3);
-    const viewportInfo = await this.scroll.getViewportInfo();
-    const viewportHeight = viewportInfo.height;
-    while (Date.now() < endTime) {
-      if (this.screenshotCollector.getCaptureCount() >= 150) {
-        console.log("\u{1F4F8} Max captures reached, stopping browse");
-        break;
-      }
-      const viewportClear = await this.contentReadiness.ensureViewportClear();
-      if (!viewportClear) {
-        console.log("  \u26A0\uFE0F Could not clear blocking overlay, attempting to continue...");
-      }
-      const currentScrollY = await this.scroll.getScrollPosition();
-      const posts = await this.navigator.findPostElementsAtomic();
-      let targetPost = null;
-      for (const post of posts) {
-        if (!post.boundingBox || !post.backendNodeId) continue;
-        const absoluteY = Math.round((currentScrollY + post.boundingBox.y) / 100);
-        const postTop = post.boundingBox.y;
-        const postBottom = postTop + post.boundingBox.height;
-        const isVisible = postTop < viewportHeight && postBottom > 0;
-        if (isVisible && !capturedPostAbsoluteYs.has(absoluteY)) {
-          targetPost = { ...post, absoluteY };
-          break;
-        }
-      }
-      if (targetPost && targetPost.boundingBox && targetPost.backendNodeId) {
-        const centerResult = await this.scroll.scrollToElementCentered(
-          targetPost.backendNodeId,
-          2
-          // max 2 retry attempts
-        );
-        if (!centerResult.success) {
-          console.log(`  \u26A0\uFE0F Centering incomplete (offset: ${Math.round(centerResult.finalOffset)}px), using fallback`);
-          await this.scroll.scroll({ baseDistance: 350 });
-        }
-        const readiness = await this.contentReadiness.waitForContentReady(2500);
-        if (!readiness.ready) {
-          console.log(`  \u23F3 Content not fully ready: ${readiness.reason} (waited ${readiness.waitedMs}ms)`);
-        }
-        await this.humanDelay(200, 400);
-        const adCheck = await this.navigator.detectAdContent();
-        if (adCheck.isAd) {
-          console.log(`  \u{1F6AB} Skipping ad: ${adCheck.reason}`);
-          capturedPostAbsoluteYs.add(targetPost.absoluteY);
-          consecutiveEmpty = 0;
-          continue;
-        }
-        const exploration = await this.explorePostDeeply();
-        const driftCheck = await this.contentReadiness.checkElementDrift(
-          targetPost.backendNodeId,
-          80
-          // tolerance: 80px (matches centering tolerance)
-        );
-        if (driftCheck?.drifted) {
-          console.log(`  \u{1F4CD} Element drifted ${Math.round(driftCheck.drift)}px, re-centering...`);
-          await this.scroll.scrollToElementCentered(targetPost.backendNodeId, 1);
-          await this.contentReadiness.waitForImagesLoaded(1e3);
-        }
-        if (!exploration.isCarousel) {
-          await this.screenshotCollector.captureCurrentPost("feed");
-        }
-        capturedPostAbsoluteYs.add(targetPost.absoluteY);
-        consecutiveEmpty = 0;
-        const postHeight = targetPost.boundingBox.height;
-        const readingTime = postHeight > 600 ? 2500 + Math.random() * 3e3 : 1500 + Math.random() * 2e3;
-        await this.humanDelay(readingTime, readingTime + 500);
-        if (Math.random() < 0.12) {
-          const pauseTime = 3e3 + Math.random() * 4e3;
-          console.log(`  \u2615 Reading pause (${(pauseTime / 1e3).toFixed(1)}s)...`);
-          await this.humanDelay(pauseTime, pauseTime + 500);
-        }
-        const captureCount = this.screenshotCollector.getCaptureCount();
-        if (captureCount % 5 === 0) {
-          console.log(`  \u{1F4CA} Captured ${captureCount} screenshots, ${capturedPostAbsoluteYs.size} unique posts`);
-        }
-      } else {
-        consecutiveEmpty++;
-        if (consecutiveEmpty >= maxConsecutiveEmpty) {
-          console.log("  \u{1F4DC} No new posts found after multiple attempts, ending browse");
-          break;
-        }
-        console.log(`  \u{1F4DC} No new posts visible, scrolling down (attempt ${consecutiveEmpty}/${maxConsecutiveEmpty})...`);
-        await this.scroll.scrollWithIntent(this.navigator, {
-          baseDistance: 500,
-          variability: 0.2,
-          microAdjustProb: 0.15
-        });
-        await this.humanDelay(1500, 2500);
-      }
-    }
-    console.log(`\u2705 Feed browse complete. Captured ${this.screenshotCollector.getCaptureCount()} screenshots (${capturedPostAbsoluteYs.size} unique posts)`);
-  }
-  // =========================================================================
-  // PHASE A: ACTIVE SEARCH (LEGACY - for backward compatibility)
-  // =========================================================================
-  /**
-   * Execute Active Search phase.
-   * For each user interest:
-   * 1. Click Search button
-   * 2. Type interest term + press Enter to commit
-   * 3. Wait 5-8 seconds for results to load
-   * 4. Scroll 1-2 times to trigger lazy loading
-   * 5. Capture screenshot with Vision API
-   * 6. Close search and repeat
-   *
-   * @param interests - User interests to search for
-   * @param maxCalls - Maximum Vision API calls for this phase
-   */
-  async executeSearchPhase(interests, maxCalls) {
-    const captures = [];
-    const interestsToSearch = interests.slice(0, maxCalls);
-    for (const interest of interestsToSearch) {
-      if (this.visionApiCalls >= maxCalls) {
-        console.log("\u{1F4B0} Search phase budget exhausted");
-        break;
-      }
-      console.log(`\u{1F50D} Searching for: "${interest}"`);
-      try {
-        const stateSummary = await this.getCurrentStateSummary();
-        this.logDecision({
-          phase: "SEARCH",
-          action: `Search for "${interest}"`,
-          objective: `Find content related to user interest: ${interest}`,
-          currentState: stateSummary,
-          rationale: `User specified "${interest}" as an interest. Searching to find relevant accounts and posts.`,
-          verificationMarker: `Search results panel opens AND results for "${interest}" are visible`
-        });
-        const searchButton = await this.navigator.findSearchButton();
-        if (!searchButton?.boundingBox) {
-          console.log("  \u26A0\uFE0F Search button not found, skipping");
-          continue;
-        }
-        await this.clickWithGaze(searchButton.boundingBox, "link", "search");
-        await this.humanDelay(1e3, 2e3);
-        const searchInput = await this.navigator.findSearchInput();
-        if (!searchInput?.boundingBox) {
-          console.log("  \u26A0\uFE0F Search input not found, skipping");
-          await this.navigator.pressEscape();
-          await this.humanDelay(500, 1e3);
-          continue;
-        }
-        await this.ghost.clickElementWithRole(searchInput.boundingBox, "searchbox", 0.5);
-        await this.humanDelay(300, 600);
-        console.log(`  \u2328\uFE0F Typing "${interest}" and selecting from dropdown...`);
-        const searchResult = await this.navigator.enterSearchTerm(interest, this.ghost);
-        if (searchResult.matchedResult) {
-          console.log(`  \u2705 Clicked dropdown result: "${searchResult.matchedResult}"`);
-        } else if (searchResult.fallbackUsed) {
-          console.log(`  \u26A0\uFE0F Used Enter key fallback (no dropdown match)`);
-        }
-        const waitTime = 3e3 + Math.random() * 2e3;
-        console.log(`  \u23F3 Waiting ${(waitTime / 1e3).toFixed(1)}s for results to load...`);
-        await this.humanDelay(waitTime, waitTime + 500);
-        const currentView = await this.navigator.getContentState();
-        if (currentView.currentView === "profile") {
-          const profileUsername = this.navigator.getProfileUsername() || interest;
-          console.log(`  \u{1F4CD} Detected profile page: ${profileUsername}`);
-          const deepContent = await this.exploreProfileDeep(interest, profileUsername);
-          if (deepContent.length > 0) {
-            captures.push({
-              interest,
-              posts: deepContent,
-              capturedAt: (/* @__PURE__ */ new Date()).toISOString()
-            });
-            console.log(`  \u2705 Deep-dive captured ${deepContent.length} items from ${profileUsername}`);
-          }
-          await this.returnToHome();
-          continue;
-        }
-        const scrollCount = 1 + Math.floor(Math.random() * 2);
-        console.log(`  \u{1F4DC} Scrolling ${scrollCount}x to trigger lazy loading...`);
-        for (let i = 0; i < scrollCount; i++) {
-          await this.scroll.scroll({
-            baseDistance: 200 + Math.random() * 150,
-            // Smaller scrolls
-            variability: 0.2,
-            microAdjustProb: 0.1,
-            readingPauseMs: [1e3, 2e3]
-            // Shorter pauses
-          });
-        }
-        await this.humanDelay(1e3, 1500);
-        const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
-        if (!canAfford) {
-          console.log("\u{1F4B8} Budget exhausted during search phase");
-          break;
-        }
-        console.log(`  \u{1F4F8} Capturing search results (Vision API call #${this.visionApiCalls + 1})`);
-        const result = await this.vision.extractVisibleContent(this.page);
-        this.visionApiCalls++;
-        if (result.success && result.posts.length > 0) {
-          captures.push({
-            interest,
-            posts: result.posts.map((p) => ({
-              ...p,
-              // Tag posts with the search interest for context
-              caption: `[SEARCH: ${interest}] ${p.caption || p.visualDescription || ""}`
-            })),
-            capturedAt: (/* @__PURE__ */ new Date()).toISOString()
-          });
-          console.log(`  \u2705 Found ${result.posts.length} results for "${interest}"`);
-        } else {
-          console.log(`  \u{1F4ED} No results captured for "${interest}"`);
-          if (result.skipped) {
-            this.skippedViewports++;
-          }
-        }
-        await this.navigator.pressEscape();
-        await this.humanDelay(1e3, 2e3);
-      } catch (error) {
-        console.error(`  \u274C Search error for "${interest}":`, error.message);
-        await this.navigator.pressEscape().catch(() => {
-        });
-        await this.humanDelay(500, 1e3);
-      }
-    }
-    console.log(`\u2705 Search phase complete. Captured ${captures.length} interest searches`);
-    return captures;
-  }
-  // =========================================================================
-  // PHASE B: STORY WATCH
-  // =========================================================================
-  /**
-   * Stories exploration using Blind Navigation + Vision Extraction.
-   *
-   * @param maxCalls - Maximum Vision API calls for this phase
-   */
-  async exploreStories(maxCalls) {
-    const stories = [];
-    console.log("\u{1F3AC} Exploring stories...");
-    const storyCircles = await this.navigator.findStoryCircles();
-    if (storyCircles.length === 0) {
-      console.log("  No stories found");
-      return stories;
-    }
-    const firstStory = storyCircles[0];
-    if (firstStory.boundingBox) {
-      await this.clickWithGaze(firstStory.boundingBox, "button", "watch_story");
-      await this.humanDelay(2e3, 3e3);
-    } else {
-      console.log("  Could not click first story (no bounding box)");
-      return stories;
-    }
-    const maxStories = Math.min(maxCalls, storyCircles.length, 12);
-    let storiesWatched = 0;
-    for (let i = 0; i < maxStories; i++) {
-      if (storiesWatched >= maxCalls) {
-        console.log("\u{1F4B0} Story phase budget exhausted");
-        break;
-      }
-      if (!this.navigator.isInStoryViewer()) {
-        console.log("  Exited story viewer");
-        break;
-      }
-      const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
-      if (!canAfford) {
-        console.log("\u{1F4B8} Budget exhausted during story phase");
-        break;
-      }
-      const storyContent = await this.vision.extractStoryContent(this.page);
-      this.visionApiCalls++;
-      storiesWatched++;
-      if (storyContent) {
-        stories.push(storyContent);
-        console.log(`  \u{1F4D6} Story ${i + 1}: ${storyContent.username}`);
-      }
-      const isTextHeavy = storyContent?.caption && storyContent.caption.length > 50;
-      const isVideo = storyContent?.isVideoContent;
-      if (isVideo) {
-        console.log(`  \u{1F3AC} Video story - watching...`);
-        await this.humanDelay(5e3, 15e3);
-      } else if (isTextHeavy) {
-        console.log(`  \u{1F4DD} Text-heavy story - reading...`);
-        await this.humanDelay(6e3, 1e4);
-      } else {
-        console.log(`  \u{1F4F7} Photo story - quick view...`);
-        await this.humanDelay(2e3, 4e3);
-      }
-      const nextStoryBtn = await this.navigator.findEdgeButton("right");
-      if (nextStoryBtn?.boundingBox) {
-        console.log(`  \u{1F3AF} Found next via spatial: "${nextStoryBtn.name}" at x=${nextStoryBtn.boundingBox.x}`);
-        await this.ghost.clickElement(nextStoryBtn.boundingBox, 0.3);
-      } else {
-        console.log("  \u27A1\uFE0F No button found, using keyboard to advance");
-        await this.page.keyboard.press("ArrowRight");
-      }
-      await this.humanDelay(1e3, 2e3);
-    }
-    await this.navigator.pressEscape();
-    await this.humanDelay(1e3, 2e3);
-    console.log(`\u2705 Stories complete. Watched ${stories.length} stories`);
-    return stories;
-  }
-  // =========================================================================
-  // PHASE C: FEED SCROLL
-  // =========================================================================
-  /**
-   * Feed exploration using Hybrid Loop:
-   * 1. MOVE: Scroll using Physics Layer (FREE)
-   * 2. CHECK: Verify content with A11y Layer (FREE)
-   * 3. EXTRACT: Call Vision API only when content confirmed (PAID)
-   *
-   * @param targetMinutes - Time to spend scrolling
-   * @param maxCalls - Maximum Vision API calls for this phase
-   */
-  async exploreFeed(targetMinutes, maxCalls) {
-    const startTime = Date.now();
-    const endTime = startTime + targetMinutes * 60 * 1e3;
-    const extractedContent = [];
-    const seenPostKeys = /* @__PURE__ */ new Set();
-    let scrollCount = 0;
-    let consecutiveDuplicates = 0;
-    let feedVisionCalls = 0;
-    const maxScrollsBeforeExtract = 3;
-    console.log(`\u{1F504} Starting feed exploration for ${targetMinutes.toFixed(1)} minutes (max ${maxCalls} calls)`);
-    await this.scroll.scrollToTop();
-    await this.humanDelay(1e3, 2e3);
-    while (Date.now() < endTime) {
-      const termination = this.navigator.shouldStopBrowsing(
-        scrollCount,
-        extractedContent.length,
-        startTime,
-        consecutiveDuplicates
-      );
-      if (termination.shouldStop) {
-        console.log(`\u2705 Stopping feed exploration: ${termination.reason}`);
-        break;
-      }
-      if (feedVisionCalls >= maxCalls) {
-        console.log(`\u{1F4B0} Feed budget limit reached (${feedVisionCalls}/${maxCalls} calls). Stopping extraction.`);
-        break;
-      }
-      if (scrollCount % 3 === 0 || scrollCount === 0) {
-        const stateSummary = await this.getCurrentStateSummary();
-        this.logDecision({
-          phase: "FEED",
-          action: `Scroll #${scrollCount + 1}`,
-          objective: "Discover new content by scrolling feed",
-          currentState: stateSummary,
-          rationale: `Content type is ${stateSummary.contentType || "unknown"}. Adapting scroll distance and pause accordingly.`,
-          verificationMarker: `ScrollY increases AND new posts become visible (not same posts as before)`
-        });
-      }
-      const scrollPosBefore = await this.scroll.getScrollPosition();
-      const scrollResult = await this.scroll.scrollWithIntent(this.navigator, {
-        variability: 0.25,
-        microAdjustProb: 0.2
-        // baseDistance and readingPauseMs determined by content density
-      });
-      await this.trackActionForLoopDetection("scroll", void 0, scrollPosBefore);
-      scrollCount++;
-      if (scrollCount % 5 === 1) {
-        console.log(`  \u{1F4CA} Content type: ${scrollResult.contentType} (scrolled ${scrollResult.scrollDistance}px)`);
-      }
-      const state = await this.navigator.getContentState();
-      if (!state.hasPosts) {
-        console.log("\u26A0\uFE0F No posts detected, waiting...");
-        await this.humanDelay(2e3, 3e3);
-        continue;
-      }
-      if (scrollCount % maxScrollsBeforeExtract === 0) {
-        const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
-        if (!canAfford) {
-          console.log("\u{1F4B8} Real-time budget check failed. Stopping.");
-          break;
-        }
-        console.log(`\u{1F4F8} Extracting content (Vision API call #${this.visionApiCalls + 1})`);
-        const result = await this.vision.extractVisibleContent(this.page);
-        this.visionApiCalls++;
-        feedVisionCalls++;
-        if (result.skipped) {
-          this.skippedViewports++;
-          consecutiveDuplicates++;
-          continue;
-        }
-        if (result.success) {
-          let newPostsThisRound = 0;
-          for (const post of result.posts) {
-            const key = `${post.username}-${post.caption.slice(0, 50)}`;
-            if (!seenPostKeys.has(key)) {
-              seenPostKeys.add(key);
-              extractedContent.push(post);
-              newPostsThisRound++;
-              console.log(`  \u{1F4DD} Found: ${post.username}`);
-            }
-          }
-          if (newPostsThisRound === 0) {
-            consecutiveDuplicates++;
-          } else {
-            consecutiveDuplicates = 0;
-          }
-          const { next: carouselNext } = await this.navigator.findCarouselControls();
-          if (carouselNext?.boundingBox) {
-            console.log(`  \u{1F3A0} Carousel detected via spatial at x=${carouselNext.boundingBox.x}`);
-            const carouselSlides = await this.exploreCarousel("feed", "feed_carousel");
-            for (const slide of carouselSlides) {
-              const slideKey = `${slide.username}-${slide.caption.slice(0, 50)}`;
-              if (!seenPostKeys.has(slideKey)) {
-                seenPostKeys.add(slideKey);
-                extractedContent.push(slide);
-              }
-            }
-          }
-        }
-      }
-      if (Math.random() < 0.12) {
-        console.log("\u2615 Taking a longer pause...");
-        await this.humanDelay(8e3, 15e3);
-      }
-    }
-    console.log(`\u2705 Feed exploration complete. Extracted ${extractedContent.length} posts`);
-    return extractedContent;
-  }
-  // =========================================================================
-  // RECURSIVE EXPLORATION METHODS
-  // =========================================================================
-  /**
-   * Explore a carousel post by clicking through all slides.
-   * Captures each slide with Vision API.
-   *
-   * FIXED: Proper actionability checks with hover, animation buffer, and slide verification.
-   *
-   * @param context - Context label for the carousel (e.g., "feed", interest name)
-   * @param slidePrefix - Prefix for slide labels
-   * @returns Array of captured slides as ExtractedPosts
-   */
-  async exploreCarousel(context, slidePrefix) {
-    const slides = [];
-    let slideNumber = 1;
-    const maxSlides = 10;
-    const maxRetries = 2;
-    console.log(`    \u{1F3A0} Exploring carousel for "${context}"...`);
-    let previousSlideIndicator = await this.navigator.getCarouselSlideIndicator();
-    if (previousSlideIndicator) {
-      console.log(`    \u{1F3A0} Starting at slide ${previousSlideIndicator.current} of ${previousSlideIndicator.total}`);
-    }
-    while (slideNumber <= maxSlides) {
-      const { next: nextButton } = await this.navigator.findCarouselControls();
-      if (!nextButton?.boundingBox) {
-        console.log(`    \u{1F3A0} Carousel complete (${slideNumber - 1} slides) - no next button found`);
-        break;
-      }
-      const hoverDuration = 800 + Math.random() * 700;
-      console.log(`    \u{1F3A0} Hovering over button at x=${nextButton.boundingBox.x}`);
-      await this.ghost.hoverElement(nextButton.boundingBox, hoverDuration, 0.3);
-      const { next: nextButtonAfterHover } = await this.navigator.findCarouselControls();
-      if (!nextButtonAfterHover?.boundingBox) {
-        console.log(`    \u26A0\uFE0F Button disappeared after hover, skipping`);
-        break;
-      }
-      let navigationSucceeded = false;
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        await this.ghost.clickElementWithRole(nextButtonAfterHover.boundingBox, "button", 0.3);
-        await this.humanDelay(1500, 3e3);
-        const currentSlideIndicator = await this.navigator.getCarouselSlideIndicator();
-        if (currentSlideIndicator) {
-          if (!previousSlideIndicator || currentSlideIndicator.current !== previousSlideIndicator.current) {
-            console.log(`    \u{1F3A0} Navigation verified: now on slide ${currentSlideIndicator.current} of ${currentSlideIndicator.total}`);
-            previousSlideIndicator = currentSlideIndicator;
-            navigationSucceeded = true;
-            break;
-          } else {
-            console.log(`    \u26A0\uFE0F Slide indicator unchanged (attempt ${attempt + 1}/${maxRetries}), retrying...`);
-            await this.humanDelay(500, 800);
-          }
-        } else {
-          console.log(`    \u{1F3A0} No slide indicator found, assuming navigation succeeded`);
-          navigationSucceeded = true;
-          break;
-        }
-      }
-      if (!navigationSucceeded) {
-        console.log(`    \u26A0\uFE0F Failed to navigate after ${maxRetries} attempts, stopping carousel`);
-        break;
-      }
-      const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
-      if (!canAfford) {
-        console.log("    \u{1F4B8} Budget exhausted during carousel");
-        break;
-      }
-      const moreButton = await this.navigator.findMoreButton();
-      if (moreButton?.boundingBox) {
-        console.log(`    \u{1F4DD} Expanding truncated caption...`);
-        await this.ghost.clickElement(moreButton.boundingBox, 0.3);
-        await this.humanDelay(500, 800);
-      }
-      const rawCaption = await this.navigator.findPostCaption();
-      const result = await this.vision.extractVisibleContent(this.page);
-      this.visionApiCalls++;
-      if (result.success && result.posts.length > 0) {
-        for (const post of result.posts) {
-          const captionText = rawCaption || post.caption || post.visualDescription || "";
-          slides.push({
-            ...post,
-            caption: `[CAROUSEL: ${context} slide ${slideNumber}] ${captionText}`
-          });
-        }
-        console.log(`    \u{1F3A0} Captured slide ${slideNumber}${rawCaption ? " (with caption)" : ""}`);
-      }
-      slideNumber++;
-    }
-    return slides;
-  }
-  /**
-   * Deep exploration of a profile page.
-   * 1. Scroll through recent posts grid (2 minutes)
-   * 2. Explore first 2 Story Highlights (30s each)
-   *
-   * @param interest - The search interest (for labeling)
-   * @param profileUsername - Username being explored
-   * @returns Array of captured content as ExtractedPosts
-   */
-  async exploreProfileDeep(interest, profileUsername) {
-    const content = [];
-    const startTime = Date.now();
-    const profileDuration = (90 + Math.random() * 60) * 1e3;
-    const highlightDuration = (25 + Math.random() * 15) * 1e3;
-    console.log(`    \u{1F464} Deep-diving into ${profileUsername}'s profile...`);
-    let scrollCount = 0;
-    const maxGridScrolls = 6;
-    while (Date.now() - startTime < profileDuration && scrollCount < maxGridScrolls) {
-      await this.scroll.scroll({
-        baseDistance: 250 + Math.random() * 150,
-        variability: 0.2,
-        microAdjustProb: 0.1,
-        readingPauseMs: [2e3, 4e3]
-      });
-      scrollCount++;
-      if (scrollCount % 2 === 0) {
-        const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
-        if (!canAfford) {
-          console.log("    \u{1F4B8} Budget exhausted during profile grid");
-          break;
-        }
-        const result = await this.vision.extractVisibleContent(this.page);
-        this.visionApiCalls++;
-        if (result.success && result.posts.length > 0) {
-          for (const post of result.posts) {
-            content.push({
-              ...post,
-              caption: `[PROFILE: ${profileUsername}] ${post.caption || post.visualDescription || ""}`
-            });
-          }
-          console.log(`    \u{1F464} Captured ${result.posts.length} grid posts`);
-        }
-      }
-    }
-    await this.scroll.scrollToTop();
-    await this.humanDelay(1500, 2500);
-    const highlights = await this.navigator.findHighlights();
-    const highlightsToExplore = Math.min(highlights.length, 2);
-    console.log(`    \u2728 Found ${highlights.length} highlights, exploring ${highlightsToExplore}...`);
-    for (let i = 0; i < highlightsToExplore; i++) {
-      const highlight = highlights[i];
-      if (!highlight.boundingBox) continue;
-      console.log(`    \u2728 Opening highlight: "${highlight.name}"`);
-      await this.clickWithGaze(highlight.boundingBox, "button");
-      await this.humanDelay(2e3, 3e3);
-      const highlightStart = Date.now();
-      let captureCount = 0;
-      while (Date.now() - highlightStart < highlightDuration && captureCount < 3) {
-        const canAfford = await this.usageService.canAffordVisionCall(this.usageCap);
-        if (!canAfford) break;
-        const result = await this.vision.extractVisibleContent(this.page);
-        this.visionApiCalls++;
-        captureCount++;
-        if (result.success && result.posts.length > 0) {
-          for (const post of result.posts) {
-            content.push({
-              ...post,
-              caption: `[HIGHLIGHT: ${profileUsername} - ${highlight.name}] ${post.caption || post.visualDescription || ""}`
-            });
-          }
-        }
-        const nextBtn = await this.navigator.findEdgeButton("right");
-        if (nextBtn?.boundingBox) {
-          await this.ghost.clickElement(nextBtn.boundingBox, 0.3);
-        } else {
-          console.log("  \u27A1\uFE0F No button found, using keyboard to advance");
-          await this.page.keyboard.press("ArrowRight");
-        }
-        await this.humanDelay(5e3, 8e3);
-      }
-      await this.navigator.pressEscape();
-      await this.humanDelay(1e3, 1500);
-    }
-    console.log(`    \u{1F464} Profile deep-dive complete. Captured ${content.length} items`);
-    return content;
-  }
-  // =========================================================================
-  // DEBUGGING & AUDIT TRAIL SYSTEM
-  // =========================================================================
-  /**
-   * Log a Decision Block to terminal and internal log.
-   * Provides conversational audit trail explaining the "Why" behind every "How".
-   */
-  logDecision(decision) {
-    const block = {
-      ...decision,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    this.decisionLog.push(block);
-    console.log("\n\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-    console.log(`\u2502 \u{1F4CB} DECISION BLOCK [${block.phase}]`);
-    console.log("\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-    console.log(`\u2502 \u{1F3AF} OBJECTIVE: ${block.objective}`);
-    console.log(`\u2502 \u{1F4CD} ACTION: ${block.action}`);
-    console.log(`\u2502 \u{1F4CA} STATE: View=${block.currentState.view}` + (block.currentState.scrollPosition !== void 0 ? `, ScrollY=${block.currentState.scrollPosition}px` : "") + (block.currentState.contentType ? `, Content=${block.currentState.contentType}` : ""));
-    if (block.currentState.visibleElements && block.currentState.visibleElements.length > 0) {
-      console.log(`\u2502 \u{1F441}\uFE0F VISIBLE: ${block.currentState.visibleElements.slice(0, 5).join(", ")}${block.currentState.visibleElements.length > 5 ? "..." : ""}`);
-    }
-    console.log(`\u2502 \u{1F4AD} RATIONALE: ${block.rationale}`);
-    console.log(`\u2502 \u2713 VERIFY: ${block.verificationMarker}`);
-    console.log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
-  }
-  /**
-   * Track action for loop detection.
-   * If the same action is repeated 3 times without state change, trigger diagnostic.
-   */
-  async trackActionForLoopDetection(action, coordinate, scrollPosition) {
-    const now = Date.now();
-    this.loopDetection.lastActions.push({
-      action,
-      coordinate,
-      scrollPosition,
-      timestamp: now
-    });
-    if (this.loopDetection.lastActions.length > 10) {
-      this.loopDetection.lastActions.shift();
-    }
-    const last3 = this.loopDetection.lastActions.slice(-3);
-    if (last3.length === 3) {
-      const allSame = last3.every((a) => {
-        const first = last3[0];
-        const actionMatch = a.action === first.action;
-        const coordMatch = !a.coordinate && !first.coordinate || a.coordinate && first.coordinate && Math.abs(a.coordinate.x - first.coordinate.x) < 50 && Math.abs(a.coordinate.y - first.coordinate.y) < 50;
-        const scrollMatch = a.scrollPosition === void 0 || first.scrollPosition === void 0 || Math.abs((a.scrollPosition || 0) - (first.scrollPosition || 0)) < 50;
-        return actionMatch && coordMatch && scrollMatch;
-      });
-      if (allSame) {
-        this.loopDetection.repeatCount++;
-        if (this.loopDetection.repeatCount >= 3) {
-          await this.triggerDiagnosticSnapshot(action, coordinate);
-        }
-      } else {
-        this.loopDetection.repeatCount = 0;
-      }
-    }
-  }
-  /**
-   * Trigger a diagnostic snapshot when a navigation loop is detected.
-   * Saves screenshot and A11y tree dump for debugging.
-   */
-  async triggerDiagnosticSnapshot(action, coordinate) {
-    console.log("\n\u26A0\uFE0F \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-    console.log("\u26A0\uFE0F NAVIGATION LOOP DETECTED");
-    console.log("\u26A0\uFE0F \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
-    if (!this.diagnosticsDir) {
-      this.diagnosticsDir = path5.join(process.cwd(), "diagnostics");
-      if (!fs5.existsSync(this.diagnosticsDir)) {
-        fs5.mkdirSync(this.diagnosticsDir, { recursive: true });
-      }
-    }
-    const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    try {
-      const screenshotPath = path5.join(this.diagnosticsDir, `loop_detected_screen_${timestamp}.png`);
-      await this.page.screenshot({ path: screenshotPath, fullPage: false });
-      console.log(`\u{1F4F8} Screenshot saved: ${screenshotPath}`);
-      const a11yTree = await this.navigator.getFullAccessibilityTree();
-      const treePath = path5.join(this.diagnosticsDir, `loop_diagnostic_tree_${timestamp}.json`);
-      fs5.writeFileSync(treePath, JSON.stringify({
-        timestamp,
-        action,
-        coordinate,
-        repeatCount: this.loopDetection.repeatCount,
-        lastActions: this.loopDetection.lastActions,
-        decisionLog: this.decisionLog.slice(-10),
-        accessibilityTree: a11yTree.slice(0, 100)
-        // Limit to first 100 nodes
-      }, null, 2));
-      console.log(`\u{1F4CB} A11y tree dump saved: ${treePath}`);
-      const coordStr = coordinate ? `(${coordinate.x}, ${coordinate.y})` : "N/A";
-      throw new Error(`Navigation Loop Detected: LLM repeated [${action}] at [${coordStr}] without page progress. Diagnostics saved to ${this.diagnosticsDir}`);
-    } catch (error) {
-      if (error.message.includes("Navigation Loop Detected")) {
-        throw error;
-      }
-      console.error("\u274C Failed to save diagnostic snapshot:", error.message);
-    }
-  }
-  /**
-   * Get current state summary for decision logging.
-   */
-  async getCurrentStateSummary() {
-    try {
-      const contentState = await this.navigator.getContentState();
-      const scrollPos = await this.scroll.getScrollPosition();
-      const contentDensity = await this.navigator.analyzeContentDensity();
-      return {
-        view: contentState.currentView,
-        scrollPosition: scrollPos,
-        contentType: contentDensity.type,
-        visibleElements: []
-        // Simplified - no longer tracking gaze targets
-      };
-    } catch {
-      return { view: "unknown" };
-    }
   }
   // =========================================================================
   // UTILITY METHODS
@@ -10284,7 +8790,7 @@ var InstagramScraper = class {
     this.screenshotCollector = new ScreenshotCollector(this.page, {
       maxCaptures: 150,
       jpegQuality: 85,
-      minScrollDelta: 200,
+      minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.1),
       saveToDirectory: path5.join(os.homedir(), "Documents", "Kowalski", "debug-screenshots")
     });
     this.contentReadiness = new ContentReadiness(this.page);
@@ -10759,358 +9265,6 @@ var InstagramScraper = class {
   }
   // NOTE: shouldTransitionPhase() and getNextPhase() removed
   // LLM now controls phase transitions through strategic decisions
-};
-
-// src/main/services/AnalysisGenerator.ts
-var MAX_CAPTION_LENGTH = 280;
-var AnalysisGenerator = class {
-  apiKey;
-  usageService;
-  constructor(apiKey) {
-    this.apiKey = apiKey;
-    this.usageService = UsageService.getInstance();
-  }
-  /**
-   * Generate a newspaper-style analysis from browsed Instagram content.
-   * This is the MAIN entry point called by SchedulerService.
-   *
-   * @throws Error if generation fails (no fallback - transparent failure)
-   */
-  async generate(session2, config) {
-    const contentSummary = this.prepareContentSummary(session2);
-    const analysis = await this.callGenerationAPI(contentSummary, config);
-    return {
-      ...analysis,
-      date: (/* @__PURE__ */ new Date()).toISOString(),
-      location: config.location,
-      scheduledTime: config.scheduledTime
-    };
-  }
-  /**
-   * Prepare content using explicit POST delimiters for strict atomic pairing.
-   * Each post is wrapped in --- POST START --- / --- POST END --- tags
-   * to prevent the LLM from mixing captions between posts.
-   *
-   * EXTRACTION RULE: The LLM is FORBIDDEN from borrowing data across POST boundaries.
-   */
-  prepareContentSummary(session2) {
-    const posts = [];
-    let itemId = 1;
-    let skippedCount = 0;
-    for (const post of session2.feedContent) {
-      const caption = post.caption || "";
-      let source = "feed";
-      let interest;
-      let cleanCaption = caption;
-      const searchMatch = caption.match(/\[SEARCH: ([^\]]+)\]/);
-      const carouselMatch = caption.match(/\[CAROUSEL: ([^\]]+)\]/);
-      const profileMatch = caption.match(/\[PROFILE: ([^\]]+)\]/);
-      const highlightMatch = caption.match(/\[HIGHLIGHT: ([^\]]+)\]/);
-      if (searchMatch) {
-        source = "search";
-        interest = searchMatch[1];
-        cleanCaption = caption.replace(/\[SEARCH: [^\]]+\]\s*/, "");
-      } else if (carouselMatch) {
-        source = "carousel";
-        cleanCaption = caption.replace(/\[CAROUSEL: [^\]]+\]\s*/, "");
-      } else if (profileMatch) {
-        source = "profile";
-        cleanCaption = caption.replace(/\[PROFILE: [^\]]+\]\s*/, "");
-      } else if (highlightMatch) {
-        source = "highlight";
-        cleanCaption = caption.replace(/\[HIGHLIGHT: [^\]]+\]\s*/, "");
-      }
-      if (this.isLowSaliencyContent(cleanCaption, post.visualDescription || "", post.username)) {
-        skippedCount++;
-        continue;
-      }
-      const truncatedCaption = this.truncateCaption(cleanCaption);
-      const truncatedImage = this.truncateCaption(post.visualDescription || "");
-      let postBlock = `--- POST START ---
-ID: ${itemId++}
-Handle: @${post.username}
-Caption: ${truncatedCaption || "[No caption]"}
-Image: ${truncatedImage || "[No description]"}
-Content Type: ${post.isVideoContent ? "video" : "image"}
-Source: ${source}`;
-      if (interest) {
-        postBlock += `
-Interest: ${interest}`;
-      }
-      postBlock += "\n--- POST END ---";
-      posts.push(postBlock);
-    }
-    for (const story of session2.storiesContent) {
-      if (this.isLowSaliencyContent(story.caption || "", story.visualDescription || "", story.username)) {
-        skippedCount++;
-        continue;
-      }
-      const truncatedCaption = this.truncateCaption(story.caption || "");
-      const truncatedImage = this.truncateCaption(story.visualDescription || "");
-      posts.push(`--- POST START ---
-ID: ${itemId++}
-Handle: @${story.username}
-Caption: ${truncatedCaption || "[No caption]"}
-Image: ${truncatedImage || "[No description]"}
-Content Type: ${story.isVideoContent ? "video" : "image"}
-Source: story
---- POST END ---`);
-    }
-    const searchCount = posts.filter((p) => p.includes("Source: search")).length;
-    const feedCount = posts.filter((p) => p.includes("Source: feed")).length;
-    const storyCount = posts.filter((p) => p.includes("Source: story")).length;
-    const otherCount = posts.length - searchCount - feedCount - storyCount;
-    if (skippedCount > 0) {
-      console.log(`\u{1F4CB} Skipped ${skippedCount} low-saliency posts (ads, generic intros)`);
-    }
-    return `CONTENT DATA (${posts.length} posts total, ${skippedCount} skipped):
-- Search results: ${searchCount}
-- Feed posts: ${feedCount}
-- Stories: ${storyCount}
-- Other (carousel/profile/highlight): ${otherCount}
-
-${posts.join("\n\n")}`;
-  }
-  /**
-   * Filter out low-saliency content that adds noise to the analysis.
-   * Returns true if the content should be SKIPPED.
-   */
-  isLowSaliencyContent(caption, imageDesc, username) {
-    const captionLower = caption.toLowerCase();
-    const imageLower = imageDesc.toLowerCase();
-    const combined = `${captionLower} ${imageLower}`;
-    const introPatterns = [
-      "meet the class",
-      "welcome to the class",
-      "introducing the class",
-      "class of 20",
-      "meet our new",
-      "welcome our new",
-      "join us in welcoming",
-      "excited to introduce"
-    ];
-    if (introPatterns.some((p) => combined.includes(p))) {
-      return true;
-    }
-    const adPatterns = [
-      "shop now",
-      "limited time",
-      "use code",
-      "link in bio",
-      "swipe up",
-      "click the link",
-      "free shipping",
-      "order now",
-      "get yours",
-      "don't miss out",
-      "sale ends",
-      "% off"
-    ];
-    const adMatchCount = adPatterns.filter((p) => combined.includes(p)).length;
-    if (adMatchCount >= 2 && caption.length < 150) {
-      return true;
-    }
-    if (!caption.trim() && (!imageDesc.trim() || imageLower.includes("generic") || imageLower.includes("stock photo"))) {
-      return true;
-    }
-    return false;
-  }
-  /**
-   * Truncate caption to reasonable length, preserving meaning.
-   */
-  truncateCaption(caption) {
-    if (!caption) return "";
-    const cleaned = caption.replace(/\s+/g, " ").trim();
-    if (cleaned.length <= MAX_CAPTION_LENGTH) {
-      return cleaned;
-    }
-    const truncated = cleaned.slice(0, MAX_CAPTION_LENGTH);
-    const lastSpace = truncated.lastIndexOf(" ");
-    return (lastSpace > 200 ? truncated.slice(0, lastSpace) : truncated) + "...";
-  }
-  /**
-   * Call GPT-4 to generate the newspaper-style analysis.
-   * Uses Smart Brevity format with bullet points and insider context.
-   */
-  async callGenerationAPI(contentSummary, config) {
-    const now = /* @__PURE__ */ new Date();
-    const dayName = now.toLocaleDateString("en-US", { weekday: "long" });
-    const dateStr = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-    const interestsList = config.interests.length > 0 ? config.interests.map((i) => `"${i}"`).join(", ") : "General news and trends";
-    const prompt = `You are a HIGH-DENSITY RESEARCH JOURNALIST and STRATEGIC INTELLIGENCE ANALYST creating a personalized briefing for ${config.userName}.
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-I. GROUNDING & FIDELITY RULES (VIOLATIONS = FAILURE)
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-EXTRACTION RULE (CRITICAL):
-You are an extraction engine. You are FORBIDDEN from mixing data across POST boundaries.
-Each post is wrapped in --- POST START --- / --- POST END --- delimiters.
-If Post A has no caption, do NOT borrow the caption from Post B.
-Use ONLY the data within the specific POST tags.
-
-ATOMIC PAIRING:
-- Each {Handle, Image, Caption} is an ISOLATED unit
-- NEVER combine data from different POST blocks into the same bullet
-- If Post #5 has a sunset and Post #8 has a football game, they are SEPARATE bullets
-
-HANDLE-FIRST ATTRIBUTION:
-- Every bullet MUST begin with **@handle** in bold
-- Format: "\u2022 **@handle**: [Fact from THIS post only]. [Contextual Analysis if warranted]"
-- The handle anchors the bullet to its source - no exceptions
-
-NO HALLUCINATIONS:
-- If a post has [No caption], describe only what's visible in the Image field
-- If you add contextual analysis (trends, implications), label it as [Contextual Analysis: ...]
-- NEVER invent meaning like "fostering lifelong connections" or "celebrating innovation"
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-II. ANALYSIS DEPTH (THE "SO WHAT?" PROTOCOL)
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-For HIGH-VALUE posts (search results, breaking news, user interests), apply 3-level analysis:
-
-Level 1 - THE EVENT: What's literally in the pixels/caption
-Level 2 - THE TREND: What 2026 theme does this connect to?
-Level 3 - THE IMPLICATION: Why should the reader care?
-
-Example of proper depth:
-\u2022 **@applebees**: Launching the 'O-M-Cheese' burger for $11.99. [Contextual Analysis: This reflects casual dining's 2026 "Premium Value" pivot as chains fight fast-casual competition on price while maintaining perceived quality.]
-
-For LOW-VALUE posts (generic updates, ephemeral stories), use Level 1 only:
-\u2022 **@friend_account**: Shared a sunset photo from the beach.
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-III. NEGATIVE CONSTRAINTS (DO NOT)
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-\u274C Do NOT use filler phrases: "The photo shows," "The caption says," "Interestingly,"
-\u274C Do NOT summarize 5 posts into 1 bland bullet
-\u274C Do NOT generate market analysis for student intro posts
-\u274C Do NOT report on generic ads (unless directly relevant to ${interestsList})
-\u274C Do NOT invent emotional narrative ("celebrating team spirit," "embracing the journey")
-\u274C Do NOT mix handles across bullet points
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-IV. USER PROFILE
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-Name: ${config.userName}
-Location: ${config.location || "Not specified"}
-Priority Interests: ${interestsList}
-Date: ${dayName}, ${dateStr}
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-V. CONTENT DATA (ATOMIC POST BLOCKS)
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-${contentSummary}
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-VI. OUTPUT STRUCTURE
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-BULLET FORMAT (MANDATORY):
-\u2022 **@handle**: [Level 1 event]. [Level 2/3 contextual analysis if high-value].
-
-SECTION STRUCTURE:
-
-# [Compelling Title Based on Top Story]
-### [Key Strategic Insight] \u2014 ${dayName}, ${dateStr}${config.location ? `, ${config.location}` : ""}
-
-## \u{1F3AF} Strategic Interests: ${interestsList}
-[4-6 bullets from search results and interest-matching posts]
-[Apply full "So What?" Protocol - Levels 1-3]
-
-## \u{1F30D} Global Intelligence
-[3-4 bullets from general newsworthy content]
-[Cross-reference with current events where verifiable]
-
-## \u26A1 Lightning Round
-[2-3 single-sentence quick hits for remaining notable content]
-[Level 1 only - just the facts]
-
-PRIORITY RULES:
-- Posts with Source: search are HIGH PRIORITY (match user interests)
-- Posts with Source: story are ephemeral (lower priority unless newsworthy)
-- Posts with Interest: field should be featured prominently
-
-EXAMPLES:
-
-\u2705 CORRECT (with depth):
-\u2022 **@CalFootball**: Posted "Class is in session" with a facility photo. [Contextual Analysis: This aligns with December's early signing period - Cal's 2026 class is ranked #18 nationally.]
-
-\u2705 CORRECT (Level 1 only for low-value):
-\u2022 **@personal_friend**: Shared a coffee shop photo in San Francisco.
-
-\u274C WRONG (mixing posts):
-\u2022 **@CalFootball** celebrated the Warriors' victory... (NEVER mix handles across posts)
-
-\u274C WRONG (hallucinating):
-\u2022 **@UniversityAccount**: "Fostering lifelong connections through education" (if caption just said "Beautiful day")
-
-Return valid JSON:
-{
-    "title": "string",
-    "subtitle": "string",
-    "sections": [
-        {"heading": "string", "content": ["\u2022 **@handle**: Fact. [Contextual Analysis: Trend and implication].", "\u2022 **@handle**: Fact."]},
-        {"heading": "string", "content": ["\u2022 **@handle**: Fact with context."]},
-        {"heading": "string", "content": ["\u2022 **@handle**: Quick fact."]}
-    ]
-}`;
-    console.log("\u{1F916} Generating analysis with GPT-4...");
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.apiKey}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        // Best model for analysis
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 2e3,
-        temperature: 0.3,
-        // Low for factual accuracy, strict attribution
-        response_format: { type: "json_object" }
-      })
-    });
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error("\u274C Generation API error:", errorData);
-      throw new Error("GENERATION_FAILED");
-    }
-    const data = await response.json();
-    if (data.usage) {
-      await this.usageService.incrementUsage(data.usage);
-      console.log(`\u{1F4B0} Generation cost tracked: ${data.usage.total_tokens} tokens`);
-    }
-    const content = data.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error("GENERATION_FAILED");
-    }
-    try {
-      const parsed = JSON.parse(content);
-      if (!parsed.title || !parsed.sections || !Array.isArray(parsed.sections)) {
-        throw new Error("Invalid response structure");
-      }
-      console.log("\u2705 Analysis generated successfully");
-      return {
-        title: parsed.title,
-        subtitle: parsed.subtitle || "",
-        sections: parsed.sections.map((s) => ({
-          heading: s.heading || "Untitled Section",
-          content: Array.isArray(s.content) ? s.content : [s.content || ""]
-        }))
-      };
-    } catch (parseError) {
-      console.error("\u274C Failed to parse generation response:", parseError);
-      throw new Error("GENERATION_FAILED");
-    }
-  }
-  // NOTE: No generateFallback() method - we don't generate garbage content.
-  // If generation fails, we notify the user and schedule a retry.
 };
 
 // src/main/services/BatchDigestGenerator.ts
@@ -11885,167 +10039,6 @@ var SchedulerService = class _SchedulerService {
   }
   // ==================== END TWO-JOB SCHEDULER ====================
   // Old shouldTrigger() method removed - replaced by shouldTriggerBaker() and shouldTriggerDelivery()
-  async triggerSimulation(now, store, scheduledTime, targetDate, silent = false) {
-    const settings = store.get("settings") || {};
-    const effectiveDate = targetDate || now;
-    const mockAnalysis = LoremIpsumGenerator.generate({
-      userName: settings.userName,
-      location: settings.location,
-      scheduledTime,
-      targetDate: effectiveDate
-    });
-    console.log(`\u{1F311} Background Task Started at ${(/* @__PURE__ */ new Date()).toLocaleString()}`);
-    const newRecord = {
-      id: `analysis-sim-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
-      // Random suffix to avoid collision in fast loops
-      data: mockAnalysis,
-      leadStoryPreview: mockAnalysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
-    };
-    const userDataPath = import_electron5.app.getPath("userData");
-    const recordDir = import_path4.default.join(userDataPath, "analysis_records");
-    const recordPath = import_path4.default.join(recordDir, `${newRecord.id}.json`);
-    const tempPath = import_path4.default.join(recordDir, `${newRecord.id}.tmp`);
-    try {
-      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs4.default.promises.rename(tempPath, recordPath);
-      console.log(`\u{1F4BE} Saved Full Analysis cleanly to disk: ${recordPath}`);
-      const metadataRecord = {
-        id: newRecord.id,
-        // Keep critical fields for sorting/listing
-        data: {
-          date: newRecord.data.date,
-          // Used for sorting
-          title: newRecord.data.title,
-          scheduledTime: newRecord.data.scheduledTime,
-          location: newRecord.data.location
-          // REMOVED: sections (heavy text)
-        },
-        leadStoryPreview: newRecord.leadStoryPreview
-      };
-      const currentAnalyses = store.get("analyses") || [];
-      const updatedAnalyses = [metadataRecord, ...currentAnalyses];
-      store.set("analyses", updatedAnalyses);
-      const newStatus = silent ? "idle" : "ready";
-      store.set("settings", {
-        ...settings,
-        lastAnalysisDate: effectiveDate.toISOString(),
-        analysisStatus: newStatus
-      });
-      console.log(`\u{1F315} Background Task Completed at ${(/* @__PURE__ */ new Date()).toLocaleString()}`);
-      console.log(`\u{1F916} Simulation Complete (${silent ? "Silent/Historical" : "Live"}). Estimated Cost: $0.00`);
-      if (!silent && this.mainWindow && !this.mainWindow.isDestroyed()) {
-        console.log("\u{1F4E1} Push Notification Sent: analysis-ready (Metadata Only)");
-        this.mainWindow.webContents.send("analysis-ready", metadataRecord);
-      }
-    } catch (e) {
-      console.error("\u274C Failed to save analysis to disk (Atomic Write Failed). Aborting metadata update.", e);
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send("analysis-error", { message: "Failed to save analysis to disk." });
-      }
-      try {
-        if (import_fs4.default.existsSync(tempPath)) await import_fs4.default.promises.unlink(tempPath);
-      } catch (cleanupErr) {
-      }
-      return;
-    }
-  }
-  /**
-   * REAL Analysis Pipeline - Instagram Exploration + GPT-4 Synthesis
-   *
-   * This is the production method that:
-   * 1. Validates Instagram session
-   * 2. Launches browser and explores feed/stories
-   * 3. Generates newspaper-style analysis via GPT-4
-   * 4. Saves and notifies UI
-   *
-   * Cost: ~$0.08 - $0.12 per session
-   */
-  async triggerAnalysis(now, store, scheduledTime) {
-    const settings = store.get("settings") || {};
-    const MINIMUM_POSTS_FOR_ANALYSIS = 5;
-    console.log(`\u{1F680} Starting REAL Analysis Pipeline at ${(/* @__PURE__ */ new Date()).toLocaleString()}`);
-    const browserManager = BrowserManager.getInstance();
-    let context = null;
-    try {
-      const apiKey = await SecureKeyManager.getInstance().getKey();
-      if (!apiKey) {
-        throw new Error("NO_API_KEY");
-      }
-      console.log("\u{1F310} Launching browser (visible mode)...");
-      context = await browserManager.launch({ headless: false });
-      console.log("\u{1F510} Validating Instagram session...");
-      const sessionCheck = await browserManager.validateSession();
-      if (!sessionCheck.valid) {
-        throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
-      }
-      console.log("\u{1F4F1} Exploring Instagram feed and stories...");
-      const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
-      const session2 = await scraper.scrapeFeedAndStories(
-        5,
-        // 5 minutes of human-paced browsing
-        settings.interests || []
-      );
-      console.log(`\u{1F4CA} Exploration complete: ${session2.feedContent.length} posts, ${session2.storiesContent.length} stories`);
-      console.log(`\u{1F4CA} Vision API calls: ${session2.visionApiCalls}, Skipped: ${session2.skippedViewports}`);
-      await browserManager.close();
-      context = null;
-      const totalContent = session2.feedContent.length + session2.storiesContent.length;
-      if (totalContent < MINIMUM_POSTS_FOR_ANALYSIS) {
-        console.warn(`\u26A0\uFE0F Insufficient content: ${totalContent} items (need ${MINIMUM_POSTS_FOR_ANALYSIS})`);
-        throw new Error("INSUFFICIENT_CONTENT");
-      }
-      console.log("\u{1F916} Generating analysis...");
-      const generator = new AnalysisGenerator(apiKey);
-      const analysis = await generator.generate(session2, {
-        userName: settings.userName || "User",
-        interests: settings.interests || [],
-        location: settings.location || "",
-        scheduledTime
-      });
-      const recordId = (0, import_uuid.v4)();
-      const newRecord = {
-        id: recordId,
-        data: analysis,
-        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
-      };
-      const userDataPath = import_electron5.app.getPath("userData");
-      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
-      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs4.default.promises.mkdir(recordDir, { recursive: true });
-      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs4.default.promises.rename(tempPath, recordPath);
-      console.log(`\u{1F4BE} Saved Analysis to disk: ${recordPath}`);
-      const metadataRecord = {
-        id: newRecord.id,
-        data: {
-          date: newRecord.data.date,
-          title: newRecord.data.title,
-          scheduledTime: newRecord.data.scheduledTime,
-          location: newRecord.data.location
-        },
-        leadStoryPreview: newRecord.leadStoryPreview
-      };
-      const currentAnalyses = store.get("analyses") || [];
-      store.set("analyses", [metadataRecord, ...currentAnalyses]);
-      store.set("settings", {
-        ...settings,
-        lastAnalysisDate: now.toISOString(),
-        analysisStatus: "ready"
-      });
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        console.log("\u{1F4E1} Notifying UI: analysis-ready");
-        this.mainWindow.webContents.send("analysis-ready", metadataRecord);
-      }
-      console.log(`\u2705 Analysis Pipeline Complete. Cost: ~$${(session2.visionApiCalls * 0.01 + 0.02).toFixed(2)}`);
-    } catch (error) {
-      console.error("\u274C Analysis pipeline failed:", error.message);
-      if (context) {
-        await browserManager.close();
-      }
-      this.handleAnalysisError(error.message, scheduledTime, store, settings);
-    }
-  }
   /**
    * Handle errors with user-facing messages and automatic retry scheduling.
    * NO FALLBACK GENERATION - either quality content or transparent failure.
@@ -12143,153 +10136,7 @@ var SchedulerService = class _SchedulerService {
     console.log(`\u{1F950} Baker starting at ${(/* @__PURE__ */ new Date()).toLocaleString()} for delivery at ${scheduledTime}`);
     await this.archivePendingAnalysis(store);
     const settings = store.get("settings") || {};
-    if (_SchedulerService.USE_REAL_ANALYSIS) {
-      if (_SchedulerService.USE_SCREENSHOT_FIRST) {
-        await this.triggerBakerScreenshotFirst(now, store, scheduledTime);
-      } else {
-        await this.triggerBakerReal(now, store, scheduledTime);
-      }
-    } else {
-      await this.triggerBakerSimulation(now, store, scheduledTime);
-    }
-  }
-  /**
-   * BAKER (Simulation Mode): Generate mock analysis silently.
-   */
-  async triggerBakerSimulation(now, store, scheduledTime) {
-    const settings = store.get("settings") || {};
-    const mockAnalysis = LoremIpsumGenerator.generate({
-      userName: settings.userName,
-      location: settings.location,
-      scheduledTime,
-      targetDate: now
-    });
-    console.log(`\u{1F311} Baker (Simulation) - Background baking started`);
-    const newRecord = {
-      id: `analysis-sim-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
-      data: mockAnalysis,
-      leadStoryPreview: mockAnalysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
-    };
-    const userDataPath = import_electron5.app.getPath("userData");
-    const recordDir = import_path4.default.join(userDataPath, "analysis_records");
-    const recordPath = import_path4.default.join(recordDir, `${newRecord.id}.json`);
-    const tempPath = import_path4.default.join(recordDir, `${newRecord.id}.tmp`);
-    try {
-      await import_fs4.default.promises.mkdir(recordDir, { recursive: true });
-      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs4.default.promises.rename(tempPath, recordPath);
-      console.log(`\u{1F4BE} Baker saved analysis to disk: ${recordPath}`);
-      const metadataRecord = {
-        id: newRecord.id,
-        data: {
-          date: newRecord.data.date,
-          title: newRecord.data.title,
-          scheduledTime: newRecord.data.scheduledTime,
-          location: newRecord.data.location
-        },
-        leadStoryPreview: newRecord.leadStoryPreview
-      };
-      const currentAnalyses = store.get("analyses") || [];
-      store.set("analyses", [metadataRecord, ...currentAnalyses]);
-      store.set("settings", {
-        ...store.get("settings"),
-        lastBakeDate: now.toISOString(),
-        analysisStatus: "pending_delivery"
-        // Awaiting delivery time
-      });
-      console.log(`\u{1F950} Baker complete. Analysis saved, awaiting delivery at ${scheduledTime}`);
-    } catch (e) {
-      console.error("\u274C Baker failed to save analysis to disk:", e);
-      try {
-        if (import_fs4.default.existsSync(tempPath)) await import_fs4.default.promises.unlink(tempPath);
-      } catch (cleanupErr) {
-      }
-    }
-  }
-  /**
-   * BAKER (Real Mode): Run Instagram scraping and GPT-4 analysis silently.
-   */
-  async triggerBakerReal(now, store, scheduledTime) {
-    const settings = store.get("settings") || {};
-    const MINIMUM_POSTS_FOR_ANALYSIS = 5;
-    console.log(`\u{1F950} Baker (Real) - Starting Instagram exploration at ${(/* @__PURE__ */ new Date()).toLocaleString()}`);
-    const browserManager = BrowserManager.getInstance();
-    let context = null;
-    try {
-      const apiKey = await SecureKeyManager.getInstance().getKey();
-      if (!apiKey) {
-        throw new Error("NO_API_KEY");
-      }
-      console.log("\u{1F310} Baker launching browser (headless)...");
-      context = await browserManager.launch({ headless: true });
-      console.log("\u{1F510} Baker validating Instagram session...");
-      const sessionCheck = await browserManager.validateSession();
-      if (!sessionCheck.valid) {
-        throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
-      }
-      console.log("\u{1F4F1} Baker exploring Instagram feed and stories...");
-      const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
-      const session2 = await scraper.scrapeFeedAndStories(
-        5,
-        // 5 minutes of human-paced browsing
-        settings.interests || []
-      );
-      console.log(`\u{1F4CA} Baker exploration complete: ${session2.feedContent.length} posts, ${session2.storiesContent.length} stories`);
-      await browserManager.close();
-      context = null;
-      const totalContent = session2.feedContent.length + session2.storiesContent.length;
-      if (totalContent < MINIMUM_POSTS_FOR_ANALYSIS) {
-        console.warn(`\u26A0\uFE0F Baker: Insufficient content: ${totalContent} items (need ${MINIMUM_POSTS_FOR_ANALYSIS})`);
-        throw new Error("INSUFFICIENT_CONTENT");
-      }
-      console.log("\u{1F916} Baker generating analysis...");
-      const generator = new AnalysisGenerator(apiKey);
-      const analysis = await generator.generate(session2, {
-        userName: settings.userName || "User",
-        interests: settings.interests || [],
-        location: settings.location || "",
-        scheduledTime
-      });
-      const recordId = (0, import_uuid.v4)();
-      const newRecord = {
-        id: recordId,
-        data: analysis,
-        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
-      };
-      const userDataPath = import_electron5.app.getPath("userData");
-      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
-      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs4.default.promises.mkdir(recordDir, { recursive: true });
-      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs4.default.promises.rename(tempPath, recordPath);
-      console.log(`\u{1F4BE} Baker saved analysis to disk: ${recordPath}`);
-      const metadataRecord = {
-        id: newRecord.id,
-        data: {
-          date: newRecord.data.date,
-          title: newRecord.data.title,
-          scheduledTime: newRecord.data.scheduledTime,
-          location: newRecord.data.location
-        },
-        leadStoryPreview: newRecord.leadStoryPreview
-      };
-      const currentAnalyses = store.get("analyses") || [];
-      store.set("analyses", [metadataRecord, ...currentAnalyses]);
-      store.set("settings", {
-        ...store.get("settings"),
-        lastBakeDate: now.toISOString(),
-        analysisStatus: "pending_delivery"
-      });
-      console.log(`\u{1F950} Baker complete. Analysis saved, awaiting delivery at ${scheduledTime}`);
-      console.log(`\u2705 Baker Pipeline Complete. Cost: ~$${(session2.visionApiCalls * 0.01 + 0.02).toFixed(2)}`);
-    } catch (error) {
-      console.error("\u274C Baker pipeline failed:", error.message);
-      if (context) {
-        await browserManager.close();
-      }
-      console.log(`\u{1F950} Baker failed silently. No paper to deliver at ${scheduledTime}`);
-    }
+    await this.triggerBakerScreenshotFirst(now, store, scheduledTime);
   }
   /**
    * DELIVERY BOY: Delivers the prepared analysis to the user.
@@ -12326,11 +10173,7 @@ var SchedulerService = class _SchedulerService {
    * - Notifies UI immediately after completion (no pending_delivery state)
    */
   async triggerDebugRun() {
-    if (_SchedulerService.USE_SCREENSHOT_FIRST) {
-      await this.triggerDebugRunScreenshotFirst();
-    } else {
-      await this.triggerDebugRunLegacy();
-    }
+    await this.triggerDebugRunScreenshotFirst();
   }
   /**
    * DEBUG RUN (Screenshot-First): Uses the new screenshot-based architecture.
@@ -12470,128 +10313,7 @@ var SchedulerService = class _SchedulerService {
       }
     }
   }
-  /**
-   * DEBUG RUN (Legacy): Uses the extraction-based architecture.
-   */
-  async triggerDebugRunLegacy() {
-    console.log("\u{1F9EA} Debug Run (Legacy): Starting Visible Analysis Pipeline");
-    const store = await this.getStore();
-    const settings = store.get("settings") || {};
-    const now = /* @__PURE__ */ new Date();
-    const scheduledTime = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    const MINIMUM_POSTS_FOR_ANALYSIS = 5;
-    const BROWSE_DURATION_MS = 5 * 60 * 1e3;
-    const browserManager = BrowserManager.getInstance();
-    let context = null;
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("debug-run-started", {
-        durationMs: BROWSE_DURATION_MS,
-        startTime: Date.now()
-      });
-    }
-    try {
-      const apiKey = await SecureKeyManager.getInstance().getKey();
-      if (!apiKey) {
-        console.error("\u{1F9EA} Debug Run: NO API KEY");
-        this.mainWindow?.webContents.send("analysis-error", { message: "API key not found." });
-        this.mainWindow?.webContents.send("debug-run-complete", {});
-        return;
-      }
-      console.log("\u{1F9EA} Launching browser (VISIBLE mode)...");
-      context = await browserManager.launch({ headless: false });
-      console.log("\u{1F9EA} Validating Instagram session...");
-      const sessionCheck = await browserManager.validateSession();
-      if (!sessionCheck.valid) {
-        throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
-      }
-      console.log("\u{1F9EA} Exploring Instagram feed and stories...");
-      const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);
-      const session2 = await scraper.scrapeFeedAndStories(
-        5,
-        // 5 minutes of human-paced browsing
-        settings.interests || []
-      );
-      console.log(`\u{1F9EA} Exploration complete: ${session2.feedContent.length} posts, ${session2.storiesContent.length} stories`);
-      await browserManager.close();
-      context = null;
-      const totalContent = session2.feedContent.length + session2.storiesContent.length;
-      if (totalContent < MINIMUM_POSTS_FOR_ANALYSIS) {
-        console.warn(`\u{1F9EA} Insufficient content: ${totalContent} items (need ${MINIMUM_POSTS_FOR_ANALYSIS})`);
-        throw new Error("INSUFFICIENT_CONTENT");
-      }
-      console.log("\u{1F9EA} Generating analysis...");
-      const generator = new AnalysisGenerator(apiKey);
-      const analysis = await generator.generate(session2, {
-        userName: settings.userName || "User",
-        interests: settings.interests || [],
-        location: settings.location || "",
-        scheduledTime
-      });
-      const recordId = (0, import_uuid.v4)();
-      const newRecord = {
-        id: recordId,
-        data: analysis,
-        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
-      };
-      const userDataPath = import_electron5.app.getPath("userData");
-      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
-      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs4.default.promises.mkdir(recordDir, { recursive: true });
-      await import_fs4.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs4.default.promises.rename(tempPath, recordPath);
-      console.log(`\u{1F9EA} Saved analysis to disk: ${recordPath}`);
-      const metadataRecord = {
-        id: newRecord.id,
-        data: {
-          date: newRecord.data.date,
-          title: newRecord.data.title,
-          scheduledTime: newRecord.data.scheduledTime,
-          location: newRecord.data.location
-        },
-        leadStoryPreview: newRecord.leadStoryPreview
-      };
-      const currentAnalyses = store.get("analyses") || [];
-      store.set("analyses", [metadataRecord, ...currentAnalyses]);
-      store.set("settings", {
-        ...store.get("settings"),
-        lastAnalysisDate: now.toISOString(),
-        analysisStatus: "ready"
-        // NOT pending_delivery - immediate!
-      });
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        console.log("\u{1F9EA} Notifying UI: analysis-ready");
-        this.mainWindow.webContents.send("analysis-ready", metadataRecord);
-        this.mainWindow.webContents.send("debug-run-complete", {});
-      }
-      console.log(`\u{1F9EA} Debug Run Complete! Cost: ~$${(session2.visionApiCalls * 0.01 + 0.02).toFixed(2)}`);
-    } catch (error) {
-      console.error("\u{1F9EA} Debug Run Failed:", error.message);
-      if (context) {
-        await browserManager.close();
-      }
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send("analysis-error", {
-          message: `Debug run failed: ${error.message}`,
-          canRetry: true
-        });
-        this.mainWindow.webContents.send("debug-run-complete", {});
-      }
-    }
-  }
   // ==================== END DEBUG / TESTING ====================
-  /**
-   * Switch between simulation mode and real analysis mode.
-   * Set USE_REAL_ANALYSIS to true for production.
-   */
-  static USE_REAL_ANALYSIS = true;
-  // LIVE FLIGHT TEST: Real pipeline enabled
-  /**
-   * Switch between extraction-based and screenshot-first approaches.
-   * Set USE_SCREENSHOT_FIRST to true for the new Screenshot-First Digest architecture.
-   */
-  static USE_SCREENSHOT_FIRST = true;
-  // NEW: Screenshot-First Digest enabled
   /**
    * BAKER (Screenshot-First Mode): Browse Instagram naturally, capture screenshots,
    * then batch-send to LLM for comprehensive digest generation.
@@ -12842,7 +10564,6 @@ import_electron6.app.on("ready", () => {
   import_electron6.session.fromPartition(SHARED_PARTITION).protocol.registerFileProtocol("kowalski-local", protocolHandler);
   console.log(`\u2705 Registered kowalski-local protocol on partition: ${SHARED_PARTITION}`);
   createWindow();
-  console.log("Session persistence enabled.");
   console.log("Session persistence enabled.");
   UsageService.getInstance().initialize();
   SchedulerService.getInstance().initialize();

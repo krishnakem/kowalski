@@ -18,7 +18,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ease, duration, spring, stagger } from "@/lib/animations";
+import { ease, duration, spring } from "@/lib/animations";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import type { ArchivedAnalysis } from "@/types/analysis";
 

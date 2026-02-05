@@ -16,7 +16,7 @@
 import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import { SessionSummary, InterestResult } from '../../types/session-memory.js';
+import { SessionSummary } from '../../types/session-memory.js';
 
 const MAX_SUMMARIES = 20;
 const DIGEST_SUMMARIES = 5;
@@ -115,18 +115,6 @@ export class SessionMemory {
         lines.push(`- Avg session: ${avgCaptures.toFixed(1)} captures in ${avgActions.toFixed(0)} actions`);
 
         return lines.join('\n');
-    }
-
-    /**
-     * Get interest productivity rankings.
-     */
-    getInterestPriority(): Map<string, number> {
-        const stats = this.getInterestStats(this.summaries.slice(-DIGEST_SUMMARIES));
-        const priority = new Map<string, number>();
-        for (const stat of stats) {
-            priority.set(stat.interest, stat.avgCaptures);
-        }
-        return priority;
     }
 
     private getInterestStats(summaries: SessionSummary[]): Array<{

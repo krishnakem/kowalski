@@ -16,7 +16,7 @@
  */
 
 import { Page, CDPSession } from 'playwright';
-import { ScrollConfig, BoundingBox, ContentDensity, ContentType } from '../../types/instagram.js';
+import { ScrollConfig, BoundingBox, ContentType } from '../../types/instagram.js';
 import type { A11yNavigator } from './A11yNavigator.js';
 
 export class HumanScroll {
@@ -565,43 +565,4 @@ export class HumanScroll {
         };
     }
 
-    /**
-     * Multiple intent-driven scrolls with cumulative content analysis.
-     * Useful for browsing sessions where content type may change.
-     *
-     * @param navigator - A11yNavigator instance for content analysis
-     * @param count - Number of scrolls to perform
-     * @param config - Optional scroll configuration overrides
-     */
-    async scrollMultipleWithIntent(
-        navigator: A11yNavigator,
-        count: number,
-        config: Partial<ScrollConfig> = {}
-    ): Promise<{
-        scrollCount: number;
-        contentTypes: ContentType[];
-        totalDistance: number;
-    }> {
-        const contentTypes: ContentType[] = [];
-        let totalDistance = 0;
-
-        for (let i = 0; i < count; i++) {
-            const result = await this.scrollWithIntent(navigator, config);
-            contentTypes.push(result.contentType);
-            totalDistance += result.scrollDistance;
-        }
-
-        return {
-            scrollCount: count,
-            contentTypes,
-            totalDistance
-        };
-    }
-
-    /**
-     * Get the session timing multiplier (for external coordination).
-     */
-    getSessionTimingMultiplier(): number {
-        return this.sessionTimingMultiplier;
-    }
 }

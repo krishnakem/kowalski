@@ -160,14 +160,6 @@ export class UsageService {
     }
 
     /**
-     * Returns current usage data.
-     */
-    public async getUsage(): Promise<UsageData> {
-        const store = await this.getStore();
-        return store.get('usageData') || { currentMonthSpend: 0, lastResetDate: new Date().toISOString() };
-    }
-
-    /**
      * Returns remaining budget and estimated API calls available.
      * Used for smart session planning.
      */

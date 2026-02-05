@@ -19,17 +19,12 @@ import {
     NavigationDecision,
     NavigationAction,
     NavigationLLMConfig,
-    ActionParams,
     ClickParams,
     ScrollParams,
-    TypeParams,
     PressParams,
     WaitParams,
-    SemanticHint,
-    StrategicDecision,
-    BrowsingPhase
+    SemanticHint
 } from '../../types/navigation.js';
-import { Point } from '../../types/instagram.js';
 
 /**
  * Default configuration for NavigationLLM.
@@ -69,6 +64,13 @@ export class NavigationLLM {
      */
     private getSystemPrompt(): string {
         return `You are a FULLY AUTONOMOUS navigation agent for an Instagram browser session. You have COMPLETE STRATEGIC CONTROL over the session - you decide what to do, when to switch activities, and when to end.
+
+CORE PHILOSOPHY — DEPTH OVER BREADTH:
+You are NOT a scroll bot. Your job is to deeply understand content, not skim past it.
+- ALWAYS prefer clicking into a post over scrolling past it
+- A single deeply-explored post (opened, carousel navigated, caption read) is worth more than 10 feed scrolls
+- The engagement loop: scroll feed → spot interesting post → CLICK INTO IT → capture detail view → navigate carousel → close → repeat
+- If you've scrolled more than 3 times without clicking into a post, you're being too superficial
 
 YOU CONTROL:
 1. TACTICAL: What action to take next (click, scroll, type, press, wait)
@@ -191,11 +193,14 @@ WHEN TO TERMINATE:
 - ✅ Collected enough content (good variety of captures)
 - ✅ Stuck and can't recover
 
-WHEN TO CAPTURE:
-- ✅ Interesting post visible that matches user interests
-- ✅ Story content visible (before advancing)
-- ✅ Search results showing relevant content
-- ❌ Don't capture: navigation screens, loading states, empty feeds
+CAPTURE QUALITY HIERARCHY (best → worst):
+1. POST DETAIL VIEW (modal open, full caption + comments visible) — BEST, always capture
+2. STORY CONTENT (individual story frame) — GREAT, capture each frame
+3. CAROUSEL SLIDES (in modal, individual slides) — GREAT, capture each slide
+4. PROFILE GRID (scrolled profile with posts visible) — OK, capture once as overview
+5. FEED SCROLL (scrolling through home feed) — LOW VALUE, only if exceptional content
+→ Prioritize captures from levels 1-3. Don't waste captures on feed scrolls.
+❌ NEVER capture: navigation screens, loading states, empty feeds
 
 VIDEO HANDLING:
 When you see a video playing (videoState in context):
@@ -218,38 +223,37 @@ STAGNATION DETECTION:
 - If "no change detected" appears 3+ times in recent actions, STOP repeating the same action and switch strategy completely.
 - If SESSION MEMORY is available, use past session patterns to avoid known dead-ends.
 
-DEEP ENGAGEMENT:
-You can engage deeply with posts to understand them better. This is OPTIONAL but encouraged for interesting content.
+DEEP ENGAGEMENT — YOUR PRIMARY MODE:
+Clicking into posts is your PRIMARY method of content collection, not an optional extra.
+You SHOULD spend most of your time in post_modal level, not feed level.
 
 ENGAGEMENT LEVELS:
-1. FEED LEVEL (default): Scrolling through posts in main feed
-2. POST MODAL LEVEL: Clicked on a post, viewing full content with comments visible
+1. FEED LEVEL: Scrolling through posts — use this to FIND posts to click into, not as an end goal
+2. POST MODAL LEVEL: Clicked on a post, viewing full content with comments — THIS IS WHERE YOU CAPTURE
 3. COMMENTS LEVEL: Scrolled down in modal to read more comments
-4. PROFILE LEVEL: Clicked on username to explore their content
+4. PROFILE LEVEL: Clicked on username to explore their content grid → then click into THEIR posts
 
-HOW TO ENGAGE DEEPLY:
-1. Click on a post image/video to open the post modal (detail view)
-2. In the modal, you can:
-   - Navigate carousel slides using ArrowRight/ArrowLeft keys
-   - Scroll down to see comments
-   - Click username to visit their profile
-3. Close modal by pressing Escape key
+THE ENGAGEMENT LOOP (your core workflow):
+1. Scroll feed/profile to find an interesting post
+2. CLICK the post image/video to open the detail modal
+3. In the modal: capture the full view, navigate carousel slides (ArrowRight/ArrowLeft), capture each slide
+4. Close modal (Escape) to return to feed
+5. Repeat — aim to open 1 post for every 2-3 scrolls
 
-WHEN TO ENGAGE DEEPLY (signals):
-✅ High engagement visible (many likes/comments like "1,234 likes", "View all 42 comments")
+WHEN TO CLICK INTO A POST:
+✅ ANY post with engagement (likes/comments visible) — click it
 ✅ Content relevant to user interests (keywords in caption/username match)
-✅ Carousel post detected (slide indicators like "1 of 4")
+✅ Carousel post detected (slide indicators like "1 of 4") — extra valuable
 ✅ Interesting caption snippet visible
 ✅ Good visual content (nature, photography, etc.)
 ❌ Already explored this post (check deeplyExploredPosts count)
-❌ Low engagement / not relevant
 ❌ Ad or sponsored content
-❌ Time pressure (need to cover more ground)
+❌ Very low engagement AND not relevant
 
 ENGAGEMENT DEPTH:
-- Adjust engagement time based on content relevance
-- A few seconds for irrelevant content, longer for high-value content
-- You decide the duration — there are no fixed time buckets
+- "quick": Open, capture, close (5-10 seconds)
+- "moderate": Open, capture, browse carousel, close (10-20 seconds)
+- "deep": Open, capture all slides, read comments, maybe visit profile (20-40 seconds)
 
 Include engagement decisions in your strategic field:
 - "engageDepth": "quick" | "moderate" | "deep" | null
@@ -317,18 +321,20 @@ Typing → seeing result links → scrolling away or typing again
 WHY: You never clicked a result, so you never navigated anywhere!
 FIX: After typing, look for links with follower counts and CLICK one.
 
-PROFILE EXPLORATION (after clicking a search result):
-When you land on a profile page, generally explore it before leaving:
+PROFILE EXPLORATION — REQUIRED WORKFLOW:
+When you land on a profile page, this is your REQUIRED workflow:
 1. Scroll down to see the profile's posts grid
-2. Capture screenshots of interesting content (use captureNow: true)
-3. Click individual posts to see them in detail, capture, then close (Escape)
-4. Keep scrolling and capturing until you've collected enough content
-5. Leaving too quickly wastes the navigation effort it took to get here
+2. Click the MOST RECENT post (top-left of grid) to open it in detail view
+3. In the modal: read caption, navigate carousel slides, capture screenshots
+4. Close modal (Escape), then click 2-4 MORE posts from the grid
+5. Each opened post = capture the detail view (level 1 quality!)
+6. Open AT LEAST 3 posts from any profile you visit
+7. Only leave the profile after you've explored multiple posts in detail
 
 COMMON PROFILE FAILURE:
-Search → click profile → immediately go back → search again (infinite loop!)
-WHY: You left the profile before exploring it. The search is useless without capturing content.
-FIX: Explore the profile and capture content before navigating away.
+Landing on profile → scrolling the grid → capturing grid screenshots → leaving
+WHY: Grid screenshots are LOW VALUE (level 4). The real content is inside individual posts.
+FIX: Click into posts to see full captions, all carousel slides, and comments (level 1).
 
 OUTPUT FORMAT (JSON only):
 {
@@ -371,16 +377,16 @@ STRATEGIC DECISION EXAMPLES:
   }
 }
 
-2. Found good content, want to capture and linger:
+2. Found interesting post in feed, clicking into it for detail view:
 {
-  "reasoning": "Found a beautiful nature photo matching user interests",
-  "action": "scroll",
-  "params": {"direction": "down", "amount": "small"},
-  "expectedOutcome": "Center the post in view",
+  "reasoning": "Post with 5.2K likes about coffee matches user interests — clicking to view full content in detail modal",
+  "action": "click",
+  "params": {"id": 15, "expectedName": "Photo by coffeelover"},
+  "expectedOutcome": "Post modal opens with full caption, comments, and carousel",
   "strategic": {
-    "captureNow": true,
-    "lingerDuration": "long",
-    "reason": "High-quality content worth studying"
+    "engageDepth": "deep",
+    "lingerDuration": "medium",
+    "reason": "High-value content — will capture detail view and explore carousel slides"
   }
 }
 
@@ -484,10 +490,10 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
                 goalDesc = 'Browse the home feed and collect interesting posts';
                 break;
             case 'explore_profile':
-                goalDesc = `Explore profile: ${context.currentGoal.target}`;
+                goalDesc = `Explore profile: ${context.currentGoal.target} — open 3+ posts to capture full captions, carousel slides, and comments`;
                 break;
             case 'analyze_account':
-                goalDesc = 'Create a comprehensive digest of this account — you decide the approach';
+                goalDesc = 'Build a comprehensive digest — click into individual posts for full content. Scrolling the feed alone is not enough.';
                 break;
             default:
                 goalDesc = 'General browsing - YOU decide what to do';
@@ -571,7 +577,26 @@ ${recentActionsStr}
 ${context.loopWarning ? `\n⚠️ LOOP DETECTED (${context.loopWarning.severity}): ${context.loopWarning.reason}
 WARNING #${context.loopWarning.consecutiveWarnings} — You are repeating actions with no effect. Change your approach NOW.
 ${context.loopWarning.consecutiveWarnings >= 2 ? 'CRITICAL: Auto-recovery will override your next action if you do not change strategy.' : ''}\n` : ''}
+${this.buildDepthReminder(context)}
 Make your decision. Include strategic decisions to signal captures, activity changes, or session termination.`;
+    }
+
+    /**
+     * Build a depth reminder if the LLM has been scrolling without clicking into posts.
+     */
+    private buildDepthReminder(context: NavigationContext): string {
+        const atFeedLevel = !context.engagementState || context.engagementState.level === 'feed';
+        if (!atFeedLevel) return '';
+
+        const recentScrollCount = context.recentActions
+            .slice(-6)
+            .filter(a => a.action === 'scroll')
+            .length;
+
+        if (recentScrollCount >= 3) {
+            return `⚠️ DEPTH REMINDER: You've scrolled ${recentScrollCount} times without clicking into a post. Open a post to get high-quality detail captures instead of low-value feed screenshots.\n`;
+        }
+        return '';
     }
 
     /**
@@ -1105,11 +1130,4 @@ Make your decision. Include strategic decisions to signal captures, activity cha
         return this.decisionCount * 0.001;
     }
 
-    /**
-     * Reset decision count (for new session).
-     */
-    reset(): void {
-        this.decisionCount = 0;
-        this.sessionJitter = 0.85 + Math.random() * 0.3;
-    }
 }
