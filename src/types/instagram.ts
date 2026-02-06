@@ -31,20 +31,6 @@ export interface ScrapedSession {
     scrapedAt: string;            // ISO timestamp
 }
 
-// ============================================================================
-// Page State Types
-// ============================================================================
-
-/**
- * Content state from A11y Navigator (NOT auth state).
- */
-export interface ContentState {
-    hasStories: boolean;
-    hasPosts: boolean;
-    hasVideo?: boolean;
-    currentView: 'feed' | 'story' | 'profile' | 'explore' | 'login' | 'post_detail' | 'unknown';
-}
-
 /**
  * Session validation result from BrowserManager.
  */

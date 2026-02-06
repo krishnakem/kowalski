@@ -17,7 +17,6 @@
 
 import { Page, CDPSession } from 'playwright';
 import { ScrollConfig, BoundingBox, ContentType } from '../../types/instagram.js';
-import type { A11yNavigator } from './A11yNavigator.js';
 
 export class HumanScroll {
     private page: Page;
@@ -437,84 +436,28 @@ export class HumanScroll {
     // =========================================================================
 
     /**
-     * Get scroll parameters based on content type.
-     * Text-heavy content = smaller scrolls, longer pauses
-     * Image-heavy content = larger scrolls, shorter pauses
+     * Scroll with human-like behavior: easing, micro-adjustments, reading pause.
+     * The LLM decides scroll distance via config overrides.
      *
-     * All values are randomized within ranges - NO fixed values.
-     */
-    private async getScrollParamsForContent(contentType: ContentType): Promise<{
-        distance: number;
-        pauseMs: [number, number];
-    }> {
-        const vh = await this.getViewportHeight();
-
-        // Proportional scroll distances based on viewport height
-        const params: Record<ContentType, {
-            distance: [number, number];
-            pause: [number, number];
-        }> = {
-            'text-heavy': {
-                distance: [vh * 0.20, vh * 0.30],    // 20-30% of viewport for reading
-                pause: [3000, 6000]
-            },
-            'image-heavy': {
-                distance: [vh * 0.50, vh * 0.70],    // 50-70% of viewport for visual scanning
-                pause: [1500, 3000]
-            },
-            'mixed': {
-                distance: [vh * 0.35, vh * 0.45],    // 35-45% of viewport balanced
-                pause: [2000, 5000]
-            }
-        };
-
-        const { distance, pause } = params[contentType];
-
-        return {
-            distance: this.randomInRange(distance[0], distance[1]) * this.sessionTimingMultiplier,
-            pauseMs: [
-                pause[0] * this.sessionTimingMultiplier,
-                pause[1] * this.sessionTimingMultiplier
-            ]
-        };
-    }
-
-    /**
-     * Intent-driven scroll that adapts to content density.
-     *
-     * This is the "smart" scroll that:
-     * 1. Analyzes the current viewport content via A11y tree
-     * 2. Adjusts scroll distance based on content type
-     * 3. Adjusts reading pause based on content density
-     * 4. AUDIT: Logs scroll delta and verifies scroll actually occurred
-     *
-     * @param navigator - A11yNavigator instance for content analysis
-     * @param config - Optional scroll configuration overrides
+     * @param config - Scroll configuration with explicit baseDistance from caller
      */
     async scrollWithIntent(
-        navigator: A11yNavigator,
         config: Partial<ScrollConfig> = {}
     ): Promise<{ contentType: ContentType; scrollDistance: number; actualDelta: number; scrollFailed: boolean; pauseDurationMs: number }> {
-        // Analyze content density
-        const contentDensity = await navigator.analyzeContentDensity();
-        const contentType = contentDensity.type;
+        const vh = await this.getViewportHeight();
 
-        // Get adaptive scroll parameters (proportional to viewport)
-        const adaptiveParams = await this.getScrollParamsForContent(contentType);
-
-        // Allow config overrides but default to adaptive values
+        // Default distance: ~40% viewport, LLM controls via config.baseDistance
         const {
-            baseDistance = adaptiveParams.distance,
+            baseDistance = Math.round(vh * 0.4 * this.sessionTimingMultiplier),
             variability = 0.3,
             microAdjustProb = 0.25,
-            readingPauseMs = adaptiveParams.pauseMs
+            readingPauseMs = [2000 * this.sessionTimingMultiplier, 4000 * this.sessionTimingMultiplier]
         } = config;
 
         // 1. Calculate actual scroll distance with variation
         const variation = 1 + (Math.random() - 0.5) * 2 * variability;
         const targetDistance = Math.round(baseDistance * variation);
 
-        // === SCROLL DELTA VERIFICATION ===
         // Capture scroll position BEFORE
         const scrollYBefore = await this.getScrollPosition();
 
@@ -525,40 +468,26 @@ export class HumanScroll {
         const scrollYAfter = await this.getScrollPosition();
         const actualDelta = scrollYAfter - scrollYBefore;
 
-        // === ENTROPY AUDIT LOG ===
-        console.log(`  📜 SCROLL AUDIT: Target=${targetDistance}px, Actual Delta=${actualDelta}px, ContentType=${contentType}`);
-        console.log(`  📊 Session Multiplier: ${this.sessionTimingMultiplier.toFixed(2)}x, Pause Range: [${Math.round(readingPauseMs[0])}-${Math.round(readingPauseMs[1])}]ms`);
+        console.log(`  📜 SCROLL: Target=${targetDistance}px, Actual=${actualDelta}px`);
 
-        // === CRITICAL WARNING: Scroll Failed ===
+        // Scroll failure detection
         let scrollFailed = false;
         if (actualDelta === 0 && targetDistance > 50) {
-            console.log('  ⚠️ CRITICAL WARNING: Scroll Failed - Page may be stuck or reached bottom!');
-            console.log(`  ⚠️ ScrollY unchanged at ${scrollYBefore}px after attempting ${targetDistance}px scroll`);
+            console.log('  ⚠️ Scroll Failed - Page may be stuck or reached bottom!');
             scrollFailed = true;
-        } else if (Math.abs(actualDelta) < targetDistance * 0.3) {
-            console.log(`  ⚠️ WARNING: Scroll undershot significantly (${Math.round(actualDelta / targetDistance * 100)}% of target)`);
         }
 
-        // 3. Micro-adjustment: scroll past and slightly back (humans do this)
-        // Probability varies by content type (more likely with text-heavy)
-        const adjustedMicroProb = contentType === 'text-heavy'
-            ? microAdjustProb * 1.3  // More likely when reading
-            : contentType === 'image-heavy'
-            ? microAdjustProb * 0.7  // Less likely when scanning images
-            : microAdjustProb;
-
-        if (Math.random() < adjustedMicroProb) {
+        // 3. Micro-adjustment (humans scroll past then slightly back)
+        if (Math.random() < microAdjustProb) {
             await this.microAdjust();
         }
 
-        // 4. Reading pause (human looks at content)
-        // Adjusted based on content type
+        // 4. Reading pause
         const pauseDuration = this.randomInRange(readingPauseMs[0], readingPauseMs[1]);
-        console.log(`  ⏱️ Reading pause: ${Math.round(pauseDuration)}ms`);
         await new Promise(resolve => setTimeout(resolve, pauseDuration));
 
         return {
-            contentType,
+            contentType: 'mixed',
             scrollDistance: targetDistance,
             actualDelta,
             scrollFailed,

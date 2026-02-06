@@ -151,21 +151,6 @@ export class NavigationExecutor {
             return this.failureResult(decision, startTime, `Element id=${params.id} not found`);
         }
 
-        // Name verification: if the LLM provided an expectedName, check it matches.
-        // On mismatch, return failure so the LLM can see the error and self-correct.
-        if (params.expectedName) {
-            const expectedLower = params.expectedName.toLowerCase();
-            const targetLower = target.name.toLowerCase();
-            const nameMatches = targetLower.includes(expectedLower) || expectedLower.includes(targetLower);
-
-            if (!nameMatches) {
-                console.warn(`⚠️ Element ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}"`);
-                return this.failureResult(decision, startTime,
-                    `ID mismatch: id=${params.id} is "${target.name.slice(0, 50)}", not "${params.expectedName}". Check the accessibility tree for the correct ID.`
-                );
-            }
-        }
-
         // Get the bounding box
         const boundingBox = target.boundingBox;
         if (!boundingBox) {
@@ -194,6 +179,32 @@ export class NavigationExecutor {
                 verified = 'dom_changed';
                 break;
             }
+        }
+
+        // Retry once for link elements — Instagram SPA may not have hydrated event handlers yet
+        if (verified === 'no_change_detected' && target.role === 'link') {
+            console.log(`  🔄 Link click no_change_detected — retrying after hydration delay (id:${target.id} "${target.name}")`);
+            await this.humanDelay(1200, 1800);
+            await this.ghost.clickElement(boundingBox);
+
+            for (let attempt = 0; attempt < 5; attempt++) {
+                await this.humanDelay(300, 500);
+                postClickUrl = this.page.url();
+                if (preClickUrl !== postClickUrl) {
+                    verified = 'url_changed';
+                    break;
+                }
+                const postClickState = await this.getQuickDOMSignature();
+                if (preClickState !== postClickState) {
+                    verified = 'dom_changed';
+                    break;
+                }
+            }
+        }
+
+        // Invalidate tree cache if click caused a state change (page structure is now different)
+        if (verified !== 'no_change_detected') {
+            this.navigator.invalidateTreeCache();
         }
 
         // Record action with state context and clicked element name
@@ -228,9 +239,6 @@ export class NavigationExecutor {
     ): Promise<ExecutionResult> {
         const params = decision.params as ScrollParams;
 
-        // Detect if a dialog/modal is open — scroll events will be captured by the modal, not the main page
-        const hasDialog = await this.detectActiveDialog();
-
         // Horizontal scroll: unchanged (mouse wheel, no content-aware logic)
         if (params.direction === 'left' || params.direction === 'right') {
             const viewportHeight = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
@@ -244,7 +252,6 @@ export class NavigationExecutor {
             this.recordAction(decision, true, undefined, {
                 scrollY: scrollYAfter,
                 url: this.page.url(),
-                ...(hasDialog ? { verified: 'scrolled_in_dialog' as const } : {})
             });
 
             return {
@@ -253,7 +260,6 @@ export class NavigationExecutor {
                 params: params,
                 resultingUrl: this.page.url(),
                 durationMs: Date.now() - startTime,
-                ...(hasDialog ? { verified: 'scrolled_in_dialog' as const } : {})
             };
         }
 
@@ -283,7 +289,7 @@ export class NavigationExecutor {
         }
 
         // Execute content-aware scroll (adapts distance + pause to content density)
-        const intentResult = await this.scroll.scrollWithIntent(this.navigator, overrides);
+        const intentResult = await this.scroll.scrollWithIntent(overrides);
 
         // Post-scroll element snapshot (fresh tree build — cache expired during scroll pause)
         const postSnapshot = await this.getQuickElementSnapshot();
@@ -311,8 +317,7 @@ export class NavigationExecutor {
         this.recordAction(decision, true, undefined, {
             scrollY: scrollYAfter,
             url: this.page.url(),
-            scrollResult: scrollResultData,
-            ...(hasDialog ? { verified: 'scrolled_in_dialog' as const } : {})
+            scrollResult: scrollResultData
         });
 
         return {
@@ -321,8 +326,7 @@ export class NavigationExecutor {
             params: params,
             resultingUrl: this.page.url(),
             durationMs: Date.now() - startTime,
-            scrollResult: scrollResultData,
-            ...(hasDialog ? { verified: 'scrolled_in_dialog' as const } : {})
+            scrollResult: scrollResultData
         };
     }
 
@@ -479,20 +483,6 @@ export class NavigationExecutor {
             return this.failureResult(decision, startTime, `Element id=${params.id} not found`);
         }
 
-        // Name verification: return failure on mismatch so LLM can self-correct
-        if (params.expectedName) {
-            const expectedLower = params.expectedName.toLowerCase();
-            const targetLower = target.name.toLowerCase();
-            const nameMatches = targetLower.includes(expectedLower) || expectedLower.includes(targetLower);
-
-            if (!nameMatches) {
-                console.warn(`⚠️ Hover ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}"`);
-                return this.failureResult(decision, startTime,
-                    `ID mismatch: id=${params.id} is "${target.name.slice(0, 50)}", not "${params.expectedName}". Check the accessibility tree for the correct ID.`
-                );
-            }
-        }
-
         const boundingBox = target.boundingBox;
         if (!boundingBox) {
             return this.failureResult(decision, startTime, `Element id=${params.id} has no bounding box`);
@@ -527,8 +517,13 @@ export class NavigationExecutor {
     ): Promise<ExecutionResult> {
         await this.page.goBack({ waitUntil: 'domcontentloaded' });
 
-        // Delay for page to settle
-        await this.humanDelay(500, 1000);
+        // Wait for Instagram SPA to re-render — 'networkidle' catches React hydration
+        // (no network requests for 500ms = React finished re-rendering)
+        await this.page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
+        await this.humanDelay(800, 1500);
+
+        // Invalidate tree cache — page structure changed fundamentally after back()
+        this.navigator.invalidateTreeCache();
 
         // Record action
         this.recordAction(decision, true, undefined, { url: this.page.url() });
@@ -540,20 +535,6 @@ export class NavigationExecutor {
             resultingUrl: this.page.url(),
             durationMs: Date.now() - startTime
         };
-    }
-
-    /**
-     * Detect if a dialog/modal overlay is currently open on the page.
-     * Used to inform the LLM that scroll events will be captured by the dialog, not the main feed.
-     */
-    private async detectActiveDialog(): Promise<boolean> {
-        try {
-            return await this.page.evaluate(() => {
-                return document.querySelectorAll('[role="dialog"]').length > 0;
-            });
-        } catch {
-            return false;
-        }
     }
 
     /**

@@ -110,7 +110,8 @@ export class ScreenshotCollector {
         const postId = this.extractPostId();
 
         // PRIMARY DEDUP: Skip if we've already captured this exact post
-        if (postId && this.capturedPostIds.has(postId)) {
+        // Carousel slides share the same postId (same URL) — rely on hash dedup instead
+        if (postId && source !== 'carousel' && this.capturedPostIds.has(postId)) {
             console.log(`📸 Skipping duplicate post: ${postId}`);
             return false;
         }
@@ -270,7 +271,7 @@ export class ScreenshotCollector {
             // Extract post ID from URL if available
             const postId = this.extractPostId();
             if (postId) {
-                if (this.capturedPostIds.has(postId)) {
+                if (source !== 'carousel' && this.capturedPostIds.has(postId)) {
                     console.log(`  📸 Capture skipped (duplicate postId: ${postId})`);
                     return null;
                 }

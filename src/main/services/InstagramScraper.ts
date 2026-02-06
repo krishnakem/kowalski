@@ -26,8 +26,7 @@ import * as path from 'path';
 import * as os from 'os';
 import {
     BrowsingSession,
-    BoundingBox,
-    ContentState
+    BoundingBox
 } from '../../types/instagram.js';
 import {
     NavigationContext,
@@ -39,6 +38,7 @@ import {
     EngagementLevel,
     PressParams
 } from '../../types/navigation.js';
+import { Jimp } from 'jimp';
 import { NavigationLLM } from './NavigationLLM.js';
 import { NavigationExecutor } from './NavigationExecutor.js';
 import { DebugOverlay, DebugState } from './DebugOverlay.js';
@@ -68,7 +68,7 @@ export class InstagramScraper {
     private sessionMemory: SessionMemory = new SessionMemory();
 
     // Track current view for gaze planning
-    private lastKnownView: ContentState['currentView'] = 'unknown';
+    private lastKnownView: string = 'unknown';
 
     // Metrics
     private visionApiCalls = 0;
@@ -114,13 +114,14 @@ export class InstagramScraper {
      * Return to Instagram home page.
      */
     private async returnToHome(): Promise<void> {
-        if (!(await this.navigator.isOnFeed())) {
+        const url = this.navigator.getPageUrl();
+        const isFeedRoot = url === 'https://www.instagram.com/' || url.startsWith('https://www.instagram.com/?');
+        if (!isFeedRoot) {
             console.log('🏠 Returning to home...');
             await this.page.goto('https://www.instagram.com/', {
                 waitUntil: 'domcontentloaded'
             });
             await this.humanDelay(2000, 3000);
-            this.lastKnownView = 'feed';
         }
     }
 
@@ -250,11 +251,11 @@ export class InstagramScraper {
             });
             await this.humanDelay(2000, 4000);
 
-            // 2. Check page state
-            const state = await this.navigator.getContentState();
-            console.log('📊 Content State:', state);
+            // 2. Check for login redirect (session lifecycle)
+            const pageUrl = this.navigator.getPageUrl();
+            console.log('📊 Page URL:', pageUrl);
 
-            if (state.currentView === 'login') {
+            if (pageUrl.includes('/accounts/login')) {
                 throw new Error('SESSION_EXPIRED');
             }
 
@@ -392,22 +393,37 @@ export class InstagramScraper {
                 consecutiveLoopWarnings = 0;
             }
 
-            // Get current state
-            const state = await this.navigator.getContentState();
-            this.screenshotCollector.appendLog(`--- view: ${state.currentView} | phase: ${currentPhase} | captures: ${this.screenshotCollector.getPhotoCount()}`);
+            const currentUrl = this.page.url();
+            this.screenshotCollector.appendLog(`--- url: ${currentUrl} | phase: ${currentPhase} | captures: ${this.screenshotCollector.getPhotoCount()}`);
             const elements = await this.navigator.getNavigationElements();
 
             // Get tree summary for LLM dynamic page awareness
             const treeSummary = await this.navigator.buildTreeSummaryForLLM();
+
+            // Capture viewport screenshot immediately after tree — same page state
+            let screenshot: Buffer | undefined;
+            try {
+                const raw = await this.page.screenshot({ type: 'jpeg', quality: 80, fullPage: false });
+                const image = await Jimp.read(Buffer.from(raw));
+                const origW = image.width;
+                const origH = image.height;
+                if (origW > 1024) {
+                    image.resize({ w: 1024 });
+                }
+                screenshot = await image.getBuffer('image/jpeg', { quality: 80 });
+                console.log(`  📸 Screenshot for LLM: ${origW}x${origH} → ${image.width}x${image.height} (${Math.round(screenshot.length / 1024)}KB)`);
+            } catch (err) {
+                console.log(`  ⚠️ Screenshot capture failed: ${err}`);
+            }
 
             // Build comprehensive context for LLM strategic decisions
             const context: NavigationContext = {
                 sessionId: `session-${startTime}`,
                 startTime,
                 targetDurationMs: config.maxDurationMs,
-                url: this.page.url(),
-                view: state.currentView,
-                currentGoal: await this.getGoalForPhase(currentPhase, userInterests, interestsSearched, state.currentView, this.page.url()),
+                url: currentUrl,
+                view: currentUrl,
+                currentGoal: this.getGoalForPhase(currentPhase, userInterests, interestsSearched),
                 userInterests,
                 postsCollected,
                 storiesWatched,
@@ -419,11 +435,6 @@ export class InstagramScraper {
                 currentPhase,
                 phaseHistory,
                 captureCount: this.screenshotCollector.getPhotoCount(),
-                videoState: state.hasVideo ? {
-                    isPlaying: true,  // Assume playing if detected
-                    duration: 0,      // Unknown without CDP query
-                    currentTime: 0
-                } : undefined,
                 contentStats: {
                     uniquePostsRatio: totalPostsSeen > 0 ? uniquePosts.size / totalPostsSeen : 1,
                     adRatio: totalPostsSeen > 0 ? adsSkipped / totalPostsSeen : 0,
@@ -454,7 +465,7 @@ export class InstagramScraper {
             };
 
             // Get LLM decision (includes strategic decisions)
-            const decision = await this.navigationLLM.decideAction(context, elements);
+            const decision = await this.navigationLLM.decideAction(context, elements, screenshot);
             console.log(`  🤖 Decision: ${decision.action} - ${decision.reasoning}`);
             this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`${decision.action}\` — ${decision.reasoning}`);
 
@@ -615,21 +626,11 @@ export class InstagramScraper {
                     uniquePosts.add(postId);
                 }
 
-                // Track story watching and profile navigation
-                const newState = await this.navigator.getContentState();
-                if (newState.currentView === 'story') {
+                // Track story watching (metric bookkeeping via URL)
+                const postActionUrl = result.resultingUrl || this.page.url();
+                if (postActionUrl.includes('/stories/')) {
                     storiesWatched++;
                     phaseItemsCollected++;
-                }
-
-                // Detect profile page navigation: mark interest as searched
-                // so we don't re-search the same interest in a loop
-                if (newState.currentView === 'profile') {
-                    const currentInterest = userInterests.find(i => !interestsSearched.includes(i));
-                    if (currentInterest && !interestsSearched.includes(currentInterest)) {
-                        interestsSearched.push(currentInterest);
-                        console.log(`  📍 Landed on profile — marked "${currentInterest}" as searched (${interestsSearched.length}/${userInterests.length})`);
-                    }
                 }
 
                 // LLM-controlled capture with 3-tier priority:
@@ -641,14 +642,18 @@ export class InstagramScraper {
                 if (shouldCapture) {
                     await this.humanDelay(500, 800); // Wait for content to stabilize
 
-                    // Determine capture source based on current view
+                    // Determine capture source from URL (infrastructure for dedup)
                     let source: 'feed' | 'story' | 'search' | 'profile' | 'carousel' = 'feed';
-                    if (newState.currentView === 'story') {
+                    if (postActionUrl.includes('/stories/')) {
                         source = 'story';
-                    } else if (newState.currentView === 'profile') {
-                        source = 'profile';
-                    } else if (this.page.url().includes('/explore') || this.page.url().includes('search')) {
+                    } else if (postActionUrl.includes('/explore') || postActionUrl.includes('search')) {
                         source = 'search';
+                    }
+
+                    // Carousel: when in a post modal with multi-slide carousel detected,
+                    // use 'carousel' source to bypass postId dedup (all slides share same URL)
+                    if (engagementState.carouselState && engagementState.carouselState.totalSlides > 1) {
+                        source = 'carousel';
                     }
 
                     const captureReason = decision.capture?.reason ||
@@ -776,71 +781,30 @@ export class InstagramScraper {
 
                 // === DEEP ENGAGEMENT STATE TRACKING ===
 
-                // Detect engagement level change
-                const engagementLevel = await this.navigator.detectEngagementLevel();
-                if (engagementLevel.level !== engagementState.level) {
-                    console.log(`  📍 Engagement: ${engagementState.level} → ${engagementLevel.level}`);
-                    this.screenshotCollector.appendLog(`  📍 Engagement: ${engagementState.level} → ${engagementLevel.level}`);
-                    engagementState.level = engagementLevel.level;
-                    engagementState.levelEnteredAt = Date.now();
-
-                    // If entering post modal, track the post
-                    if (engagementLevel.level === 'post_modal' && engagementLevel.postUrl) {
-                        engagementState.currentPost = {
-                            postUrl: engagementLevel.postUrl,
-                            username: engagementLevel.username
-                        };
-                        engagementState.entryAction = 'clicked_post';
-                    }
-
-                    // If entering profile
-                    if (engagementLevel.level === 'profile') {
-                        engagementState.currentPost = {
-                            username: engagementLevel.username
-                        };
-                        engagementState.entryAction = 'clicked_username';
-                    }
-                }
-
-                // If in post modal, extract metrics and carousel state
-                if (engagementState.level === 'post_modal') {
-                    const metrics = await this.navigator.extractPostEngagementMetrics();
-                    engagementState.postMetrics = {
-                        likeCount: metrics.likeCount,
-                        commentCount: metrics.commentCount,
-                        hasVideo: metrics.hasVideo
+                // Update carousel state (needed for programmatic carousel exploration)
+                const carouselIndicator = await this.navigator.getCarouselSlideIndicator();
+                if (carouselIndicator) {
+                    const prevSlide = engagementState.carouselState?.currentSlide || 0;
+                    engagementState.carouselState = {
+                        currentSlide: carouselIndicator.current,
+                        totalSlides: carouselIndicator.total,
+                        fullyExplored: carouselIndicator.current === carouselIndicator.total
                     };
-
-                    // Update carousel state
-                    if (metrics.carouselState) {
-                        const prevSlide = engagementState.carouselState?.currentSlide || 0;
-                        engagementState.carouselState = {
-                            currentSlide: metrics.carouselState.currentSlide,
-                            totalSlides: metrics.carouselState.totalSlides,
-                            fullyExplored: metrics.carouselState.currentSlide === metrics.carouselState.totalSlides
-                        };
-
-                        // Log carousel navigation
-                        if (prevSlide !== metrics.carouselState.currentSlide) {
-                            console.log(`  🎠 Carousel: Slide ${metrics.carouselState.currentSlide}/${metrics.carouselState.totalSlides}`);
-                        }
+                    if (prevSlide !== carouselIndicator.current) {
+                        console.log(`  🎠 Carousel: Slide ${carouselIndicator.current}/${carouselIndicator.total}`);
                     }
                 }
 
                 // Handle closeEngagement decision
                 if (decision.strategic?.closeEngagement) {
-                    // Mark post as deeply explored
                     if (engagementState.currentPost?.postUrl) {
                         engagementState.deeplyExploredPostUrls.push(engagementState.currentPost.postUrl);
                         console.log(`  ✓ Added to explored posts (${engagementState.deeplyExploredPostUrls.length} total)`);
                     }
-
-                    // If we just pressed Escape, reset engagement state
                     if (decision.action === 'press' && (decision.params as PressParams).key === 'Escape') {
                         engagementState.level = 'feed';
                         engagementState.currentPost = undefined;
                         engagementState.carouselState = undefined;
-                        engagementState.postMetrics = undefined;
                         engagementState.entryAction = undefined;
                         engagementState.levelEnteredAt = Date.now();
                     }
@@ -863,13 +827,18 @@ export class InstagramScraper {
                 if (recovery.action === 'press' && recovery.key) {
                     await this.page.keyboard.press(recovery.key);
                 } else if (recovery.action === 'back') {
-                    // Context-aware: don't back() from the feed — it navigates away from Instagram entirely
-                    const currentState = await this.navigator.getContentState();
-                    if (currentState.currentView === 'feed' || currentState.currentView === 'unknown') {
-                        console.log(`  🔄 On ${currentState.currentView} — scrolling instead of back() to stay on Instagram`);
+                    // Safety: don't back() from the feed root — it navigates away from Instagram entirely
+                    const recoveryUrl = this.navigator.getPageUrl();
+                    const isOnFeedRoot = recoveryUrl === 'https://www.instagram.com/' || recoveryUrl.startsWith('https://www.instagram.com/?');
+                    if (isOnFeedRoot) {
+                        console.log(`  🔄 On feed root — scrolling instead of back() to stay on Instagram`);
                         await this.scroll.scroll({ baseDistance: 600, variability: 0.3, readingPauseMs: [300, 600] });
                     } else {
                         await this.page.goBack({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+                        // Wait for SPA re-hydration after back() — same settle logic as NavigationExecutor.executeBack()
+                        await this.page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
+                        await this.humanDelay(800, 1500);
+                        this.navigator.invalidateTreeCache();
                     }
                 } else if (recovery.action === 'navigate_home') {
                     // Try clicking the Home link dynamically via accessibility tree (no page reload)
@@ -992,36 +961,23 @@ export class InstagramScraper {
 
     /**
      * Get the navigation goal for a given phase.
-     * Note: Time allocation is now fully LLM-controlled.
-     * These goals provide hints but LLM decides actual duration.
+     * Returns a generic goal — the LLM determines context from URL + tree + screenshot.
      */
-    private async getGoalForPhase(
+    private getGoalForPhase(
         phase: BrowsingPhase,
         userInterests: string[],
-        interestsSearched: string[],
-        currentView?: string,
-        currentUrl?: string
-    ): Promise<NavigationGoal> {
-        // Provide context about current location — the system prompt decides behavior
-        if (currentUrl && (currentUrl.includes('/p/') || currentUrl.includes('/reel/'))) {
+        interestsSearched: string[]
+    ): NavigationGoal {
+        const unsearched = userInterests.filter(i => !interestsSearched.includes(i));
+        if (phase === 'search' && unsearched.length > 0) {
             return {
-                type: 'analyze_account',
-                target: 'Currently viewing a post detail page (modal open)'
+                type: 'search_interest',
+                target: unsearched[0]
             };
         }
-
-        if (currentView === 'profile') {
-            const username = (await this.navigator.getProfileUsername()) || 'unknown profile';
-            return {
-                type: 'explore_profile',
-                target: username
-            };
-        }
-
-        // Default: general session goal
         return {
-            type: 'analyze_account',
-            target: 'General Instagram session in progress'
+            type: 'general_browse',
+            target: `Phase: ${phase}`
         };
     }
 

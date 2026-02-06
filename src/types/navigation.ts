@@ -8,7 +8,7 @@
  * Cost: ~$0.001 per decision using GPT-4o-mini
  */
 
-import { Point, BoundingBox, ContentState, ContentType } from './instagram.js';
+import { Point, BoundingBox, ContentType } from './instagram.js';
 
 // ============================================================================
 // Navigation Context Types
@@ -36,7 +36,7 @@ export interface NavigationContext {
 
     // Current page state
     url: string;
-    view: ContentState['currentView'];
+    view: string;
 
     // Goal/mission
     currentGoal: NavigationGoal;
@@ -148,13 +148,6 @@ export interface EngagementState {
         totalSlides: number;
         /** Have we seen all slides? */
         fullyExplored: boolean;
-    };
-
-    /** Engagement metrics for this post */
-    postMetrics?: {
-        likeCount?: string;      // e.g., "1,234 likes"
-        commentCount?: string;   // e.g., "View all 42 comments"
-        hasVideo: boolean;
     };
 
     /** Time spent in current engagement level (ms) */
@@ -386,12 +379,12 @@ export interface ActionRecord {
     action: NavigationAction;
     params: ActionParams;
     success: boolean;
-    resultingView?: ContentState['currentView'];
+    resultingView?: string;
     errorMessage?: string;
     // State context for stagnation detection
     scrollY?: number;
     url?: string;
-    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified' | 'scrolled_in_dialog';
+    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified';
     elementCount?: number;
     // What element was actually acted on (for LLM feedback)
     clickedElementName?: string;
@@ -420,11 +413,11 @@ export interface ExecutionResult {
     actionTaken: NavigationAction;
     params: ActionParams;
     resultingUrl?: string;
-    resultingView?: ContentState['currentView'];
+    resultingView?: string;
     errorMessage?: string;
     durationMs: number;
     focusedElement?: FocusedElement;         // Element that was clicked (for capture)
-    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified' | 'scrolled_in_dialog';
+    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified';
     scrollResult?: ScrollResult;             // Content-aware scroll feedback
 }
 
@@ -437,6 +430,7 @@ export interface NavigationLLMConfig {
     maxTokens?: number;                      // Default: 300
     temperature?: number;                    // Default: 0.3
     debug?: boolean;                         // Enable verbose logging of LLM reasoning
+    visionDetail?: 'low' | 'high' | 'off';  // Default: 'low'. Screenshot detail level for LLM vision.
 }
 
 /**

@@ -17,14 +17,9 @@
 
 import { Page, CDPSession } from 'playwright';
 import {
-    ContentState,
-    FeedTerminationConfig,
-    TerminationResult,
     InteractiveElement,
     ElementState,
     BoundingBox,
-    ContentDensity,
-    ContentType,
     CDPAXNode,
     AXTree,
     AXTreeNode,
@@ -143,370 +138,11 @@ export class A11yNavigator {
     }
 
     /**
-     * Get content state using accessibility tree (primary) with URL fallback.
-     * Cost: $0 (CDP accessibility tree + URL analysis)
-     *
-     * NOTE: This does NOT check auth status. Use BrowserManager.validateSession() for that.
+     * Get the current page URL.
+     * Simple primitive — callers use it for infrastructure checks (login, safety).
      */
-    async getContentState(): Promise<ContentState> {
-        const tree = await this.getCachedTree();
-        const treeView = tree ? this.detectCurrentViewFromTree(tree) : 'unknown' as ContentState['currentView'];
-        const urlView = this.detectCurrentViewFromURL();
-
-        // Temporary: comparison logging for validation
-        if (treeView !== 'unknown' && treeView !== urlView) {
-            console.log(`  🔍 View detection disagreement: tree=${treeView}, url=${urlView}`);
-        }
-
-        // Tree-based detection is primary, URL is fallback for 'unknown'
-        const currentView = treeView !== 'unknown' ? treeView : urlView;
-
-        return {
-            hasStories: currentView === 'feed' || currentView === 'story',
-            hasPosts: currentView === 'feed' || currentView === 'profile',
-            currentView
-        };
-    }
-
-    // =========================================================================
-    // Tree-Based View Detection
-    // =========================================================================
-
-    /**
-     * Detect current view from accessibility tree signals.
-     * Priority-ordered: most specific first.
-     * Returns 'unknown' if no strong signals match (falls back to URL).
-     */
-    private detectCurrentViewFromTree(tree: AXTree): ContentState['currentView'] {
-        const signals = this.collectViewSignals(tree);
-
-        if (signals.hasLoginForm) return 'login';
-        if (signals.hasStoryViewer) return 'story';
-        if (signals.hasPostDetailDialog) return 'post_detail';
-
-        // Post detail PAGE (not dialog overlay): when user clicks a timestamp link,
-        // Instagram navigates to a full page (instagram.com/p/xxx or /reel/xxx).
-        // No dialog element exists, so hasPostDetailDialog is false.
-        // Must check URL before explore — post detail pages have many deep links
-        // that falsely trigger the explore grid heuristic.
-        const url = this.page.url();
-        if (url.includes('/p/') || url.includes('/reel/')) return 'post_detail';
-
-        if (signals.hasProfileIndicators) return 'profile';
-        if (signals.hasExploreGrid) return 'explore';
-        if (signals.articleCount > 0) return 'feed';
-        return 'unknown';
-    }
-
-    /**
-     * Single-pass signal collection from the accessibility tree.
-     * Collects all signals needed for view detection efficiently.
-     *
-     * Critical implementation details:
-     * - Dialog detection uses parent-chain validation (not just "dialog exists + article exists")
-     * - Profile detection uses depth checks (prevents false positives from feed suggestions)
-     * - Explore detection uses grid link pattern matching
-     */
-    private collectViewSignals(tree: AXTree): {
-        hasLoginForm: boolean;
-        hasStoryViewer: boolean;
-        hasPostDetailDialog: boolean;
-        hasProfileIndicators: boolean;
-        hasExploreGrid: boolean;
-        articleCount: number;
-        storyButtonCount: number;
-    } {
-        let hasDialog = false;
-        let hasArticleInDialog = false;
-        let hasTablist = false;
-        let hasProfileTabs = false;
-        let hasFollowButtonShallow = false;
-        let hasFollowerStatsShallow = false;
-        let hasLoginInputs = false;
-        let hasStoryPause = false;
-        let articleCount = 0;
-        let storyButtonCount = 0;
-        let gridLinkCount = 0;
-
-        // Track dialog nodeIds for parent-chain validation
-        const dialogNodeIds = new Set<string>();
-
-        for (const node of tree.nodeMap.values()) {
-            if (node.ignored) continue;
-            const role = node.role?.value?.toLowerCase() || '';
-            const name = (node.name?.value || '').toLowerCase();
-            const depth = node.depth || 0;
-
-            // Track dialogs
-            if (role === 'dialog' || role === 'alertdialog') {
-                hasDialog = true;
-                dialogNodeIds.add(node.nodeId);
-            }
-
-            // Count articles and check if any are inside a dialog (parent-chain walk)
-            if (role === 'article') {
-                articleCount++;
-                if (hasDialog && !hasArticleInDialog) {
-                    // Walk parent chain to verify article is inside a dialog
-                    let parent = node.parentId ? tree.nodeMap.get(node.parentId) : null;
-                    while (parent) {
-                        if (dialogNodeIds.has(parent.nodeId)) {
-                            hasArticleInDialog = true;
-                            break;
-                        }
-                        parent = parent.parentId ? tree.nodeMap.get(parent.parentId) : null;
-                    }
-                }
-            }
-
-            // Profile detection: tablist and profile-specific tabs
-            if (role === 'tablist') hasTablist = true;
-            if (role === 'tab' && (name === 'posts' || name === 'reels' || name === 'tagged')) {
-                hasProfileTabs = true;
-            }
-
-            // Profile detection: Follow button and follower stats at shallow depth
-            // (prevents false positives from feed suggestions/unfollowed posts)
-            if (role === 'button' && name === 'follow' && depth < 15) {
-                hasFollowButtonShallow = true;
-            }
-            if ((name.includes('followers') || name.includes('following')) && depth < 15) {
-                hasFollowerStatsShallow = true;
-            }
-
-            // Story viewer detection: Pause button at shallow depth with no articles
-            if (role === 'button' && name === 'pause' && depth < 15) {
-                hasStoryPause = true;
-            }
-            if (name.startsWith('story by ')) {
-                storyButtonCount++;
-            }
-
-            // Login detection
-            if ((role === 'textbox' || role === 'input') &&
-                (name.includes('username') || name.includes('password') || name.includes('phone number'))) {
-                hasLoginInputs = true;
-            }
-
-            // Explore detection: grid of links with meaningful names, no article wrappers
-            if (role === 'link' && depth > 15 && name.length > 20) {
-                gridLinkCount++;
-            }
-        }
-
-        return {
-            hasLoginForm: hasLoginInputs,
-            hasStoryViewer: hasStoryPause && articleCount === 0,
-            hasPostDetailDialog: hasDialog && hasArticleInDialog,
-            hasProfileIndicators: (hasTablist && hasProfileTabs) || (hasFollowerStatsShallow && hasFollowButtonShallow),
-            hasExploreGrid: gridLinkCount > 6 && articleCount === 0 && !hasProfileTabs,
-            articleCount,
-            storyButtonCount,
-        };
-    }
-
-    // =========================================================================
-    // URL-Based View Detection (Fallback)
-    // =========================================================================
-
-    /**
-     * Determine current view/page type from URL.
-     * Kept as fallback when tree-based detection returns 'unknown'.
-     */
-    private detectCurrentViewFromURL(): ContentState['currentView'] {
-        const url = this.page.url();
-        if (url.includes('/accounts/login')) return 'login';
-        if (url.includes('/stories/')) return 'story';
-        if (url.includes('/explore')) return 'explore';
-
-        // Check for post detail page: instagram.com/p/xxx or /reel/xxx
-        if (url.includes('/p/') || url.includes('/reel/')) {
-            return 'post_detail';
-        }
-
-        // Check for profile page pattern: instagram.com/username
-        const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
-        if (profileMatch && !['explore', 'reels', 'direct'].includes(profileMatch[1])) {
-            return 'profile';
-        }
-
-        // Default to feed if on main page
-        if (url === 'https://www.instagram.com/' || url.includes('instagram.com/?')) {
-            return 'feed';
-        }
-
-        return 'unknown';
-    }
-
-    // ============================================================================
-    // Deep Engagement Detection
-    // ============================================================================
-
-    /**
-     * Detect current engagement level for LLM context.
-     * Uses accessibility tree signals (primary) with URL fallback.
-     * Cost: $0 (CDP accessibility tree analysis)
-     */
-    async detectEngagementLevel(): Promise<{
-        level: 'feed' | 'post_modal' | 'comments' | 'profile';
-        postUrl?: string;
-        username?: string;
-    }> {
-        const tree = await this.getCachedTree();
-
-        if (tree) {
-            const signals = this.collectViewSignals(tree);
-
-            // Post detail modal: dialog containing an article
-            if (signals.hasPostDetailDialog) {
-                // Try to extract post URL from page URL (still useful for tracking)
-                const url = this.page.url();
-                const postMatch = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-                const postUrl = postMatch ? `https://www.instagram.com/p/${postMatch[2]}/` : undefined;
-                return { level: 'post_modal', postUrl };
-            }
-
-            // Profile page: tablist with profile tabs or follower stats
-            if (signals.hasProfileIndicators) {
-                const username = this.getProfileUsernameFromTree(tree);
-                return { level: 'profile', username: username || undefined };
-            }
-
-            // Story viewer is a separate engagement (not modal, not feed)
-            if (signals.hasStoryViewer) {
-                return { level: 'feed' }; // Stories don't have a dedicated engagement level
-            }
-        }
-
-        // Fallback to URL-based detection
-        const url = this.page.url();
-        if (url.includes('/p/') || url.includes('/reel/')) {
-            const postMatch = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-            const postUrl = postMatch ? `https://www.instagram.com/p/${postMatch[2]}/` : undefined;
-            return { level: 'post_modal', postUrl };
-        }
-
-        const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
-        if (profileMatch && !['explore', 'reels', 'direct', 'p'].includes(profileMatch[1])) {
-            return { level: 'profile', username: profileMatch[1] };
-        }
-
-        return { level: 'feed' };
-    }
-
-    /**
-     * Extract profile username from accessibility tree.
-     * Finds the first heading at shallow depth that looks like a username.
-     */
-    private getProfileUsernameFromTree(tree: AXTree): string | null {
-        for (const node of tree.nodeMap.values()) {
-            if (node.ignored) continue;
-            const role = node.role?.value?.toLowerCase() || '';
-            const name = node.name?.value || '';
-            const depth = node.depth || 0;
-
-            // Profile headings are at shallow depth and contain the display name
-            if (role === 'heading' && depth < 15 && name.length > 1 && name.length < 100) {
-                // Skip generic headings
-                if (name.toLowerCase() === 'suggestions for you') continue;
-                return name;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Extract engagement metrics from visible post elements.
-     * Looks for like counts, comment counts, carousel indicators.
-     * Cost: $0 (accessibility tree analysis)
-     */
-    async extractPostEngagementMetrics(): Promise<{
-        likeCount?: string;
-        commentCount?: string;
-        carouselState?: { currentSlide: number; totalSlides: number };
-        hasVideo: boolean;
-        username?: string;
-    }> {
-        const tree = await this.buildAccessibilityTree();
-        if (!tree) return { hasVideo: false };
-
-        let likeCount: string | undefined;
-        let commentCount: string | undefined;
-        let hasVideo = false;
-        let username: string | undefined;
-
-        for (const node of tree.nodeMap.values()) {
-            if (node.ignored) continue;
-            const name = node.name?.value || '';
-            const role = node.role?.value?.toLowerCase() || '';
-
-            // Like count patterns: "1,234 likes", "1 like"
-            if (/^[\d,]+\s*likes?$/i.test(name)) {
-                likeCount = name;
-            }
-
-            // Comment count patterns: "View all 42 comments", "1 comment"
-            if (/view\s*(all\s*)?\d+\s*comments?/i.test(name) || /^\d+\s*comments?$/i.test(name)) {
-                commentCount = name;
-            }
-
-            // Video detection
-            if (role === 'video' || /video|play|pause|mute|unmute/i.test(name)) {
-                hasVideo = true;
-            }
-
-            // Username detection (link with @ pattern or alphanumeric in header area)
-            if (role === 'link' && /^@?\w+$/.test(name) && name.length > 2 && name.length < 30) {
-                // Prefer shorter usernames (actual usernames vs text fragments)
-                if (!username || name.length < username.length) {
-                    username = name.replace(/^@/, '');
-                }
-            }
-        }
-
-        // Get carousel state using existing method
-        const carouselIndicator = await this.getCarouselSlideIndicator();
-        const carouselState = carouselIndicator ? {
-            currentSlide: carouselIndicator.current,
-            totalSlides: carouselIndicator.total
-        } : undefined;
-
-        return {
-            likeCount,
-            commentCount,
-            carouselState,
-            hasVideo,
-            username
-        };
-    }
-
-    /**
-     * Determine if we should stop browsing the feed.
-     * Uses multiple signals since "end of feed" text is unreliable
-     * (Instagram feeds are often infinite).
-     */
-    shouldStopBrowsing(
-        scrollCount: number,
-        extractedCount: number,
-        startTime: number,
-        recentDuplicates: number,
-        config: FeedTerminationConfig = {
-            maxDurationMs: 5 * 60 * 1000,  // 5 minute default
-            duplicateThreshold: 5           // 5 consecutive dupes = we're looping
-        }
-    ): TerminationResult {
-
-        // 1. Time-based cutoff (the primary hard limit)
-        if (Date.now() - startTime > config.maxDurationMs) {
-            return { shouldStop: true, reason: 'TIME_LIMIT' };
-        }
-
-        // 2. Duplicate detection (loop safeguard — we're seeing the same posts)
-        if (recentDuplicates >= config.duplicateThreshold) {
-            return { shouldStop: true, reason: 'DUPLICATE_LOOP' };
-        }
-
-        return { shouldStop: false, reason: '' };
+    getPageUrl(): string {
+        return this.page.url();
     }
 
     /**
@@ -546,74 +182,6 @@ export class A11yNavigator {
         } catch {
             return { width: 0, height: 0, scrollHeight: 0 };
         }
-    }
-
-    /**
-     * Check if we're currently viewing a story.
-     * Uses accessibility tree (primary) with URL fallback.
-     */
-    async isInStoryViewer(): Promise<boolean> {
-        const tree = await this.getCachedTree();
-        if (tree) {
-            const signals = this.collectViewSignals(tree);
-            if (signals.hasStoryViewer) return true;
-            // If tree gives a clear non-story answer, trust it
-            if (signals.articleCount > 0 || signals.hasProfileIndicators) return false;
-        }
-        // URL fallback
-        return this.page.url().includes('/stories/');
-    }
-
-    /**
-     * Check if we're on a profile page and extract username.
-     * Uses accessibility tree (primary) with URL fallback.
-     */
-    async getProfileUsername(): Promise<string | null> {
-        const tree = await this.getCachedTree();
-        if (tree) {
-            const signals = this.collectViewSignals(tree);
-            if (signals.hasProfileIndicators) {
-                return this.getProfileUsernameFromTree(tree);
-            }
-        }
-        // URL fallback
-        const url = this.page.url();
-        const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
-        if (profileMatch && !['explore', 'reels', 'direct', 'stories'].includes(profileMatch[1])) {
-            return profileMatch[1];
-        }
-        return null;
-    }
-
-    /**
-     * Check if we're on the main feed.
-     * Uses accessibility tree (primary) with URL fallback.
-     */
-    async isOnFeed(): Promise<boolean> {
-        const tree = await this.getCachedTree();
-        if (tree) {
-            const view = this.detectCurrentViewFromTree(tree);
-            if (view !== 'unknown') return view === 'feed';
-        }
-        // URL fallback
-        const url = this.page.url();
-        return url === 'https://www.instagram.com/' ||
-               url.includes('instagram.com/?') ||
-               url === 'https://www.instagram.com';
-    }
-
-    /**
-     * Check if we're on the explore page.
-     * Uses accessibility tree (primary) with URL fallback.
-     */
-    async isOnExplore(): Promise<boolean> {
-        const tree = await this.getCachedTree();
-        if (tree) {
-            const view = this.detectCurrentViewFromTree(tree);
-            if (view !== 'unknown') return view === 'explore';
-        }
-        // URL fallback
-        return this.page.url().includes('/explore');
     }
 
     // =========================================================================
@@ -1484,59 +1052,6 @@ export class A11yNavigator {
     }
 
     /**
-     * Detect if current viewport contains video content.
-     * Uses STRICT criteria to avoid false positives on stories.
-     *
-     * Video detection signals (must have at least one):
-     * 1. Mute/unmute/volume button - indicates audio track (videos only)
-     * 2. Video element role - actual video player element
-     * 3. Scrubber/timeline WITH duration display - video player controls
-     *
-     * Explicitly IGNORING (present in all stories, causes false positives):
-     * - Progress bars (story progress indicator)
-     * - Generic pause button (tap-to-pause on stories)
-     *
-     * @returns Object with isVideo and hasAudio flags
-     */
-    async detectVideoContent(): Promise<{ isVideo: boolean; hasAudio: boolean }> {
-        const elements = await this.getAllInteractiveElements();
-
-        // STRONG signal: Mute/unmute/volume controls (only videos have audio controls)
-        const hasMuteControl = elements.some(el =>
-            el.role === 'button' && /mute|unmute|volume/i.test(el.name)
-        );
-
-        // STRONG signal: Actual video element in a11y tree
-        const hasVideoElement = elements.some(el =>
-            el.role === 'video' ||
-            (el.role === 'application' && /video|player/i.test(el.name))
-        );
-
-        // MODERATE signal: Scrubber/timeline control (video players have these, story progress bars don't)
-        const hasScrubber = elements.some(el =>
-            /scrub|timeline|slider|seek/i.test(el.name) ||
-            (el.role === 'slider' && /video|time/i.test(el.name))
-        );
-
-        // MODERATE signal: Duration display (shows time like "0:30" - videos only)
-        const hasDuration = elements.some(el =>
-            /\d+:\d+/.test(el.name) || /duration|remaining/i.test(el.name)
-        );
-
-        // Video detection: need at least one STRONG signal, or both moderate signals
-        const isVideo = hasMuteControl || hasVideoElement || (hasScrubber && hasDuration);
-
-        if (isVideo) {
-            console.log(`  🎬 Video detected: mute=${hasMuteControl}, videoEl=${hasVideoElement}, scrubber=${hasScrubber}`);
-        }
-
-        return {
-            isVideo,
-            hasAudio: hasMuteControl
-        };
-    }
-
-    /**
      * Get the first element from a list of nodes that has a valid bounding box.
      * Used by button-finding methods to return actionable elements.
      *
@@ -1574,12 +1089,12 @@ export class A11yNavigator {
     }
 
     /**
-     * Find Story Highlights on a profile page.
-     * Highlights appear as circular buttons below the bio, similar to stories.
+     * Find small buttons in a proportional size range.
+     * Useful for discovering highlight-like circular buttons on profile pages.
      *
      * @returns Array of InteractiveElements with bounding boxes
      */
-    async findHighlights(): Promise<InteractiveElement[]> {
+    async findSmallButtons(): Promise<InteractiveElement[]> {
         const highlights: InteractiveElement[] = [];
         const nodes = await this.getAccessibilityTree();
 
@@ -1693,11 +1208,13 @@ export class A11yNavigator {
      * Falls back to spatial search for backward compatibility.
      *
      * @param side - 'right' for next, 'left' for previous
+     * @param mode - 'story' or 'carousel' — determines spatial search strategy
      * @param options - Optional EdgeButtonOptions with contentArea and/or containerNodeId
      * @returns Button element positioned on the specified side, or null
      */
     async findEdgeButton(
         side: 'right' | 'left',
+        mode: 'story' | 'carousel',
         options?: EdgeButtonOptions
     ): Promise<InteractiveElement | null> {
         const viewport = await this.getViewportInfo();
@@ -1728,11 +1245,10 @@ export class A11yNavigator {
                         // Sort by distance from center
                         // For stories: pick closest to center (arrow buttons are near content)
                         // For carousel: pick furthest from center (buttons are at edges)
-                        const inStory = await this.isInStoryViewer();
                         sideButtons.sort((a, b) => {
                             const aX = a.boundingBox!.x;
                             const bX = b.boundingBox!.x;
-                            return inStory
+                            return mode === 'story'
                                 ? (side === 'right' ? aX - bX : bX - aX)  // Closest to center
                                 : (side === 'right' ? bX - aX : aX - bX); // Furthest from center
                         });
@@ -1817,16 +1333,8 @@ export class A11yNavigator {
 
         // === STRATEGY 2: Context-aware fallback ===
         const viewportCenterX = viewport.width / 2;
-        const inStoryViewer = await this.isInStoryViewer();
 
-        // Story viewer has a different layout:
-        // - Story content is centered (roughly 30-70% of viewport width)
-        // - Arrow buttons are at the EDGES of story content, not viewport edges
-        // - Thumbnail buttons are at the FAR edges (0-25% and 75-100%)
-        // For stories: search CLOSER to center, pick button nearest to center
-        // For carousel/feed: search wider zone, pick button furthest from center
-
-        if (inStoryViewer) {
+        if (mode === 'story') {
             // STORY MODE: Tighter zone, pick CLOSEST to center
             // Story arrows are typically at 30-45% (left) and 55-70% (right) of viewport
             const storyZoneStart = viewport.width * 0.28;
@@ -1969,8 +1477,8 @@ export class A11yNavigator {
         const options: EdgeButtonOptions = { contentArea, containerNodeId };
 
         return {
-            next: await this.findEdgeButton('right', options),
-            previous: await this.findEdgeButton('left', options)
+            next: await this.findEdgeButton('right', 'carousel', options),
+            previous: await this.findEdgeButton('left', 'carousel', options)
         };
     }
 
@@ -2140,131 +1648,9 @@ export class A11yNavigator {
         return elements;
     }
 
-    /**
-     * Check if stories are present by looking for story-related elements
-     * in the accessibility tree. More accurate than URL-only detection.
-     */
-    async detectStoriesPresent(): Promise<boolean> {
-        const nodes = await this.getAccessibilityTree();
-        const storyPattern = /story/i;
-
-        return nodes.some(node => {
-            if (node.ignored) return false;
-            const nodeName = node.name?.value || '';
-            const nodeRole = node.role?.value?.toLowerCase();
-
-            return (nodeRole === 'button' || nodeRole === 'link') && storyPattern.test(nodeName);
-        });
-    }
-
-    /**
-     * Check if posts are present by looking for Like/Comment buttons
-     * in the accessibility tree. More accurate than URL-only detection.
-     */
-    async detectPostsPresent(): Promise<boolean> {
-        const nodes = await this.getAccessibilityTree();
-
-        const hasLikeButton = nodes.some(node => {
-            if (node.ignored) return false;
-            const nodeName = node.name?.value?.toLowerCase() || '';
-            return nodeName.includes('like') && node.role?.value === 'button';
-        });
-
-        const hasCommentButton = nodes.some(node => {
-            if (node.ignored) return false;
-            const nodeName = node.name?.value?.toLowerCase() || '';
-            return nodeName.includes('comment') && node.role?.value === 'button';
-        });
-
-        return hasLikeButton || hasCommentButton;
-    }
-
-    /**
-     * Detect if the current viewport shows an ad/sponsored content.
-     * Uses accessibility tree to find ad indicators without Vision API.
-     *
-     * Detection signals:
-     * - "Sponsored" label (below username in post header)
-     * - "Learn more" button (common in ads)
-     * - "Shop now" button
-     * - "Paid partnership" text
-     *
-     * @returns Object with isAd flag and reason
-     */
-    async detectAdContent(): Promise<{ isAd: boolean; reason?: string }> {
-        const nodes = await this.getAccessibilityTree();
-
-        for (const node of nodes) {
-            if (node.ignored) continue;
-            const nodeName = node.name?.value?.toLowerCase() || '';
-            const nodeRole = node.role?.value?.toLowerCase() || '';
-
-            // Check for "Sponsored" label (appears below username in post header)
-            // Instagram uses exact "Sponsored" text as a link
-            if (nodeName === 'sponsored') {
-                return { isAd: true, reason: 'Sponsored label detected' };
-            }
-
-            // Check for "Learn more" button/link (common in video/image ads)
-            if ((nodeRole === 'button' || nodeRole === 'link') &&
-                nodeName.includes('learn more')) {
-                return { isAd: true, reason: 'Learn more button detected' };
-            }
-
-            // Check for "Shop now" button (e-commerce ads)
-            if ((nodeRole === 'button' || nodeRole === 'link') &&
-                nodeName.includes('shop now')) {
-                return { isAd: true, reason: 'Shop now button detected' };
-            }
-
-            // Check for "Paid partnership" text (influencer sponsored content)
-            if (nodeName.includes('paid partnership')) {
-                return { isAd: true, reason: 'Paid partnership detected' };
-            }
-        }
-
-        return { isAd: false };
-    }
-
-    /**
-     * Get enhanced content state using accessibility tree and CDP detection.
-     * Slightly more expensive than getContentState() but more accurate.
-     */
-    async getEnhancedContentState(): Promise<ContentState> {
-        const tree = await this.getCachedTree();
-        let currentView: ContentState['currentView'] = 'unknown';
-        if (tree) {
-            currentView = this.detectCurrentViewFromTree(tree);
-        }
-        if (currentView === 'unknown') {
-            currentView = this.detectCurrentViewFromURL();
-        }
-
-        // Use CDP accessibility tree for accurate detection
-        const [hasStories, hasPosts] = await Promise.all([
-            this.detectStoriesPresent(),
-            this.detectPostsPresent()
-        ]);
-
-        return {
-            hasStories,
-            hasPosts,
-            currentView
-        };
-    }
-
     // =========================================================================
     // Search Navigation Methods (Active Research)
     // =========================================================================
-
-    /**
-     * Check if we're on the search/explore page.
-     * URL-based detection.
-     */
-    isOnSearchPage(): boolean {
-        const url = this.page.url();
-        return url.includes('/explore') || url.includes('/search');
-    }
 
     /**
      * Find the Search button/link in the sidebar using CDP accessibility tree.
@@ -2748,134 +2134,6 @@ export class A11yNavigator {
     // =========================================================================
     // Gaze Simulation Methods (Human-like Visual Attention)
     // =========================================================================
-
-    /**
-     * Randomized value within a range - NO fixed values allowed.
-     */
-    private randomInRange(min: number, max: number): number {
-        return min + Math.random() * (max - min);
-    }
-
-    /**
-     * Score an element's visual salience (how likely a human would look at it).
-     * Higher scores = more visually interesting.
-     *
-     * Scoring factors:
-     * - Role priority: image > button > link > heading > text
-     * - Position: Center-weighted (elements near viewport center score higher)
-     * - Size: Larger elements = more visually prominent
-     * - Uniqueness: Common labels ("Like", "Share") score lower
-     */
-    private scoreElementSalience(
-        node: CDPAXNode,
-        box: BoundingBox,
-        viewportWidth: number,
-        viewportHeight: number
-    ): number {
-        let score = 0;
-        const role = node.role?.value?.toLowerCase() || '';
-        const name = (node.name?.value || '').toLowerCase();
-
-        // Role priority scoring (randomized within ranges)
-        const roleScores: Record<string, [number, number]> = {
-            'image': [0.7, 0.9],
-            'img': [0.7, 0.9],
-            'figure': [0.65, 0.85],
-            'button': [0.5, 0.7],
-            'link': [0.4, 0.6],
-            'heading': [0.35, 0.55],
-            'text': [0.2, 0.4],
-            'statictext': [0.15, 0.35]
-        };
-        const [minRole, maxRole] = roleScores[role] || [0.1, 0.3];
-        score += this.randomInRange(minRole, maxRole);
-
-        // Position scoring - center-weighted with randomization
-        const centerX = viewportWidth / 2;
-        const centerY = viewportHeight / 2;
-        const elementCenterX = box.x + box.width / 2;
-        const elementCenterY = box.y + box.height / 2;
-
-        // Normalize distance from center (0 = at center, 1 = at edge)
-        const distX = Math.abs(elementCenterX - centerX) / centerX;
-        const distY = Math.abs(elementCenterY - centerY) / centerY;
-        const centerDistance = Math.sqrt(distX * distX + distY * distY) / Math.sqrt(2);
-
-        // Higher score for elements closer to center (with randomization)
-        score += this.randomInRange(0.1, 0.3) * (1 - centerDistance);
-
-        // Size scoring - larger elements are more prominent
-        const area = box.width * box.height;
-        const viewportArea = viewportWidth * viewportHeight;
-        const sizeRatio = Math.min(area / viewportArea, 0.3); // Cap at 30% of viewport
-        score += this.randomInRange(0.05, 0.15) * (sizeRatio / 0.3);
-
-        // Penalty for common/repeated labels (less interesting)
-        const commonLabels = ['like', 'comment', 'share', 'save', 'more', 'follow', 'following'];
-        if (commonLabels.some(label => name.includes(label))) {
-            score *= this.randomInRange(0.4, 0.6);
-        }
-
-        // Bonus for unique/interesting content
-        if (name.includes('#') || name.includes('@')) {
-            score *= this.randomInRange(1.1, 1.3);
-        }
-
-        return Math.min(score, 1); // Cap at 1.0
-    }
-
-    /**
-     * Analyze content density for intent-driven scrolling.
-     * Determines if viewport is text-heavy, image-heavy, or mixed.
-     *
-     * @returns ContentDensity with type classification and counts
-     */
-    async analyzeContentDensity(): Promise<ContentDensity> {
-        const nodes = await this.getAccessibilityTree();
-
-        // Count text-related nodes
-        const textRoles = ['paragraph', 'text', 'heading', 'statictext', 'label'];
-        const textNodes = nodes.filter(node => {
-            if (node.ignored) return false;
-            const role = node.role?.value?.toLowerCase() || '';
-            return textRoles.includes(role);
-        });
-
-        // Count image-related nodes
-        const imageRoles = ['image', 'img', 'figure', 'graphics-symbol'];
-        const imageNodes = nodes.filter(node => {
-            if (node.ignored) return false;
-            const role = node.role?.value?.toLowerCase() || '';
-            return imageRoles.includes(role);
-        });
-
-        const textCount = textNodes.length;
-        const imageCount = imageNodes.length;
-        const total = textCount + imageCount;
-
-        // Avoid division by zero
-        const textRatio = total > 0 ? textCount / total : 0.5;
-
-        // Classify with randomized thresholds for variance
-        const textHeavyThreshold = this.randomInRange(0.65, 0.75);
-        const imageHeavyThreshold = this.randomInRange(0.25, 0.35);
-
-        let type: ContentType;
-        if (textRatio > textHeavyThreshold) {
-            type = 'text-heavy';
-        } else if (textRatio < imageHeavyThreshold) {
-            type = 'image-heavy';
-        } else {
-            type = 'mixed';
-        }
-
-        return {
-            type,
-            textCount,
-            imageCount,
-            textRatio
-        };
-    }
 
     /**
      * Expose getAccessibilityTree for external use (e.g., by HumanScroll).
