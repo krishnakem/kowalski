@@ -494,7 +494,7 @@ export class HumanScroll {
     async scrollWithIntent(
         navigator: A11yNavigator,
         config: Partial<ScrollConfig> = {}
-    ): Promise<{ contentType: ContentType; scrollDistance: number; actualDelta: number; scrollFailed: boolean }> {
+    ): Promise<{ contentType: ContentType; scrollDistance: number; actualDelta: number; scrollFailed: boolean; pauseDurationMs: number }> {
         // Analyze content density
         const contentDensity = await navigator.analyzeContentDensity();
         const contentType = contentDensity.type;
@@ -561,7 +561,8 @@ export class HumanScroll {
             contentType,
             scrollDistance: targetDistance,
             actualDelta,
-            scrollFailed
+            scrollFailed,
+            pauseDurationMs: pauseDuration
         };
     }
 

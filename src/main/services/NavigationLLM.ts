@@ -19,6 +19,7 @@ import {
     NavigationDecision,
     NavigationAction,
     NavigationLLMConfig,
+    ScrollResult,
     ClickParams,
     ScrollParams,
     PressParams,
@@ -336,6 +337,7 @@ Check RECENT ACTIONS for these failure patterns and apply the correct fix:
    → A modal/overlay may be intercepting scroll events, OR scroll focus was lost after back() navigation.
    → Fix #1: Press Escape to close any overlay, then retry scroll.
    → Fix #2: If no overlay is visible, click on any element in the main content area (an article, an image) to restore scroll focus, then retry scroll.
+   → After scrolling, check LAST SCROLL RESULT in the context. It tells you what content density was detected, how far the page actually scrolled, and how many new posts appeared. Use this to gauge whether scrolling is productive or if you should try a different approach.
 
 2. CLICK DID NOTHING on feed (no_change_detected):
    → You probably clicked a BUTTON instead of a LINK. Buttons with numbers (like "390.2K", "663") don't navigate.
@@ -742,6 +744,26 @@ CRITICAL REMINDERS:
      * Analyzes recent actions and state to produce targeted warnings
      * that help the LLM recognize when it's stuck and redirect.
      */
+    private formatScrollResult(result: ScrollResult): string {
+        const health = result.scrollFailed ? 'FAILED (page may be stuck)'
+            : result.actualDeltaPx === 0 ? 'NO MOVEMENT'
+            : 'OK';
+
+        const lines = [
+            'LAST SCROLL RESULT:',
+            `- Scrolled ${result.requestedDirection} (${result.requestedAmount}): ${Math.abs(result.actualDeltaPx)}px actual`,
+            `- Content type detected: ${result.contentType}`,
+            `- New content: ~${result.newArticles} new post(s), ${result.newElementsAppeared} interactive elements appeared, ${result.elementsDisappeared} left viewport`,
+            `- Scroll health: ${health}`,
+        ];
+
+        if (result.newArticles === 0 && result.newElementsAppeared === 0 && !result.scrollFailed) {
+            lines.push('- NOTE: No new content appeared. Content may still be loading (wait 1-2s) or feed is exhausted (consider switching phases).');
+        }
+
+        return lines.join('\n');
+    }
+
     private buildProgressAudit(context: NavigationContext): string {
         const warnings: string[] = [];
         const recentActions = context.recentActions || [];
@@ -929,7 +951,7 @@ CURRENT STATE:
 - Content freshness: ${context.elementFingerprint || 'unknown'}
 ${overlayInfo}
 ${this.formatTreeContext(context)}
-
+${context.lastScrollResult ? '\n' + this.formatScrollResult(context.lastScrollResult) + '\n' : ''}
 ENGAGEMENT STATE:
 ${this.formatEngagementState(context)}
 ${context.sessionMemoryDigest ? `\nSESSION MEMORY (from past sessions):\n${context.sessionMemoryDigest}\n` : ''}

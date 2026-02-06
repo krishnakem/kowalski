@@ -8,7 +8,7 @@
  * Cost: ~$0.001 per decision using GPT-4o-mini
  */
 
-import { Point, BoundingBox, ContentState } from './instagram.js';
+import { Point, BoundingBox, ContentState, ContentType } from './instagram.js';
 
 // ============================================================================
 // Navigation Context Types
@@ -107,6 +107,9 @@ export interface NavigationContext {
         succeeded: boolean;
         reason?: string;  // e.g., 'filtered as duplicate', 'ok'
     };
+
+    // Scroll feedback from last scroll action (content-aware results)
+    lastScrollResult?: ScrollResult;
 }
 
 // ============================================================================
@@ -359,6 +362,23 @@ export interface NavigationDecision {
 }
 
 /**
+ * Result of a content-aware scroll operation.
+ * Provides feedback about what happened after scrolling so the LLM
+ * can make informed decisions about subsequent actions.
+ */
+export interface ScrollResult {
+    contentType: ContentType;                    // Content density detected before scroll
+    requestedDirection: 'up' | 'down' | 'left' | 'right';
+    requestedAmount: string;                     // 'small' | 'medium' | 'large' | 'xlarge'
+    actualDeltaPx: number;                       // How far the page actually scrolled
+    scrollFailed: boolean;                       // True if scroll had no effect
+    pauseDurationMs: number;                     // Reading pause applied after scroll
+    newElementsAppeared: number;                 // Interactive elements with meaningful names
+    elementsDisappeared: number;                 // Elements that scrolled off-screen
+    newArticles: number;                         // New article-role elements (approx new posts)
+}
+
+/**
  * Record of an executed action (for history tracking).
  */
 export interface ActionRecord {
@@ -375,6 +395,8 @@ export interface ActionRecord {
     elementCount?: number;
     // What element was actually acted on (for LLM feedback)
     clickedElementName?: string;
+    // Content-aware scroll feedback
+    scrollResult?: ScrollResult;
 }
 
 // ============================================================================
@@ -403,6 +425,7 @@ export interface ExecutionResult {
     durationMs: number;
     focusedElement?: FocusedElement;         // Element that was clicked (for capture)
     verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified' | 'scrolled_in_dialog';
+    scrollResult?: ScrollResult;             // Content-aware scroll feedback
 }
 
 /**

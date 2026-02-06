@@ -346,6 +346,9 @@ export class InstagramScraper {
         // Capture attempt feedback for LLM (so it knows when captures are being rejected)
         let lastCaptureAttempt: NavigationContext['lastCaptureAttempt'];
 
+        // Scroll feedback for LLM (content-aware scroll results)
+        let lastScrollResult: NavigationContext['lastScrollResult'];
+
         // Deep engagement state (LLM-controlled)
         const engagementState: EngagementState = {
             level: 'feed',
@@ -444,7 +447,10 @@ export class InstagramScraper {
                 loopWarning,
 
                 // Last capture attempt feedback
-                lastCaptureAttempt
+                lastCaptureAttempt,
+
+                // Scroll feedback from last scroll action
+                lastScrollResult
             };
 
             // Get LLM decision (includes strategic decisions)
@@ -570,6 +576,13 @@ export class InstagramScraper {
 
             // Execute the decision
             const result = await this.navigationExecutor.execute(decision, elements);
+
+            // Track scroll feedback for LLM context (reset on non-scroll actions)
+            if (result.scrollResult) {
+                lastScrollResult = result.scrollResult;
+            } else {
+                lastScrollResult = undefined;
+            }
 
             // Clear debug highlights after execution
             if (this.debugOverlay) {

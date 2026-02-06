@@ -20,6 +20,7 @@ import {
     NavigationElement,
     ExecutionResult,
     ActionRecord,
+    ScrollResult,
     ClickParams,
     ScrollParams,
     TypeParams,
@@ -30,6 +31,7 @@ import {
     ClearParams,
     StrategicDecision
 } from '../../types/navigation.js';
+import { ScrollConfig } from '../../types/instagram.js';
 
 import { GhostMouse } from './GhostMouse.js';
 import { HumanScroll } from './HumanScroll.js';
@@ -229,31 +231,87 @@ export class NavigationExecutor {
         // Detect if a dialog/modal is open — scroll events will be captured by the modal, not the main page
         const hasDialog = await this.detectActiveDialog();
 
-        // Map high-level amount to proportional pixels based on viewport
-        const viewportHeight = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
-        const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
-        const baseDistance = Math.round(viewportHeight * proportion);
-
+        // Horizontal scroll: unchanged (mouse wheel, no content-aware logic)
         if (params.direction === 'left' || params.direction === 'right') {
-            // Horizontal scroll using mouse wheel
+            const viewportHeight = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
+            const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
+            const baseDistance = Math.round(viewportHeight * proportion);
             const deltaX = params.direction === 'right' ? baseDistance : -baseDistance;
             await this.page.mouse.wheel(deltaX, 0);
             await this.humanDelay(300, 600);
-        } else {
-            // Vertical scroll using HumanScroll
-            const direction = params.direction === 'up' ? -1 : 1;
-            await this.scroll.scroll({
-                baseDistance: baseDistance * direction,
-                variability: 0.3,
-                readingPauseMs: [500, 1500]  // Shorter pause for navigation
+
+            const scrollYAfter = await this.scroll.getScrollPosition();
+            this.recordAction(decision, true, undefined, {
+                scrollY: scrollYAfter,
+                url: this.page.url(),
+                ...(hasDialog ? { verified: 'scrolled_in_dialog' as const } : {})
             });
+
+            return {
+                success: true,
+                actionTaken: 'scroll',
+                params: params,
+                resultingUrl: this.page.url(),
+                durationMs: Date.now() - startTime,
+                ...(hasDialog ? { verified: 'scrolled_in_dialog' as const } : {})
+            };
         }
 
-        // Record action with scroll position for stagnation detection
+        // --- Vertical scroll: use content-aware scrollWithIntent ---
+
+        // Pre-scroll element snapshot (reuses cached tree from earlier in loop iteration)
+        const preSnapshot = await this.getQuickElementSnapshot();
+
+        // Build config overrides based on LLM amount hint
+        const overrides: Partial<ScrollConfig> = {};
+        if (params.amount !== 'medium') {
+            const vh = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
+            const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
+            overrides.baseDistance = Math.round(vh * proportion);
+        }
+        // For 'medium', pass no overrides — scrollWithIntent picks distance from content density
+
+        // Handle direction: negate baseDistance for upward scrolls
+        if (params.direction === 'up') {
+            if (overrides.baseDistance) {
+                overrides.baseDistance = -overrides.baseDistance;
+            } else {
+                // scrollWithIntent defaults to downward — for upward with no override, set explicit negative
+                const vh = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
+                overrides.baseDistance = -Math.round(vh * 0.4);
+            }
+        }
+
+        // Execute content-aware scroll (adapts distance + pause to content density)
+        const intentResult = await this.scroll.scrollWithIntent(this.navigator, overrides);
+
+        // Post-scroll element snapshot (fresh tree build — cache expired during scroll pause)
+        const postSnapshot = await this.getQuickElementSnapshot();
+
+        // Compute element diff
+        const newInteractive = [...postSnapshot.interactive].filter(([id]) => !preSnapshot.interactive.has(id));
+        const disappeared = [...preSnapshot.interactive].filter(([id]) => !postSnapshot.interactive.has(id));
+        const meaningfulNew = newInteractive.filter(([, name]) => name.length > 0).length;
+        const newArticles = Math.max(0, postSnapshot.articleCount - preSnapshot.articleCount);
+
+        const scrollResultData: ScrollResult = {
+            contentType: intentResult.contentType,
+            requestedDirection: params.direction,
+            requestedAmount: params.amount,
+            actualDeltaPx: intentResult.actualDelta,
+            scrollFailed: intentResult.scrollFailed,
+            pauseDurationMs: intentResult.pauseDurationMs,
+            newElementsAppeared: meaningfulNew,
+            elementsDisappeared: disappeared.length,
+            newArticles
+        };
+
+        // Record action with scroll position and scroll result for stagnation detection
         const scrollYAfter = await this.scroll.getScrollPosition();
         this.recordAction(decision, true, undefined, {
             scrollY: scrollYAfter,
             url: this.page.url(),
+            scrollResult: scrollResultData,
             ...(hasDialog ? { verified: 'scrolled_in_dialog' as const } : {})
         });
 
@@ -263,7 +321,29 @@ export class NavigationExecutor {
             params: params,
             resultingUrl: this.page.url(),
             durationMs: Date.now() - startTime,
+            scrollResult: scrollResultData,
             ...(hasDialog ? { verified: 'scrolled_in_dialog' as const } : {})
+        };
+    }
+
+    /**
+     * Quick snapshot of visible elements for scroll diff computation.
+     * Returns interactive elements (from getNavigationElements) plus article count from the raw tree.
+     */
+    private async getQuickElementSnapshot(): Promise<{ interactive: Map<number, string>; articleCount: number }> {
+        const elements = await this.navigator.getNavigationElements();
+        // Count articles from the cached tree (flat nodeMap, NOT nested children)
+        const tree = await this.navigator.getCachedTree();
+        let articleCount = 0;
+        if (tree) {
+            for (const node of tree.nodeMap.values()) {
+                if (node.ignored) continue;
+                if ((node.role?.value?.toLowerCase() || '') === 'article') articleCount++;
+            }
+        }
+        return {
+            interactive: new Map(elements.map(e => [e.id, e.name || ''])),
+            articleCount
         };
     }
 
@@ -531,7 +611,7 @@ export class NavigationExecutor {
         decision: NavigationDecision,
         success: boolean,
         errorMessage?: string,
-        stateContext?: { scrollY?: number; url?: string; verified?: ActionRecord['verified']; elementCount?: number; clickedElementName?: string }
+        stateContext?: { scrollY?: number; url?: string; verified?: ActionRecord['verified']; elementCount?: number; clickedElementName?: string; scrollResult?: ScrollResult }
     ): ActionRecord {
         const record: ActionRecord = {
             timestamp: Date.now(),
