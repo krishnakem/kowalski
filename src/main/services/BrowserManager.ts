@@ -409,6 +409,9 @@ export class BrowserManager {
                 await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded' });
             }
 
+            // Wait for React hydration — Instagram's SPA needs time to render nav elements
+            await new Promise(r => setTimeout(r, 3000));
+
             // Check URL for obvious failure states first (fast path)
             const currentUrl = page.url();
             if (currentUrl.includes('/accounts/login')) {
@@ -422,14 +425,20 @@ export class BrowserManager {
             }
 
             // Validate via CDP accessibility tree (NO waitForSelector - bot detectable!)
-            const isValid = await this.checkLoginStateViaCDP(page);
-            if (isValid) {
-                console.log('✅ Session validation: Valid');
-                return { valid: true };
-            } else {
-                console.log('❌ Session validation: Not logged in');
-                return { valid: false, reason: 'SESSION_EXPIRED' };
+            // Retry up to 3 times — Instagram's SPA may still be rendering nav elements
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                const isValid = await this.checkLoginStateViaCDP(page);
+                if (isValid) {
+                    console.log('✅ Session validation: Valid');
+                    return { valid: true };
+                }
+                if (attempt < 3) {
+                    console.log(`⏳ Session check attempt ${attempt}/3: nav elements not found yet, waiting...`);
+                    await new Promise(r => setTimeout(r, 2000));
+                }
             }
+            console.log('❌ Session validation: Not logged in (after 3 attempts)');
+            return { valid: false, reason: 'SESSION_EXPIRED' };
 
         } catch (error: any) {
             console.error('❌ Session validation error:', error.message);

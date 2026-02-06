@@ -33,17 +33,6 @@ const DEFAULT_CONFIG: CollectorConfig = {
     minScrollDelta: 100       // Must scroll at least 100px for new capture
 };
 
-/**
- * Story UI crop proportions (fraction of viewport height).
- * Instagram stories have progress bar + header at top, reply box at bottom.
- */
-function getStoryCropMargins(viewportHeight: number) {
-    return {
-        topMargin: Math.round(viewportHeight * 0.034),   // ~3.4% of viewport
-        bottomMargin: Math.round(viewportHeight * 0.036)  // ~3.6% of viewport
-    };
-}
-
 export class ScreenshotCollector {
     private page: Page;
     private captures: CapturedPost[] = [];
@@ -54,7 +43,12 @@ export class ScreenshotCollector {
     // Deduplication tracking
     private capturedPostIds = new Set<string>();      // Track by Instagram post ID
     private capturedHashes = new Set<string>();       // Track by image hash (for carousel/story)
-    private capturedPositions = new Set<number>();    // Track by scroll position bucket (100px)
+    private capturedPositions = new Set<string>();    // Track by URL-path + scroll position bucket
+    private lastCaptureUrl: string = '';
+
+    // Session log buffer (written to .md file alongside screenshots)
+    private logBuffer: string[] = [];
+    private sessionStartTime: number = Date.now();
 
     constructor(page: Page, config: Partial<CollectorConfig> = {}) {
         this.page = page;
@@ -121,52 +115,34 @@ export class ScreenshotCollector {
             return false;
         }
 
-        // POSITION-BASED DEDUP: Track by proportional scroll position buckets
-        // This catches the same viewport being captured multiple times even with different sources
-        // Exception: carousel slides and stories share position but show different content (rely on hash dedup)
+        // POSITION-BASED DEDUP: Track by URL path + scroll position bucket
+        // Different pages (e.g., feed vs post detail) have independent position tracking
+        // Exception: carousel slides and stories rely on hash dedup instead
+        const currentUrl = this.page.url();
+        const urlPath = new URL(currentUrl).pathname;
         const vpSize = this.page.viewportSize();
         const bucketSize = vpSize ? Math.round(vpSize.height * 0.078) : 75;
         const positionBucket = Math.round(scrollPosition / bucketSize);
-        if (source !== 'carousel' && source !== 'story' && this.capturedPositions.has(positionBucket)) {
-            console.log(`📸 Skipping duplicate position: bucket ${positionBucket} (scroll ~${scrollPosition}px)`);
+        const positionKey = `${urlPath}:${positionBucket}`;
+        if (source !== 'carousel' && source !== 'story' && this.capturedPositions.has(positionKey)) {
+            console.log(`📸 Skipping duplicate position: bucket ${positionBucket} on ${urlPath}`);
             return false;
         }
 
-        // Skip if we haven't scrolled enough (likely same content) - for feed only
-        if (source === 'feed' && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
+        // Skip if we haven't scrolled enough (likely same content) - for feed only, same page only
+        const onSamePage = currentUrl === this.lastCaptureUrl;
+        if (onSamePage && source === 'feed' && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
             console.log(`📸 Scroll delta too small (${Math.abs(scrollPosition - this.lastScrollPosition)}px), skipping duplicate`);
             return false;
         }
 
         try {
-            // Get viewport dimensions for clip calculations
-            const viewport = this.page.viewportSize();
-            let screenshot: Buffer;
-
-            // For stories, crop out the Instagram UI chrome (progress bar, header, reply box)
-            if (source === 'story' && viewport) {
-                const storyCrop = getStoryCropMargins(viewport.height);
-                const clipHeight = viewport.height - storyCrop.topMargin - storyCrop.bottomMargin;
-
-                screenshot = await this.page.screenshot({
-                    type: 'jpeg',
-                    quality: this.config.jpegQuality,
-                    clip: {
-                        x: 0,
-                        y: storyCrop.topMargin,
-                        width: viewport.width,
-                        height: Math.max(clipHeight, Math.round(viewport.height * 0.05))
-                    }
-                });
-                console.log(`📸 Story cropped: removed top ${storyCrop.topMargin}px and bottom ${storyCrop.bottomMargin}px`);
-            } else {
-                // Regular viewport screenshot for feed/search/profile
-                screenshot = await this.page.screenshot({
-                    type: 'jpeg',
-                    quality: this.config.jpegQuality,
-                    fullPage: false  // Viewport only
-                });
-            }
+            // Full viewport screenshot for all content types (feed, story, search, profile)
+            const screenshot = await this.page.screenshot({
+                type: 'jpeg',
+                quality: this.config.jpegQuality,
+                fullPage: false  // Viewport only
+            });
 
             // SECONDARY DEDUP: Hash-based for carousel/story (no postId available)
             const hash = this.computeImageHash(screenshot);
@@ -191,9 +167,13 @@ export class ScreenshotCollector {
                 this.capturedPostIds.add(postId);
             }
             this.capturedHashes.add(hash);
-            this.capturedPositions.add(positionBucket);
+            // Only track position for sources that check it (not carousel/story)
+            if (source !== 'carousel' && source !== 'story') {
+                this.capturedPositions.add(positionKey);
+            }
 
-            // Update last position for feed content
+            // Update last position and URL for feed content
+            this.lastCaptureUrl = currentUrl;
             if (source === 'feed') {
                 this.lastScrollPosition = scrollPosition;
             }
@@ -267,9 +247,10 @@ export class ScreenshotCollector {
                 captureRegion.height = viewport.height - captureRegion.y;
             }
 
-            // Ensure minimum dimensions (proportional to viewport)
-            captureRegion.width = Math.max(captureRegion.width, Math.round(viewport.width * 0.09));
-            captureRegion.height = Math.max(captureRegion.height, Math.round(viewport.height * 0.05));
+            // Ensure minimum dimensions — captures should be at least 30% of viewport
+            // to produce useful content (not tiny button/icon crops)
+            captureRegion.width = Math.max(captureRegion.width, Math.round(viewport.width * 0.30));
+            captureRegion.height = Math.max(captureRegion.height, Math.round(viewport.height * 0.20));
 
             // Take cropped screenshot focused on the element
             const screenshot = await this.page.screenshot({
@@ -589,6 +570,36 @@ export class ScreenshotCollector {
         } catch {
             return null;
         }
+    }
+
+    /**
+     * Append a line to the session log buffer.
+     * Lines are timestamped relative to session start.
+     */
+    appendLog(line: string): void {
+        const elapsed = ((Date.now() - this.sessionStartTime) / 1000).toFixed(1);
+        this.logBuffer.push(`[${elapsed}s] ${line}`);
+    }
+
+    /**
+     * Append a raw line (no timestamp prefix) to the session log buffer.
+     * Used for headers, separators, and pre-formatted content.
+     */
+    appendLogRaw(line: string): void {
+        this.logBuffer.push(line);
+    }
+
+    /**
+     * Flush the session log buffer to a markdown file alongside screenshots.
+     * Called at session end. Only writes if outputDir is configured.
+     */
+    flushSessionLog(): void {
+        if (!this.outputDir || this.logBuffer.length === 0) return;
+
+        const filepath = path.join(this.outputDir, 'session_log.md');
+        const content = this.logBuffer.join('\n') + '\n';
+        fs.writeFileSync(filepath, content, 'utf-8');
+        console.log(`📝 Session log saved: ${filepath}`);
     }
 
     /**

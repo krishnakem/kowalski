@@ -143,17 +143,24 @@ export class A11yNavigator {
     }
 
     /**
-     * Get content state by analyzing URL only.
-     * Cost: $0 (no API calls, no DOM queries)
+     * Get content state using accessibility tree (primary) with URL fallback.
+     * Cost: $0 (CDP accessibility tree + URL analysis)
      *
      * NOTE: This does NOT check auth status. Use BrowserManager.validateSession() for that.
-     * For detailed element detection, use ContentVision.
      */
     async getContentState(): Promise<ContentState> {
-        const url = this.page.url();
-        const currentView = this.detectCurrentView(url);
+        const tree = await this.getCachedTree();
+        const treeView = tree ? this.detectCurrentViewFromTree(tree) : 'unknown' as ContentState['currentView'];
+        const urlView = this.detectCurrentViewFromURL();
 
-        // URL-based inference only - no DOM queries
+        // Temporary: comparison logging for validation
+        if (treeView !== 'unknown' && treeView !== urlView) {
+            console.log(`  🔍 View detection disagreement: tree=${treeView}, url=${urlView}`);
+        }
+
+        // Tree-based detection is primary, URL is fallback for 'unknown'
+        const currentView = treeView !== 'unknown' ? treeView : urlView;
+
         return {
             hasStories: currentView === 'feed' || currentView === 'story',
             hasPosts: currentView === 'feed' || currentView === 'profile',
@@ -161,10 +168,153 @@ export class A11yNavigator {
         };
     }
 
+    // =========================================================================
+    // Tree-Based View Detection
+    // =========================================================================
+
+    /**
+     * Detect current view from accessibility tree signals.
+     * Priority-ordered: most specific first.
+     * Returns 'unknown' if no strong signals match (falls back to URL).
+     */
+    private detectCurrentViewFromTree(tree: AXTree): ContentState['currentView'] {
+        const signals = this.collectViewSignals(tree);
+
+        if (signals.hasLoginForm) return 'login';
+        if (signals.hasStoryViewer) return 'story';
+        if (signals.hasPostDetailDialog) return 'post_detail';
+
+        // Post detail PAGE (not dialog overlay): when user clicks a timestamp link,
+        // Instagram navigates to a full page (instagram.com/p/xxx or /reel/xxx).
+        // No dialog element exists, so hasPostDetailDialog is false.
+        // Must check URL before explore — post detail pages have many deep links
+        // that falsely trigger the explore grid heuristic.
+        const url = this.page.url();
+        if (url.includes('/p/') || url.includes('/reel/')) return 'post_detail';
+
+        if (signals.hasProfileIndicators) return 'profile';
+        if (signals.hasExploreGrid) return 'explore';
+        if (signals.articleCount > 0) return 'feed';
+        return 'unknown';
+    }
+
+    /**
+     * Single-pass signal collection from the accessibility tree.
+     * Collects all signals needed for view detection efficiently.
+     *
+     * Critical implementation details:
+     * - Dialog detection uses parent-chain validation (not just "dialog exists + article exists")
+     * - Profile detection uses depth checks (prevents false positives from feed suggestions)
+     * - Explore detection uses grid link pattern matching
+     */
+    private collectViewSignals(tree: AXTree): {
+        hasLoginForm: boolean;
+        hasStoryViewer: boolean;
+        hasPostDetailDialog: boolean;
+        hasProfileIndicators: boolean;
+        hasExploreGrid: boolean;
+        articleCount: number;
+        storyButtonCount: number;
+    } {
+        let hasDialog = false;
+        let hasArticleInDialog = false;
+        let hasTablist = false;
+        let hasProfileTabs = false;
+        let hasFollowButtonShallow = false;
+        let hasFollowerStatsShallow = false;
+        let hasLoginInputs = false;
+        let hasStoryPause = false;
+        let articleCount = 0;
+        let storyButtonCount = 0;
+        let gridLinkCount = 0;
+
+        // Track dialog nodeIds for parent-chain validation
+        const dialogNodeIds = new Set<string>();
+
+        for (const node of tree.nodeMap.values()) {
+            if (node.ignored) continue;
+            const role = node.role?.value?.toLowerCase() || '';
+            const name = (node.name?.value || '').toLowerCase();
+            const depth = node.depth || 0;
+
+            // Track dialogs
+            if (role === 'dialog' || role === 'alertdialog') {
+                hasDialog = true;
+                dialogNodeIds.add(node.nodeId);
+            }
+
+            // Count articles and check if any are inside a dialog (parent-chain walk)
+            if (role === 'article') {
+                articleCount++;
+                if (hasDialog && !hasArticleInDialog) {
+                    // Walk parent chain to verify article is inside a dialog
+                    let parent = node.parentId ? tree.nodeMap.get(node.parentId) : null;
+                    while (parent) {
+                        if (dialogNodeIds.has(parent.nodeId)) {
+                            hasArticleInDialog = true;
+                            break;
+                        }
+                        parent = parent.parentId ? tree.nodeMap.get(parent.parentId) : null;
+                    }
+                }
+            }
+
+            // Profile detection: tablist and profile-specific tabs
+            if (role === 'tablist') hasTablist = true;
+            if (role === 'tab' && (name === 'posts' || name === 'reels' || name === 'tagged')) {
+                hasProfileTabs = true;
+            }
+
+            // Profile detection: Follow button and follower stats at shallow depth
+            // (prevents false positives from feed suggestions/unfollowed posts)
+            if (role === 'button' && name === 'follow' && depth < 15) {
+                hasFollowButtonShallow = true;
+            }
+            if ((name.includes('followers') || name.includes('following')) && depth < 15) {
+                hasFollowerStatsShallow = true;
+            }
+
+            // Story viewer detection: Pause button at shallow depth with no articles
+            if (role === 'button' && name === 'pause' && depth < 15) {
+                hasStoryPause = true;
+            }
+            if (name.startsWith('story by ')) {
+                storyButtonCount++;
+            }
+
+            // Login detection
+            if ((role === 'textbox' || role === 'input') &&
+                (name.includes('username') || name.includes('password') || name.includes('phone number'))) {
+                hasLoginInputs = true;
+            }
+
+            // Explore detection: grid of links with meaningful names, no article wrappers
+            if (role === 'link' && depth > 15 && name.length > 20) {
+                gridLinkCount++;
+            }
+        }
+
+        return {
+            hasLoginForm: hasLoginInputs,
+            hasStoryViewer: hasStoryPause && articleCount === 0,
+            hasPostDetailDialog: hasDialog && hasArticleInDialog,
+            hasProfileIndicators: (hasTablist && hasProfileTabs) || (hasFollowerStatsShallow && hasFollowButtonShallow),
+            hasExploreGrid: gridLinkCount > 6 && articleCount === 0 && !hasProfileTabs,
+            articleCount,
+            storyButtonCount,
+        };
+    }
+
+    // =========================================================================
+    // URL-Based View Detection (Fallback)
+    // =========================================================================
+
     /**
      * Determine current view/page type from URL.
+     * Kept as fallback when tree-based detection returns 'unknown'.
      */
-    private detectCurrentView(url: string): ContentState['currentView'] {
+    private detectCurrentViewFromURL(): ContentState['currentView'] {
+        const url = this.page.url();
         if (url.includes('/accounts/login')) return 'login';
         if (url.includes('/stories/')) return 'story';
         if (url.includes('/explore')) return 'explore';
@@ -194,50 +344,75 @@ export class A11yNavigator {
 
     /**
      * Detect current engagement level for LLM context.
-     * Determines if we're in feed, post modal, comments, or profile view.
-     * Cost: $0 (URL analysis + optional accessibility tree check)
+     * Uses accessibility tree signals (primary) with URL fallback.
+     * Cost: $0 (CDP accessibility tree analysis)
      */
     async detectEngagementLevel(): Promise<{
         level: 'feed' | 'post_modal' | 'comments' | 'profile';
         postUrl?: string;
         username?: string;
     }> {
-        const url = this.page.url();
+        const tree = await this.getCachedTree();
 
-        // Check for post detail page
+        if (tree) {
+            const signals = this.collectViewSignals(tree);
+
+            // Post detail modal: dialog containing an article
+            if (signals.hasPostDetailDialog) {
+                // Try to extract post URL from page URL (still useful for tracking)
+                const url = this.page.url();
+                const postMatch = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+                const postUrl = postMatch ? `https://www.instagram.com/p/${postMatch[2]}/` : undefined;
+                return { level: 'post_modal', postUrl };
+            }
+
+            // Profile page: tablist with profile tabs or follower stats
+            if (signals.hasProfileIndicators) {
+                const username = this.getProfileUsernameFromTree(tree);
+                return { level: 'profile', username: username || undefined };
+            }
+
+            // Story viewer is a separate engagement (not modal, not feed)
+            if (signals.hasStoryViewer) {
+                return { level: 'feed' }; // Stories don't have a dedicated engagement level
+            }
+        }
+
+        // Fallback to URL-based detection
+        const url = this.page.url();
         if (url.includes('/p/') || url.includes('/reel/')) {
             const postMatch = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
             const postUrl = postMatch ? `https://www.instagram.com/p/${postMatch[2]}/` : undefined;
-
-            // Check if there's a dialog (modal overlay) in accessibility tree
-            const tree = await this.buildAccessibilityTree();
-            if (tree) {
-                const hasDialog = Array.from(tree.nodeMap.values()).some(
-                    node => node.role?.value?.toLowerCase() === 'dialog'
-                );
-
-                // If dialog present, we're in a modal on top of feed
-                // Otherwise we navigated directly to post page
-                return {
-                    level: 'post_modal',
-                    postUrl
-                };
-            }
-
             return { level: 'post_modal', postUrl };
         }
 
-        // Check for profile page
         const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
         if (profileMatch && !['explore', 'reels', 'direct', 'p'].includes(profileMatch[1])) {
-            return {
-                level: 'profile',
-                username: profileMatch[1]
-            };
+            return { level: 'profile', username: profileMatch[1] };
         }
 
-        // Default to feed
         return { level: 'feed' };
+    }
+
+    /**
+     * Extract profile username from accessibility tree.
+     * Finds the first heading at shallow depth that looks like a username.
+     */
+    private getProfileUsernameFromTree(tree: AXTree): string | null {
+        for (const node of tree.nodeMap.values()) {
+            if (node.ignored) continue;
+            const role = node.role?.value?.toLowerCase() || '';
+            const name = node.name?.value || '';
+            const depth = node.depth || 0;
+
+            // Profile headings are at shallow depth and contain the display name
+            if (role === 'heading' && depth < 15 && name.length > 1 && name.length < 100) {
+                // Skip generic headings
+                if (name.toLowerCase() === 'suggestions for you') continue;
+                return name;
+            }
+        }
+        return null;
     }
 
     /**
@@ -316,29 +491,17 @@ export class A11yNavigator {
         startTime: number,
         recentDuplicates: number,
         config: FeedTerminationConfig = {
-            maxScrolls: 25,          // ~25 scrolls = 5 min at human pace
-            maxPosts: 30,            // 30 posts is plenty for analysis
-            maxDurationMs: 5 * 60 * 1000,  // 5 minute hard cap
-            duplicateThreshold: 5    // 5 consecutive dupes = we're looping
+            maxDurationMs: 5 * 60 * 1000,  // 5 minute default
+            duplicateThreshold: 5           // 5 consecutive dupes = we're looping
         }
     ): TerminationResult {
 
-        // 1. Time-based cutoff (most reliable)
+        // 1. Time-based cutoff (the primary hard limit)
         if (Date.now() - startTime > config.maxDurationMs) {
             return { shouldStop: true, reason: 'TIME_LIMIT' };
         }
 
-        // 2. Scroll count limit (prevents infinite scrolling)
-        if (scrollCount >= config.maxScrolls) {
-            return { shouldStop: true, reason: 'SCROLL_LIMIT' };
-        }
-
-        // 3. Content quota reached (we have enough data)
-        if (extractedCount >= config.maxPosts) {
-            return { shouldStop: true, reason: 'CONTENT_QUOTA' };
-        }
-
-        // 4. Duplicate detection (we're seeing the same posts)
+        // 2. Duplicate detection (loop safeguard — we're seeing the same posts)
         if (recentDuplicates >= config.duplicateThreshold) {
             return { shouldStop: true, reason: 'DUPLICATE_LOOP' };
         }
@@ -386,19 +549,34 @@ export class A11yNavigator {
     }
 
     /**
-     * Check if we're currently viewing a story (vs feed).
-     * URL-based detection only - completely undetectable.
+     * Check if we're currently viewing a story.
+     * Uses accessibility tree (primary) with URL fallback.
      */
-    isInStoryViewer(): boolean {
-        const url = this.page.url();
-        return url.includes('/stories/');
+    async isInStoryViewer(): Promise<boolean> {
+        const tree = await this.getCachedTree();
+        if (tree) {
+            const signals = this.collectViewSignals(tree);
+            if (signals.hasStoryViewer) return true;
+            // If tree gives a clear non-story answer, trust it
+            if (signals.articleCount > 0 || signals.hasProfileIndicators) return false;
+        }
+        // URL fallback
+        return this.page.url().includes('/stories/');
     }
 
     /**
      * Check if we're on a profile page and extract username.
-     * URL-based detection only.
+     * Uses accessibility tree (primary) with URL fallback.
      */
-    getProfileUsername(): string | null {
+    async getProfileUsername(): Promise<string | null> {
+        const tree = await this.getCachedTree();
+        if (tree) {
+            const signals = this.collectViewSignals(tree);
+            if (signals.hasProfileIndicators) {
+                return this.getProfileUsernameFromTree(tree);
+            }
+        }
+        // URL fallback
         const url = this.page.url();
         const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
         if (profileMatch && !['explore', 'reels', 'direct', 'stories'].includes(profileMatch[1])) {
@@ -409,9 +587,15 @@ export class A11yNavigator {
 
     /**
      * Check if we're on the main feed.
-     * URL-based detection only.
+     * Uses accessibility tree (primary) with URL fallback.
      */
-    isOnFeed(): boolean {
+    async isOnFeed(): Promise<boolean> {
+        const tree = await this.getCachedTree();
+        if (tree) {
+            const view = this.detectCurrentViewFromTree(tree);
+            if (view !== 'unknown') return view === 'feed';
+        }
+        // URL fallback
         const url = this.page.url();
         return url === 'https://www.instagram.com/' ||
                url.includes('instagram.com/?') ||
@@ -420,9 +604,15 @@ export class A11yNavigator {
 
     /**
      * Check if we're on the explore page.
-     * URL-based detection only.
+     * Uses accessibility tree (primary) with URL fallback.
      */
-    isOnExplore(): boolean {
+    async isOnExplore(): Promise<boolean> {
+        const tree = await this.getCachedTree();
+        if (tree) {
+            const view = this.detectCurrentViewFromTree(tree);
+            if (view !== 'unknown') return view === 'explore';
+        }
+        // URL fallback
         return this.page.url().includes('/explore');
     }
 
@@ -864,6 +1054,36 @@ export class A11yNavigator {
     }
 
     // =========================================================================
+    // Cached Tree Access (shared across methods within ~500ms)
+    // =========================================================================
+
+    private _cachedTree: AXTree | null = null;
+    private _cacheTimestamp: number = 0;
+    private static CACHE_TTL_MS = 500;
+
+    /**
+     * Get the accessibility tree, reusing a cached version if fresh (<500ms).
+     * Multiple methods called in the same navigation loop iteration share
+     * the same tree instead of rebuilding independently.
+     */
+    async getCachedTree(): Promise<AXTree | null> {
+        if (this._cachedTree && Date.now() - this._cacheTimestamp < A11yNavigator.CACHE_TTL_MS) {
+            return this._cachedTree;
+        }
+        this._cachedTree = await this.buildAccessibilityTree();
+        this._cacheTimestamp = Date.now();
+        return this._cachedTree;
+    }
+
+    /**
+     * Invalidate the cached tree. Call after actions that change page state.
+     */
+    invalidateTreeCache(): void {
+        this._cachedTree = null;
+        this._cacheTimestamp = 0;
+    }
+
+    // =========================================================================
     // Tree Summary for LLM Dynamic Reasoning
     // =========================================================================
 
@@ -873,7 +1093,7 @@ export class A11yNavigator {
      * The LLM infers what page it's on and what's safe to do.
      */
     async buildTreeSummaryForLLM(): Promise<TreeSummary> {
-        const tree = await this.buildAccessibilityTree();
+        const tree = await this.getCachedTree();
         if (!tree) return { containers: [], inputs: [], landmarks: [] };
 
         const containers: ContainerInfo[] = [];
@@ -1508,7 +1728,7 @@ export class A11yNavigator {
                         // Sort by distance from center
                         // For stories: pick closest to center (arrow buttons are near content)
                         // For carousel: pick furthest from center (buttons are at edges)
-                        const inStory = this.isInStoryViewer();
+                        const inStory = await this.isInStoryViewer();
                         sideButtons.sort((a, b) => {
                             const aX = a.boundingBox!.x;
                             const bX = b.boundingBox!.x;
@@ -1597,7 +1817,7 @@ export class A11yNavigator {
 
         // === STRATEGY 2: Context-aware fallback ===
         const viewportCenterX = viewport.width / 2;
-        const inStoryViewer = this.isInStoryViewer();
+        const inStoryViewer = await this.isInStoryViewer();
 
         // Story viewer has a different layout:
         // - Story content is centered (roughly 30-70% of viewport width)
@@ -2007,12 +2227,18 @@ export class A11yNavigator {
     }
 
     /**
-     * Get enhanced content state using both URL and accessibility tree.
+     * Get enhanced content state using accessibility tree and CDP detection.
      * Slightly more expensive than getContentState() but more accurate.
      */
     async getEnhancedContentState(): Promise<ContentState> {
-        const url = this.page.url();
-        const currentView = this.detectCurrentView(url);
+        const tree = await this.getCachedTree();
+        let currentView: ContentState['currentView'] = 'unknown';
+        if (tree) {
+            currentView = this.detectCurrentViewFromTree(tree);
+        }
+        if (currentView === 'unknown') {
+            currentView = this.detectCurrentViewFromURL();
+        }
 
         // Use CDP accessibility tree for accurate detection
         const [hasStories, hasPosts] = await Promise.all([
@@ -2991,8 +3217,8 @@ export class A11yNavigator {
         const elements: NavigationElement[] = [];
         const viewport = await this.getViewportInfo();
 
-        // Build hierarchical tree for container context
-        const tree = await this.buildAccessibilityTree();
+        // Build hierarchical tree for container context (uses cached tree)
+        const tree = await this.getCachedTree();
         if (!tree) {
             return elements;
         }

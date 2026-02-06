@@ -43,7 +43,6 @@ export interface DebugState {
 
     // Metrics
     postsCollected: number;
-    actionsRemaining: number;
 }
 
 /**
@@ -335,9 +334,6 @@ export class DebugOverlay {
                 <div class="debug-row">
                     <span><span class="debug-label">Captures</span> ${state.captureCount}</span>
                     <span><span class="debug-label">Posts</span> ${state.postsCollected}</span>
-                </div>
-                <div class="debug-row">
-                    <span><span class="debug-label">Actions left</span> ${state.actionsRemaining}</span>
                 </div>
             </div>
 

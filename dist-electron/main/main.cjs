@@ -493,6 +493,7 @@ var BrowserManager = class _BrowserManager {
       if (!url.includes("instagram.com")) {
         await page.goto("https://www.instagram.com/", { waitUntil: "domcontentloaded" });
       }
+      await new Promise((r) => setTimeout(r, 3e3));
       const currentUrl = page.url();
       if (currentUrl.includes("/accounts/login")) {
         return { valid: false, reason: "SESSION_EXPIRED" };
@@ -503,14 +504,19 @@ var BrowserManager = class _BrowserManager {
       if (currentUrl.includes("/accounts/suspended")) {
         return { valid: false, reason: "RATE_LIMITED" };
       }
-      const isValid = await this.checkLoginStateViaCDP(page);
-      if (isValid) {
-        console.log("\u2705 Session validation: Valid");
-        return { valid: true };
-      } else {
-        console.log("\u274C Session validation: Not logged in");
-        return { valid: false, reason: "SESSION_EXPIRED" };
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const isValid = await this.checkLoginStateViaCDP(page);
+        if (isValid) {
+          console.log("\u2705 Session validation: Valid");
+          return { valid: true };
+        }
+        if (attempt < 3) {
+          console.log(`\u23F3 Session check attempt ${attempt}/3: nav elements not found yet, waiting...`);
+          await new Promise((r) => setTimeout(r, 2e3));
+        }
       }
+      console.log("\u274C Session validation: Not logged in (after 3 attempts)");
+      return { valid: false, reason: "SESSION_EXPIRED" };
     } catch (error) {
       console.error("\u274C Session validation error:", error.message);
       return { valid: false, reason: error.message };
@@ -3064,7 +3070,7 @@ var HumanScroll = class {
 };
 
 // src/main/services/A11yNavigator.ts
-var A11yNavigator = class {
+var A11yNavigator = class _A11yNavigator {
   page;
   // Session-level timing multiplier for cross-session variance in typing delays
   sessionTimingMultiplier;
@@ -3115,25 +3121,131 @@ var A11yNavigator = class {
     }
   }
   /**
-   * Get content state by analyzing URL only.
-   * Cost: $0 (no API calls, no DOM queries)
+   * Get content state using accessibility tree (primary) with URL fallback.
+   * Cost: $0 (CDP accessibility tree + URL analysis)
    *
    * NOTE: This does NOT check auth status. Use BrowserManager.validateSession() for that.
-   * For detailed element detection, use ContentVision.
    */
   async getContentState() {
-    const url = this.page.url();
-    const currentView = this.detectCurrentView(url);
+    const tree = await this.getCachedTree();
+    const treeView = tree ? this.detectCurrentViewFromTree(tree) : "unknown";
+    const urlView = this.detectCurrentViewFromURL();
+    if (treeView !== "unknown" && treeView !== urlView) {
+      console.log(`  \u{1F50D} View detection disagreement: tree=${treeView}, url=${urlView}`);
+    }
+    const currentView = treeView !== "unknown" ? treeView : urlView;
     return {
       hasStories: currentView === "feed" || currentView === "story",
       hasPosts: currentView === "feed" || currentView === "profile",
       currentView
     };
   }
+  // =========================================================================
+  // Tree-Based View Detection
+  // =========================================================================
+  /**
+   * Detect current view from accessibility tree signals.
+   * Priority-ordered: most specific first.
+   * Returns 'unknown' if no strong signals match (falls back to URL).
+   */
+  detectCurrentViewFromTree(tree) {
+    const signals = this.collectViewSignals(tree);
+    if (signals.hasLoginForm) return "login";
+    if (signals.hasStoryViewer) return "story";
+    if (signals.hasPostDetailDialog) return "post_detail";
+    const url = this.page.url();
+    if (url.includes("/p/") || url.includes("/reel/")) return "post_detail";
+    if (signals.hasProfileIndicators) return "profile";
+    if (signals.hasExploreGrid) return "explore";
+    if (signals.articleCount > 0) return "feed";
+    return "unknown";
+  }
+  /**
+   * Single-pass signal collection from the accessibility tree.
+   * Collects all signals needed for view detection efficiently.
+   *
+   * Critical implementation details:
+   * - Dialog detection uses parent-chain validation (not just "dialog exists + article exists")
+   * - Profile detection uses depth checks (prevents false positives from feed suggestions)
+   * - Explore detection uses grid link pattern matching
+   */
+  collectViewSignals(tree) {
+    let hasDialog = false;
+    let hasArticleInDialog = false;
+    let hasTablist = false;
+    let hasProfileTabs = false;
+    let hasFollowButtonShallow = false;
+    let hasFollowerStatsShallow = false;
+    let hasLoginInputs = false;
+    let hasStoryPause = false;
+    let articleCount = 0;
+    let storyButtonCount = 0;
+    let gridLinkCount = 0;
+    const dialogNodeIds = /* @__PURE__ */ new Set();
+    for (const node of tree.nodeMap.values()) {
+      if (node.ignored) continue;
+      const role = node.role?.value?.toLowerCase() || "";
+      const name = (node.name?.value || "").toLowerCase();
+      const depth = node.depth || 0;
+      if (role === "dialog" || role === "alertdialog") {
+        hasDialog = true;
+        dialogNodeIds.add(node.nodeId);
+      }
+      if (role === "article") {
+        articleCount++;
+        if (hasDialog && !hasArticleInDialog) {
+          let parent = node.parentId ? tree.nodeMap.get(node.parentId) : null;
+          while (parent) {
+            if (dialogNodeIds.has(parent.nodeId)) {
+              hasArticleInDialog = true;
+              break;
+            }
+            parent = parent.parentId ? tree.nodeMap.get(parent.parentId) : null;
+          }
+        }
+      }
+      if (role === "tablist") hasTablist = true;
+      if (role === "tab" && (name === "posts" || name === "reels" || name === "tagged")) {
+        hasProfileTabs = true;
+      }
+      if (role === "button" && name === "follow" && depth < 15) {
+        hasFollowButtonShallow = true;
+      }
+      if ((name.includes("followers") || name.includes("following")) && depth < 15) {
+        hasFollowerStatsShallow = true;
+      }
+      if (role === "button" && name === "pause" && depth < 15) {
+        hasStoryPause = true;
+      }
+      if (name.startsWith("story by ")) {
+        storyButtonCount++;
+      }
+      if ((role === "textbox" || role === "input") && (name.includes("username") || name.includes("password") || name.includes("phone number"))) {
+        hasLoginInputs = true;
+      }
+      if (role === "link" && depth > 15 && name.length > 20) {
+        gridLinkCount++;
+      }
+    }
+    return {
+      hasLoginForm: hasLoginInputs,
+      hasStoryViewer: hasStoryPause && articleCount === 0,
+      hasPostDetailDialog: hasDialog && hasArticleInDialog,
+      hasProfileIndicators: hasTablist && hasProfileTabs || hasFollowerStatsShallow && hasFollowButtonShallow,
+      hasExploreGrid: gridLinkCount > 6 && articleCount === 0 && !hasProfileTabs,
+      articleCount,
+      storyButtonCount
+    };
+  }
+  // =========================================================================
+  // URL-Based View Detection (Fallback)
+  // =========================================================================
   /**
    * Determine current view/page type from URL.
+   * Kept as fallback when tree-based detection returns 'unknown'.
    */
-  detectCurrentView(url) {
+  detectCurrentViewFromURL() {
+    const url = this.page.url();
     if (url.includes("/accounts/login")) return "login";
     if (url.includes("/stories/")) return "story";
     if (url.includes("/explore")) return "explore";
@@ -3154,34 +3266,55 @@ var A11yNavigator = class {
   // ============================================================================
   /**
    * Detect current engagement level for LLM context.
-   * Determines if we're in feed, post modal, comments, or profile view.
-   * Cost: $0 (URL analysis + optional accessibility tree check)
+   * Uses accessibility tree signals (primary) with URL fallback.
+   * Cost: $0 (CDP accessibility tree analysis)
    */
   async detectEngagementLevel() {
+    const tree = await this.getCachedTree();
+    if (tree) {
+      const signals = this.collectViewSignals(tree);
+      if (signals.hasPostDetailDialog) {
+        const url2 = this.page.url();
+        const postMatch = url2.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+        const postUrl = postMatch ? `https://www.instagram.com/p/${postMatch[2]}/` : void 0;
+        return { level: "post_modal", postUrl };
+      }
+      if (signals.hasProfileIndicators) {
+        const username = this.getProfileUsernameFromTree(tree);
+        return { level: "profile", username: username || void 0 };
+      }
+      if (signals.hasStoryViewer) {
+        return { level: "feed" };
+      }
+    }
     const url = this.page.url();
     if (url.includes("/p/") || url.includes("/reel/")) {
       const postMatch = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
       const postUrl = postMatch ? `https://www.instagram.com/p/${postMatch[2]}/` : void 0;
-      const tree = await this.buildAccessibilityTree();
-      if (tree) {
-        const hasDialog = Array.from(tree.nodeMap.values()).some(
-          (node) => node.role?.value?.toLowerCase() === "dialog"
-        );
-        return {
-          level: "post_modal",
-          postUrl
-        };
-      }
       return { level: "post_modal", postUrl };
     }
     const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
     if (profileMatch && !["explore", "reels", "direct", "p"].includes(profileMatch[1])) {
-      return {
-        level: "profile",
-        username: profileMatch[1]
-      };
+      return { level: "profile", username: profileMatch[1] };
     }
     return { level: "feed" };
+  }
+  /**
+   * Extract profile username from accessibility tree.
+   * Finds the first heading at shallow depth that looks like a username.
+   */
+  getProfileUsernameFromTree(tree) {
+    for (const node of tree.nodeMap.values()) {
+      if (node.ignored) continue;
+      const role = node.role?.value?.toLowerCase() || "";
+      const name = node.name?.value || "";
+      const depth = node.depth || 0;
+      if (role === "heading" && depth < 15 && name.length > 1 && name.length < 100) {
+        if (name.toLowerCase() === "suggestions for you") continue;
+        return name;
+      }
+    }
+    return null;
   }
   /**
    * Extract engagement metrics from visible post elements.
@@ -3233,23 +3366,13 @@ var A11yNavigator = class {
    * (Instagram feeds are often infinite).
    */
   shouldStopBrowsing(scrollCount, extractedCount, startTime, recentDuplicates, config = {
-    maxScrolls: 25,
-    // ~25 scrolls = 5 min at human pace
-    maxPosts: 30,
-    // 30 posts is plenty for analysis
     maxDurationMs: 5 * 60 * 1e3,
-    // 5 minute hard cap
+    // 5 minute default
     duplicateThreshold: 5
     // 5 consecutive dupes = we're looping
   }) {
     if (Date.now() - startTime > config.maxDurationMs) {
       return { shouldStop: true, reason: "TIME_LIMIT" };
-    }
-    if (scrollCount >= config.maxScrolls) {
-      return { shouldStop: true, reason: "SCROLL_LIMIT" };
-    }
-    if (extractedCount >= config.maxPosts) {
-      return { shouldStop: true, reason: "CONTENT_QUOTA" };
     }
     if (recentDuplicates >= config.duplicateThreshold) {
       return { shouldStop: true, reason: "DUPLICATE_LOOP" };
@@ -3294,18 +3417,30 @@ var A11yNavigator = class {
     }
   }
   /**
-   * Check if we're currently viewing a story (vs feed).
-   * URL-based detection only - completely undetectable.
+   * Check if we're currently viewing a story.
+   * Uses accessibility tree (primary) with URL fallback.
    */
-  isInStoryViewer() {
-    const url = this.page.url();
-    return url.includes("/stories/");
+  async isInStoryViewer() {
+    const tree = await this.getCachedTree();
+    if (tree) {
+      const signals = this.collectViewSignals(tree);
+      if (signals.hasStoryViewer) return true;
+      if (signals.articleCount > 0 || signals.hasProfileIndicators) return false;
+    }
+    return this.page.url().includes("/stories/");
   }
   /**
    * Check if we're on a profile page and extract username.
-   * URL-based detection only.
+   * Uses accessibility tree (primary) with URL fallback.
    */
-  getProfileUsername() {
+  async getProfileUsername() {
+    const tree = await this.getCachedTree();
+    if (tree) {
+      const signals = this.collectViewSignals(tree);
+      if (signals.hasProfileIndicators) {
+        return this.getProfileUsernameFromTree(tree);
+      }
+    }
     const url = this.page.url();
     const profileMatch = url.match(/instagram\.com\/([^\/\?]+)\/?$/);
     if (profileMatch && !["explore", "reels", "direct", "stories"].includes(profileMatch[1])) {
@@ -3315,17 +3450,27 @@ var A11yNavigator = class {
   }
   /**
    * Check if we're on the main feed.
-   * URL-based detection only.
+   * Uses accessibility tree (primary) with URL fallback.
    */
-  isOnFeed() {
+  async isOnFeed() {
+    const tree = await this.getCachedTree();
+    if (tree) {
+      const view = this.detectCurrentViewFromTree(tree);
+      if (view !== "unknown") return view === "feed";
+    }
     const url = this.page.url();
     return url === "https://www.instagram.com/" || url.includes("instagram.com/?") || url === "https://www.instagram.com";
   }
   /**
    * Check if we're on the explore page.
-   * URL-based detection only.
+   * Uses accessibility tree (primary) with URL fallback.
    */
-  isOnExplore() {
+  async isOnExplore() {
+    const tree = await this.getCachedTree();
+    if (tree) {
+      const view = this.detectCurrentViewFromTree(tree);
+      if (view !== "unknown") return view === "explore";
+    }
     return this.page.url().includes("/explore");
   }
   // =========================================================================
@@ -3680,6 +3825,32 @@ var A11yNavigator = class {
     });
   }
   // =========================================================================
+  // Cached Tree Access (shared across methods within ~500ms)
+  // =========================================================================
+  _cachedTree = null;
+  _cacheTimestamp = 0;
+  static CACHE_TTL_MS = 500;
+  /**
+   * Get the accessibility tree, reusing a cached version if fresh (<500ms).
+   * Multiple methods called in the same navigation loop iteration share
+   * the same tree instead of rebuilding independently.
+   */
+  async getCachedTree() {
+    if (this._cachedTree && Date.now() - this._cacheTimestamp < _A11yNavigator.CACHE_TTL_MS) {
+      return this._cachedTree;
+    }
+    this._cachedTree = await this.buildAccessibilityTree();
+    this._cacheTimestamp = Date.now();
+    return this._cachedTree;
+  }
+  /**
+   * Invalidate the cached tree. Call after actions that change page state.
+   */
+  invalidateTreeCache() {
+    this._cachedTree = null;
+    this._cacheTimestamp = 0;
+  }
+  // =========================================================================
   // Tree Summary for LLM Dynamic Reasoning
   // =========================================================================
   /**
@@ -3688,7 +3859,7 @@ var A11yNavigator = class {
    * The LLM infers what page it's on and what's safe to do.
    */
   async buildTreeSummaryForLLM() {
-    const tree = await this.buildAccessibilityTree();
+    const tree = await this.getCachedTree();
     if (!tree) return { containers: [], inputs: [], landmarks: [] };
     const containers = [];
     const inputs = [];
@@ -4188,7 +4359,7 @@ var A11yNavigator = class {
             return side === "right" ? btnCenterX > centerX : btnCenterX < centerX;
           });
           if (sideButtons.length > 0) {
-            const inStory = this.isInStoryViewer();
+            const inStory = await this.isInStoryViewer();
             sideButtons.sort((a, b) => {
               const aX = a.boundingBox.x;
               const bX = b.boundingBox.x;
@@ -4245,7 +4416,7 @@ var A11yNavigator = class {
       }
     }
     const viewportCenterX = viewport.width / 2;
-    const inStoryViewer = this.isInStoryViewer();
+    const inStoryViewer = await this.isInStoryViewer();
     if (inStoryViewer) {
       const storyZoneStart = viewport.width * 0.28;
       const storyZoneEnd = viewport.width * 0.72;
@@ -4545,12 +4716,18 @@ var A11yNavigator = class {
     return { isAd: false };
   }
   /**
-   * Get enhanced content state using both URL and accessibility tree.
+   * Get enhanced content state using accessibility tree and CDP detection.
    * Slightly more expensive than getContentState() but more accurate.
    */
   async getEnhancedContentState() {
-    const url = this.page.url();
-    const currentView = this.detectCurrentView(url);
+    const tree = await this.getCachedTree();
+    let currentView = "unknown";
+    if (tree) {
+      currentView = this.detectCurrentViewFromTree(tree);
+    }
+    if (currentView === "unknown") {
+      currentView = this.detectCurrentViewFromURL();
+    }
     const [hasStories, hasPosts] = await Promise.all([
       this.detectStoriesPresent(),
       this.detectPostsPresent()
@@ -5296,7 +5473,7 @@ var A11yNavigator = class {
   async getNavigationElements(maxElements = 1e3) {
     const elements = [];
     const viewport = await this.getViewportInfo();
-    const tree = await this.buildAccessibilityTree();
+    const tree = await this.getCachedTree();
     if (!tree) {
       return elements;
     }
@@ -5844,14 +6021,6 @@ var DEFAULT_CONFIG = {
   minScrollDelta: 100
   // Must scroll at least 100px for new capture
 };
-function getStoryCropMargins(viewportHeight) {
-  return {
-    topMargin: Math.round(viewportHeight * 0.034),
-    // ~3.4% of viewport
-    bottomMargin: Math.round(viewportHeight * 0.036)
-    // ~3.6% of viewport
-  };
-}
 var ScreenshotCollector = class {
   page;
   captures = [];
@@ -5864,7 +6033,11 @@ var ScreenshotCollector = class {
   capturedHashes = /* @__PURE__ */ new Set();
   // Track by image hash (for carousel/story)
   capturedPositions = /* @__PURE__ */ new Set();
-  // Track by scroll position bucket (100px)
+  // Track by URL-path + scroll position bucket
+  lastCaptureUrl = "";
+  // Session log buffer (written to .md file alongside screenshots)
+  logBuffer = [];
+  sessionStartTime = Date.now();
   constructor(page, config = {}) {
     this.page = page;
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -5913,42 +6086,28 @@ var ScreenshotCollector = class {
       console.log(`\u{1F4F8} Skipping duplicate post: ${postId}`);
       return false;
     }
+    const currentUrl = this.page.url();
+    const urlPath = new URL(currentUrl).pathname;
     const vpSize = this.page.viewportSize();
     const bucketSize = vpSize ? Math.round(vpSize.height * 0.078) : 75;
     const positionBucket = Math.round(scrollPosition / bucketSize);
-    if (source !== "carousel" && source !== "story" && this.capturedPositions.has(positionBucket)) {
-      console.log(`\u{1F4F8} Skipping duplicate position: bucket ${positionBucket} (scroll ~${scrollPosition}px)`);
+    const positionKey = `${urlPath}:${positionBucket}`;
+    if (source !== "carousel" && source !== "story" && this.capturedPositions.has(positionKey)) {
+      console.log(`\u{1F4F8} Skipping duplicate position: bucket ${positionBucket} on ${urlPath}`);
       return false;
     }
-    if (source === "feed" && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
+    const onSamePage = currentUrl === this.lastCaptureUrl;
+    if (onSamePage && source === "feed" && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
       console.log(`\u{1F4F8} Scroll delta too small (${Math.abs(scrollPosition - this.lastScrollPosition)}px), skipping duplicate`);
       return false;
     }
     try {
-      const viewport = this.page.viewportSize();
-      let screenshot;
-      if (source === "story" && viewport) {
-        const storyCrop = getStoryCropMargins(viewport.height);
-        const clipHeight = viewport.height - storyCrop.topMargin - storyCrop.bottomMargin;
-        screenshot = await this.page.screenshot({
-          type: "jpeg",
-          quality: this.config.jpegQuality,
-          clip: {
-            x: 0,
-            y: storyCrop.topMargin,
-            width: viewport.width,
-            height: Math.max(clipHeight, Math.round(viewport.height * 0.05))
-          }
-        });
-        console.log(`\u{1F4F8} Story cropped: removed top ${storyCrop.topMargin}px and bottom ${storyCrop.bottomMargin}px`);
-      } else {
-        screenshot = await this.page.screenshot({
-          type: "jpeg",
-          quality: this.config.jpegQuality,
-          fullPage: false
-          // Viewport only
-        });
-      }
+      const screenshot = await this.page.screenshot({
+        type: "jpeg",
+        quality: this.config.jpegQuality,
+        fullPage: false
+        // Viewport only
+      });
       const hash = this.computeImageHash(screenshot);
       if (this.capturedHashes.has(hash)) {
         console.log(`\u{1F4F8} Skipping duplicate (hash match): ${hash.slice(0, 8)}...`);
@@ -5968,7 +6127,10 @@ var ScreenshotCollector = class {
         this.capturedPostIds.add(postId);
       }
       this.capturedHashes.add(hash);
-      this.capturedPositions.add(positionBucket);
+      if (source !== "carousel" && source !== "story") {
+        this.capturedPositions.add(positionKey);
+      }
+      this.lastCaptureUrl = currentUrl;
       if (source === "feed") {
         this.lastScrollPosition = scrollPosition;
       }
@@ -6022,8 +6184,8 @@ var ScreenshotCollector = class {
       if (captureRegion.y + captureRegion.height > viewport.height) {
         captureRegion.height = viewport.height - captureRegion.y;
       }
-      captureRegion.width = Math.max(captureRegion.width, Math.round(viewport.width * 0.09));
-      captureRegion.height = Math.max(captureRegion.height, Math.round(viewport.height * 0.05));
+      captureRegion.width = Math.max(captureRegion.width, Math.round(viewport.width * 0.3));
+      captureRegion.height = Math.max(captureRegion.height, Math.round(viewport.height * 0.2));
       const screenshot = await this.page.screenshot({
         type: "jpeg",
         quality: this.config.jpegQuality,
@@ -6274,6 +6436,32 @@ var ScreenshotCollector = class {
     } catch {
       return null;
     }
+  }
+  /**
+   * Append a line to the session log buffer.
+   * Lines are timestamped relative to session start.
+   */
+  appendLog(line) {
+    const elapsed = ((Date.now() - this.sessionStartTime) / 1e3).toFixed(1);
+    this.logBuffer.push(`[${elapsed}s] ${line}`);
+  }
+  /**
+   * Append a raw line (no timestamp prefix) to the session log buffer.
+   * Used for headers, separators, and pre-formatted content.
+   */
+  appendLogRaw(line) {
+    this.logBuffer.push(line);
+  }
+  /**
+   * Flush the session log buffer to a markdown file alongside screenshots.
+   * Called at session end. Only writes if outputDir is configured.
+   */
+  flushSessionLog() {
+    if (!this.outputDir || this.logBuffer.length === 0) return;
+    const filepath = path3.join(this.outputDir, "session_log.md");
+    const content = this.logBuffer.join("\n") + "\n";
+    fs3.writeFileSync(filepath, content, "utf-8");
+    console.log(`\u{1F4DD} Session log saved: ${filepath}`);
   }
   /**
    * Log summary of captured content.
@@ -6806,32 +6994,32 @@ var NavigationLLM = class {
   getSystemPrompt() {
     return `You are a FULLY AUTONOMOUS navigation agent for an Instagram browser session. You have COMPLETE STRATEGIC CONTROL over the session - you decide what to do, when to switch activities, and when to end.
 
-CORE PHILOSOPHY \u2014 SMART CONTENT COLLECTION:
-You are NOT a mindless scroll bot. Your job is to collect high-quality content efficiently.
-- On the FEED: posts are already fully visible \u2014 scroll and capture interesting ones directly
-- On GRID views (profiles, explore, hashtags): thumbnails are too small \u2014 you MUST click them to open post modals
-- A well-captured feed post (article with full image + caption) is just as valuable as a modal view
-- On profiles: click into 3+ posts to see full captions, carousel slides, and comments
-- Match content to user interests before capturing \u2014 don't capture everything
+CORE PHILOSOPHY \u2014 CATALOG EVERYTHING:
+Your job is to build a COMPLETE digest of the user's Instagram world. Capture EVERY post and story you encounter.
+- On the FEED: capture EVERY post as you scroll. Don't skip posts. The digest should reflect the full feed.
+- On STORIES: capture EVERY story frame. Stories are ephemeral \u2014 they disappear after 24h.
+- On GRID views (profiles, explore, hashtags): thumbnails are too small \u2014 you MUST click them to open post modals before capturing.
+- On profiles: click into posts to see full captions, carousel slides, and comments.
+- The ONLY content to skip: ads/sponsored posts, "Suggested for you" panels, and loading states.
 
 SESSION START PATTERN:
 When a session begins and you're on the feed:
-1. Scroll through the first 2-3 posts \u2014 capture any that match interests or have high engagement
-2. Then search for your first interest topic to find targeted content
-3. From search results, visit a relevant profile and click into their recent posts
-This gives you a mix of feed content + interest-targeted content early in the session.
+1. Scroll through feed posts \u2014 capture EVERY post you see (they're all part of the digest).
+2. Watch stories \u2014 capture EVERY story frame.
+3. Search for interest topics and visit relevant profiles for additional targeted content.
+The feed and stories are cataloged completely. Interest searches add bonus targeted content on top.
 
 CAPTURE PACING:
-- Target: ~1 capture every 10-15 seconds. A 300-second session should produce 15-25 captures.
-- If you're below 5 captures at the halfway point, you're being too selective \u2014 capture more aggressively.
-- The session FAILS if you collect fewer than 10 captures. Don't be overly picky.
-- Stories are your easiest captures \u2014 each frame is fresh, full-screen, and takes 3-5 seconds. Watch 3-5 stories early in the session to build a capture baseline.
+- Capture EVERY post on the feed and EVERY story frame \u2014 no selectivity needed.
+- You should be capturing on almost every scroll action when on the feed.
+- If you've scrolled 3+ times without a capture, you're missing content \u2014 capture more aggressively.
+- Stories are your easiest captures \u2014 each frame is fresh, full-screen, and quick.
 
-TIME ALLOCATION (for a 300-second session):
-- First 30s: Scroll feed, capture 2-3 interesting posts, watch 2-3 stories
-- 30-180s: Search for interest topics, visit profiles, click into grid posts
-- 180-270s: Return to feed for any new content, visit a second profile if needed
-- Last 30s: Wrap up, capture anything remaining, terminate
+TIME ALLOCATION (proportional to session length \u2014 check SESSION STATUS for your total time):
+- First ~40%: Scroll feed \u2014 click TIMESTAMP LINK on EVERY post to open detail page, capture, back, repeat
+- 40-60%: Watch stories \u2014 capture EVERY story frame
+- 60-80%: Search for topics (from SEARCH TOPICS), visit profiles, click into grid posts
+- 80-100%: Return to feed for any remaining posts, wrap up, terminate
 
 YOU CONTROL:
 1. TACTICAL: What action to take next (click, scroll, type, press, wait)
@@ -6864,14 +7052,25 @@ Elements are grouped by their container from the accessibility tree:
 - "navigation" container = nav links (Home, Explore, Messages, etc.)
 - "dialog" container = modal/popup content
 
-INSTAGRAM HAS TWO CONTENT LAYOUTS \u2014 LEARN THE DIFFERENCE:
+INSTAGRAM CONTENT LAYOUTS:
 
 1. FEED LAYOUT (instagram.com/ home feed):
-   Posts are ALREADY FULLY VISIBLE \u2014 large image/video, caption preview, engagement counts, timestamp.
-   - DO NOT click into feed posts. There is nothing more to see.
-   - Just SCROLL to discover posts, then CAPTURE interesting ones directly.
-   - Each post is inside an "article" container. The article and its children are what you screenshot.
-   - To capture a feed post: set capture.targetId to the article element's id, or use strategic.captureNow for the full viewport.
+   Posts are visible as cards with image, truncated caption, and engagement counts.
+   For EVERY feed post, you must open the POST DETAIL MODAL. Here's how to find the right element to click:
+
+   HOW TO OPEN A FEED POST (try in this order):
+   a) BEST: Find the TIMESTAMP LINK inside the article (e.g. link "1h", link "16h", link "2d", link "1w").
+      This is a LINK (role=link) \u2014 it ALWAYS exists in every feed post and ALWAYS navigates to the post detail page.
+   b) BACKUP: Find a link whose name contains "comments" (e.g. "View all 106 comments") \u2192 CLICK it.
+      NOTE: This link does NOT exist on every post! Many posts only have a button with a bare number for comment count.
+   c) LAST RESORT: Click the username link (e.g. link "username Verified") \u2014 goes to profile, then find the post there.
+
+   \u26A0\uFE0F DO NOT click BUTTONS with numbers like "390.2K", "663", "1.4K" \u2014 those are like/comment count BUTTONS that may not navigate.
+   \u26A0\uFE0F DO NOT click buttons named "Comment", "Like", "Share", "Save" \u2014 those are action buttons, not navigation.
+   \u26A0\uFE0F KEY DISTINCTION: Look for LINKS (role=link), not BUTTONS (role=button). Timestamp links are ALWAYS role=link.
+
+   After the post detail page opens: capture it (captureNow: true), then press Back to return to feed, scroll to next post.
+   DO NOT capture feed cards directly \u2014 always open the post detail first.
 
 2. GRID LAYOUT (profile pages, explore page, hashtag pages, search result pages):
    Posts appear as SMALL THUMBNAILS in a grid (3 columns on profiles, mixed sizes on explore).
@@ -6880,8 +7079,8 @@ INSTAGRAM HAS TWO CONTENT LAYOUTS \u2014 LEARN THE DIFFERENCE:
    - Capture the content inside the modal, then close it (press Escape or click Close) and click the next thumbnail.
    - Grid thumbnails in the accessibility tree look like: link "Caption text..." at consistent Y positions in rows of 3.
 
-RULE: If the current view is "feed" \u2192 scroll and capture, don't click posts.
-RULE: If the current view is "profile", "explore", or a hashtag/search page \u2192 click thumbnails to open posts, then capture.
+RULE: On the FEED \u2192 for each post, click the TIMESTAMP LINK (e.g. link "16h", link "2d") inside the article \u2192 capture the post detail page \u2192 Back \u2192 scroll to next.
+RULE: On GRID views (profile, explore, hashtag) \u2192 click thumbnails to open post modals, capture, close, next.
 
 PATTERN RECOGNITION:
 - Multiple small buttons with usernames = carousel (stories, suggestions)
@@ -6892,15 +7091,34 @@ PATTERN RECOGNITION:
 ELEMENT IDENTIFICATION QUICK REFERENCE:
 | What you want to do              | What to look for in the tree                                    |
 |----------------------------------|-----------------------------------------------------------------|
-| Capture a feed post              | article "" container \u2192 use its id as capture.targetId           |
+| Open a feed post detail          | BEST: timestamp link (role=link, name "1h","16h","2d","1w") \u2014 ALWAYS present. BACKUP: link with "comments" in name (not always present). NEVER click buttons with numbers. |
 | Open a post from a grid          | link "Caption text..." or image with caption \u2192 CLICK this       |
-| Watch a story                    | button "Story by [user], not seen" \u2192 CLICK this                 |
+| Watch a story                    | button with "story" in name, or "not seen" \u2192 CLICK this        |
 | Search for a topic               | link "Search" in sidebar, then textbox "Search input"           |
 | Close a modal/overlay            | button "Close" or press Escape                                  |
 | Navigate carousel in modal       | button "Next" / "Go Back", or press ArrowRight/ArrowLeft        |
 | Go to someone's profile          | link "[username]" \u2014 the text username link, not the avatar      |
-| Check post age                   | link "1h" / "2d" / "1w" \u2014 timestamp link inside article        |
 | Skip suggested accounts          | Scroll past any section with button "Follow" elements           |
+
+HOW TO IDENTIFY CLICKABLE ELEMENTS INSIDE A FEED ARTICLE:
+Inside each article container, you'll typically see these elements:
+- link "16h" (or "1h", "2d", "1w") \u2192 TIMESTAMP LINK \u2014 \u2705 CLICK THIS to open post detail. Always present, always works.
+- link "username Verified" (or just "username") \u2192 USERNAME LINK \u2014 goes to profile page
+- button "390.2K" (large number) \u2192 LIKE COUNT button \u2014 \u274C DO NOT CLICK (won't navigate)
+- button "663" (smaller number) \u2192 COMMENT COUNT button \u2014 \u274C DO NOT CLICK (it's a button, may not navigate)
+- button "Comment" \u2192 comment icon \u2014 \u274C DO NOT CLICK (action button)
+- button "Like" \u2192 like icon \u2014 \u274C FORBIDDEN
+- button "Share" \u2192 share icon \u2014 \u274C FORBIDDEN
+- button "Save" \u2192 save icon \u2014 \u274C FORBIDDEN
+
+KEY RULE: Only click LINKS (role=link), not BUTTONS (role=button). The timestamp link is your primary navigation tool on the feed.
+On SOME posts, a "View all X comments" LINK may exist \u2014 if you see it, you can click it too. But don't count on it being there.
+
+CLICK RECOVERY \u2014 if a click produces "no state change detected":
+- Do NOT click the same element again. It will fail again.
+- Try the TIMESTAMP LINK in the same article \u2014 it's always a link (role=link) with a time name like "1h", "2d"
+- If 2 different elements both fail, scroll to the next post and try there
+- Remember: only LINKS navigate. BUTTONS with numbers are like/comment counts and don't navigate.
 
 DYNAMIC PAGE AWARENESS (infer from tree context):
 YOU must infer where you are from the accessibility tree. Look at:
@@ -6925,31 +7143,34 @@ Typing here could send a message. I'll press Escape to exit first."
 
 CONTENT ASSESSMENT (from accessibility tree):
 Elements may include contentPreview data extracted directly from the page:
-- Caption: Post caption text (first 100 chars) - USE THIS to match content
-- Engagement: Like counts, comment counts - higher = more interesting
-- Tags: Extracted hashtags - MATCH THESE to user interests
+- Caption: Post caption text (first 100 chars)
+- Engagement: Like counts, comment counts
+- Tags: Extracted hashtags
 - Alt: Image description/alt text
 
-USE CONTENT TO MAKE SMART DECISIONS:
-\u2705 Caption/hashtags match user interests \u2192 engage deeply, capture
-\u2705 High engagement (thousands of likes) + relevant \u2192 priority capture
-\u2705 Hashtags like #photography when user likes photography \u2192 explore
-\u274C No relevance to user interests \u2192 scroll past quickly
-\u274C Sponsored/ad content \u2192 skip immediately
-\u274C Generic content with low engagement \u2192 don't capture
+CAPTURE RULES BY CONTEXT:
+\u2705 ANY feed post \u2192 CAPTURE IT (the digest catalogs the FULL feed \u2014 no filtering)
+\u2705 ANY story frame \u2192 CAPTURE IT (stories are ephemeral \u2014 capture ALL of them)
+\u2705 Search results / profile posts \u2192 capture posts relevant to your search topic
+\u274C Sponsored/ad content \u2192 skip (don't capture)
+\u274C "Suggested for you" panels \u2192 skip (not real posts)
+
+IMPORTANT: User interests are SEARCH TOPICS ONLY. Do NOT use them to decide what to capture on the feed or stories. On the feed, capture EVERY post. On stories, capture EVERY frame. Interests are ONLY used during the search phase to decide what to search for and which search result posts to capture.
 
 TIMESTAMP RECENCY (from link elements like "1h", "2d", "1w" inside articles):
-- Minutes/hours (1m, 30m, 1h, 3h) = very fresh, PRIORITIZE these
-- 1-3 days (1d, 2d, 3d) = recent, good for the digest
-- 4-7 days (4d, 5d, 6d, 1w) = borderline, only capture if highly relevant to user interests
-- 2+ weeks (2w, 4w, 12w, 90w) = STALE \u2014 skip immediately, do not capture
-The digest should primarily contain content from the last 48 hours.
+Recency helps you prioritize when SEARCHING for content on profiles/explore:
+- Minutes/hours (1m, 30m, 1h, 3h) = very fresh, highest priority for search results
+- 1-3 days (1d, 2d, 3d) = recent, good for search results
+- 4-7 days (4d, 5d, 6d, 1w) = borderline for search, only if highly relevant
+- 2+ weeks (2w, 4w, 12w, 90w) = STALE for search \u2014 skip on profiles/explore
 
-EXAMPLE: User interests: ["coffee", "travel", "photography"]
-- Post with Caption: "Morning espresso \u2615 #coffee #barista" \u2192 HIGH RELEVANCE, priority capture!
-- Post with Caption: "New workout routine \u{1F4AA} #fitness" \u2192 Not an interest match, but capture if engagement is very high (10K+ likes) or content is timely/trending
-- Post with Tags: #travel, #wanderlust \u2192 MATCHES, engage deeper
-- Post from a friend with 500 likes about their weekend \u2192 CAPTURE \u2014 the digest should reflect the user's full feed, not just one topic
+BUT on the HOME FEED: capture ALL posts regardless of timestamp. Instagram's algorithm already curates the feed \u2014 whatever appears is worth cataloging.
+
+EXAMPLE: Search topics: ["coffee", "travel", "photography"]
+- Any feed post \u2192 CAPTURE (the digest catalogs everything on the feed \u2014 no filtering by topics)
+- Any story \u2192 CAPTURE (ephemeral content, always catalog \u2014 no filtering by topics)
+- During search phase: search "coffee", visit profile, capture recent posts about coffee from their grid
+- Profile post 2+ weeks old \u2192 skip on profiles, it's stale
 
 AVAILABLE TACTICAL ACTIONS:
 - click(id): Click element by ID
@@ -6982,13 +7203,15 @@ Include a "strategic" field to make session-level decisions:
    - "terminateSession": true \u2192 end the session (content exhausted, time's up, goal achieved)
 
 3. CAPTURE CONTROL - You decide WHAT to screenshot and HOW it's framed:
+   \u26A0\uFE0F CAPTURES DO NOT HAPPEN AUTOMATICALLY. You MUST explicitly include "strategic": {"captureNow": true} in your JSON output.
+   If you don't include captureNow: true, NO screenshot is taken \u2014 no matter what you write in "reasoning".
+   - To capture the FULL VIEWPORT: set strategic.captureNow = true.
+     Use this for: detail modals, story frames, profile overviews.
    - To capture a SPECIFIC ELEMENT: set capture.targetId to the element's id number.
      The screenshot will crop tightly to that element's bounding box.
-     Use this for: a specific post, image, profile header, story frame, etc.
-   - To capture the FULL VIEWPORT: set strategic.captureNow = true (without capture.targetId).
-     Captures everything currently visible on screen.
-     Use this for: overview shots, page layouts, full dialog views.
-   - You control the framing \u2014 pick the element that best shows the content worth capturing.
+   - EVERY TIME you see a detail modal open, your VERY NEXT action must include strategic.captureNow = true.
+   \u26A0\uFE0F captureNow is a ONE-SHOT signal. Send it ONCE per post/story, then IMMEDIATELY move on (back/scroll/next).
+   NEVER send captureNow twice for the same content. The screenshot is taken instantly \u2014 retrying wastes time.
 
 4. PACING CONTROL - You decide how long to linger:
    - "lingerDuration": "short" (1s) | "medium" (3s) | "long" (6s) | "xlong" (12s)
@@ -7000,20 +7223,24 @@ WHEN TO TERMINATE:
 - \u2705 Collected enough content (good variety of captures)
 - \u2705 Stuck and can't recover
 
-CAPTURE QUALITY HIERARCHY (best \u2192 worst):
-1. FEED POST (article on home feed \u2014 full image + caption already visible) \u2014 BEST on feed, capture via targetId on the article
-2. POST MODAL (opened from a grid thumbnail \u2014 full caption + comments visible) \u2014 BEST on grids, always capture
-3. STORY CONTENT (individual story frame) \u2014 GREAT, capture each frame
-4. CAROUSEL SLIDES (in modal, individual slides) \u2014 GREAT, capture each slide
-5. PROFILE GRID (scrolled profile with thumbnails visible) \u2014 OK, capture once as overview
-\u274C NEVER capture: navigation screens, loading states, empty feeds, "Suggested for you" panels
+CAPTURE EVERYTHING RULE:
+\u26A0\uFE0F Captures require explicit "strategic": {"captureNow": true} in your JSON. Nothing is captured automatically!
+\u26A0\uFE0F captureNow is ONE-SHOT: send it ONCE, screenshot is taken instantly, then MOVE ON. Never retry for the same content.
+- FEED POSTS: click TIMESTAMP LINK \u2192 wait+captureNow (ONE TIME) \u2192 back() \u2192 scroll. Four actions per post, no more.
+- STORIES: Each frame \u2192 ONE captureNow, then advance (click right/ArrowRight/wait for auto-advance) \u2192 captureNow next frame \u2192 repeat
+- POST MODALS (from grid): As soon as modal is open \u2192 ONE captureNow \u2192 Escape \u2192 next thumbnail
+- CAROUSEL SLIDES: Navigate to slide \u2192 ONE captureNow \u2192 next slide
+- PROFILE GRID overview: ONE captureNow as overview
+\u274C NEVER: send captureNow twice for the same content, wait repeatedly on a post detail page, or retry captures
+\u274C NEVER capture: navigation screens, loading states, empty feeds, "Suggested for you" panels, ads, feed card views
 
-CAPTURE FRAMING \u2014 USE targetId:
-When you see an interesting element, set capture.targetId to its id number.
-Example: You see id:12 article "Photo by coffeelover" with great engagement.
-\u2192 Set capture.targetId: 12 to crop the screenshot to that exact post.
-If you're in a modal viewing a post, set targetId to the article or dialog element.
-For full-screen captures (stories, overview), use strategic.captureNow without targetId.
+CAPTURE FRAMING:
+All post captures should be from the POST DETAIL view (image left, caption+comments right).
+- For feed posts: click timestamp link \u2192 post detail page opens \u2192 use strategic.captureNow for full viewport capture.
+- For grid posts: click thumbnail \u2192 modal opens \u2192 use strategic.captureNow for full viewport capture.
+- For stories: use strategic.captureNow for full viewport capture.
+- You can also use capture.targetId on the dialog or article element for cropped captures.
+- NEVER capture feed card views \u2014 always open the post detail first.
 
 VIDEO HANDLING:
 When you see a video playing (videoState in context):
@@ -7022,13 +7249,14 @@ When you see a video playing (videoState in context):
 - Capture multiple frames by staying on video (system auto-captures)
 
 ADS:
-- Ads rarely contain useful content \u2014 skip them unless they relate to user interests.
+- Ads rarely contain useful content \u2014 skip them entirely.
 - Sponsored indicators: "Sponsored", "Paid partnership", "Shop now", "Learn more"
-- Use lingerDuration: "short" and scroll past when not relevant
+- Use lingerDuration: "short" and scroll past
 
 FORBIDDEN ACTIONS:
-- NEVER click: like_button, comment_button, share_button, save_button, follow_button
+- NEVER click: like_button, share_button, save_button, follow_button
 - Read-only browsing only
+- NOTE: Clicking LINKS to navigate (timestamps, "View all X comments") is ALLOWED and REQUIRED. The forbidden actions are only POSTING comments, liking, sharing, etc.
 
 STAGNATION DETECTION AND RECOVERY:
 Check RECENT ACTIONS for these failure patterns and apply the correct fix:
@@ -7038,33 +7266,72 @@ Check RECENT ACTIONS for these failure patterns and apply the correct fix:
    \u2192 Fix #1: Press Escape to close any overlay, then retry scroll.
    \u2192 Fix #2: If no overlay is visible, click on any element in the main content area (an article, an image) to restore scroll focus, then retry scroll.
 
-2. CLICK DID NOTHING on feed (clicking article, no_change_detected):
-   \u2192 You're on the FEED \u2014 you don't need to click posts here. Just scroll and capture.
-   \u2192 Fix: Stop clicking, switch to scrolling + capturing.
+2. CLICK DID NOTHING on feed (no_change_detected):
+   \u2192 You probably clicked a BUTTON instead of a LINK. Buttons with numbers (like "390.2K", "663") don't navigate.
+   \u2192 Fix: Find the TIMESTAMP LINK (role=link, name like "1h", "16h", "2d") in the same article. This ALWAYS works.
+   \u2192 If the timestamp link also fails, scroll to the next post and try there.
+   \u2192 NEVER click buttons with numbers \u2014 those are like/comment count buttons that don't navigate.
 
 3. CLICK DID NOTHING on grid (clicking thumbnail, no_change_detected):
    \u2192 You may have clicked a non-interactive element (container, decorative image).
    \u2192 Fix: Find the link element with caption text \u2014 that's the clickable thumbnail. Click THAT.
 
-4. STUCK IN LOOP (same actions repeating 3+ times):
+4. STUCK IN CAPTURE LOOP (sending wait+captureNow repeatedly on the same post):
+   \u2192 The capture was ALREADY TAKEN on the first captureNow. Retrying does nothing \u2014 the dedup system blocks duplicate screenshots.
+   \u2192 Fix: IMMEDIATELY send back() to return to the feed. Then scroll to the next post.
+   \u2192 The 4-step rhythm is: click \u2192 wait+captureNow \u2192 back \u2192 scroll. If you've done 2+ waits in a row, you're stuck.
+
+5. REOPENED SAME POST (clicked a timestamp you already captured):
+   \u2192 After back(), the feed is at the SAME scroll position \u2014 the post you just captured is STILL the first visible post.
+   \u2192 You forgot step 4 (scroll). You MUST scroll down BEFORE clicking any timestamp link.
+   \u2192 Fix: IMMEDIATELY back() if you're on the post detail page again, then scroll(down, medium) to move past it.
+   \u2192 Check RECENT ACTIONS: if your last sequence was click\u2192capture\u2192back\u2192click (missing scroll), you're in this loop.
+   \u2192 CORRECT sequence: click \u2192 capture \u2192 back \u2192 SCROLL \u2192 click next. The scroll is MANDATORY.
+
+6. STUCK IN LOOP (same actions repeating 3+ times):
    \u2192 Switch strategy completely. If feed isn't working, search for a specific account.
    \u2192 If search isn't working, go to a known profile directly.
    \u2192 If a profile is exhausted, try a different one.
 
-5. CONTENT NOT LOADING (tree looks sparse after navigation):
+7. CONTENT NOT LOADING (tree looks sparse after navigation):
    \u2192 Use wait(2) to let content load. Instagram loads images lazily.
 
-6. FEED IS STALE (only old timestamps visible like 2w, 3w):
+8. FEED IS STALE (only old timestamps visible like 2w, 3w):
    \u2192 Scroll past old content or switch to a different content source.
    \u2192 Search for an account that posts frequently for fresher content.
+
+9. SCROLL IN MODAL (you scrolled but feed position didn't change):
+   \u2192 If RECENT ACTIONS shows "scrolled in dialog", your scroll moved content INSIDE a modal/dialog, NOT the main feed.
+   \u2192 Fix: Close the modal first \u2014 use back() if the URL changed when you opened it, or press Escape for overlay dialogs.
+   \u2192 After closing the modal, THEN scroll the feed.
 
 CONTENT COLLECTION \u2014 TWO MODES:
 
 MODE 1: FEED (home feed at instagram.com/)
-Posts are ALREADY FULLY VISIBLE \u2014 large image/video, caption preview, engagement counts, timestamp.
-- You don't need to click into feed posts to capture them \u2014 they're already fully visible. (You CAN still click usernames to visit profiles or timestamps to check post details.)
-- Just SCROLL to discover posts, then CAPTURE interesting ones directly.
-- Each post is an "article" container. Set capture.targetId to the article's id, or use strategic.captureNow.
+For EVERY feed post, follow this EXACT 4-step loop. Each step is ONE action \u2014 do them in strict sequence:
+
+STEP 1 (action: click): FIND the TIMESTAMP LINK inside the article and CLICK it.
+   - Look for a link (role=link) with a short time name: "1h", "16h", "2d", "3d", "1w"
+   - This is the MOST RELIABLE element \u2014 it ALWAYS exists in every feed post
+   - Click the timestamp link \u2192 post detail page opens (URL changes)
+STEP 2 (action: wait): CAPTURE \u2014 include "strategic": {"captureNow": true}. The screenshot is taken INSTANTLY.
+   - Send wait(1) with captureNow: true. ONE time. The capture happens immediately.
+STEP 3 (action: back): RETURN to feed IMMEDIATELY after step 2. Do NOT send another wait or captureNow.
+   - Send back() to return to the feed. This is your VERY NEXT action after the capture.
+STEP 4 (action: scroll): SCROLL DOWN before clicking anything. This step is MANDATORY \u2014 without it you will click the SAME post again.
+   - After back(), the feed is at the EXACT SAME scroll position. The post you just captured is STILL visible.
+   - You MUST scroll(down, medium) to move the captured post off-screen and bring the NEXT post into view.
+   - Only AFTER scrolling should you look for the next timestamp link to click.
+
+\u26A0\uFE0F CRITICAL: captureNow is a ONE-SHOT signal. You send it ONCE, the screenshot is taken, then you IMMEDIATELY back().
+\u26A0\uFE0F DO NOT send captureNow multiple times for the same post. If you already sent it, the capture already happened \u2014 MOVE ON.
+\u26A0\uFE0F If captures count in SESSION STATUS didn't increase, the capture was filtered as a duplicate \u2014 still MOVE ON. Never retry.
+\u26A0\uFE0F The sequence is ALWAYS: click \u2192 wait+captureNow \u2192 back \u2192 SCROLL \u2192 click next. Four actions, then repeat. NEVER skip the scroll.
+\u26A0\uFE0F After back(), you MUST scroll BEFORE clicking. If you click without scrolling, you will reopen the same post.
+
+\u26A0\uFE0F DO NOT CLICK BUTTONS WITH NUMBERS: Elements like button "390.2K" or button "663" are like/comment count BUTTONS \u2014 they are NOT links and may not navigate.
+
+\u26A0\uFE0F IF A CLICK FAILS ("no state change detected"): do NOT retry the same element. Try a DIFFERENT link in the article, or scroll to the next post.
 
 MODE 2: GRID (profile pages, explore, hashtag pages)
 Posts appear as SMALL THUMBNAILS \u2014 too small to capture meaningfully.
@@ -7073,29 +7340,46 @@ Posts appear as SMALL THUMBNAILS \u2014 too small to capture meaningfully.
 - Close modal (Escape or "Close" button) and click the next thumbnail.
 - Aim to open 3+ posts per profile grid visit.
 
+MODE 3: STORIES (full-screen story viewer)
+Stories auto-play \u2014 your job is to capture EVERY frame as it plays:
+- STEP 1: Click a story circle (button with username) from the stories row at the top of the feed.
+- STEP 2: Story viewer opens full-screen. IMMEDIATELY send wait(1) + captureNow: true to capture this frame.
+- STEP 3: Advance to next frame \u2014 click the right side of the screen, press ArrowRight, or just wait (stories auto-advance).
+- STEP 4: captureNow: true again for the new frame. Repeat steps 3-4 for every frame.
+- STEP 5: When the story viewer closes (no more stories), you're back on the feed. Continue with feed posts.
+\u26A0\uFE0F Stories are ephemeral (disappear after 24h) \u2014 capture EVERY frame, don't skip any.
+\u26A0\uFE0F Each frame needs its own captureNow: true. One capture per frame, then advance.
+\u26A0\uFE0F If a story is a video, use captureNow immediately (captures current frame). Don't wait for it to finish.
+
 ENGAGEMENT LEVELS:
-1. FEED LEVEL: Scrolling feed \u2014 scroll and capture interesting articles directly
+1. FEED LEVEL: Scrolling feed \u2014 for each post, click the TIMESTAMP LINK to open post detail, capture, back, scroll next
 2. GRID LEVEL: On a profile/explore/hashtag page \u2014 click thumbnails to open modals
-3. POST MODAL LEVEL: Inside a modal from a grid click \u2014 capture, browse carousel, close
+3. POST DETAIL LEVEL: On a post detail page or modal \u2014 capture (captureNow: true!), browse carousel, back/close
 4. PROFILE LEVEL: Clicked on a username \u2014 explore their content grid, click into their posts
+5. STORY LEVEL: In story viewer \u2014 captureNow each frame, advance to next, repeat until stories end
 
 WHEN TO CLICK A THUMBNAIL (grid views only \u2014 NOT the feed):
-\u2705 Content relevant to user interests (keywords in caption/username match)
+\u2705 Content relevant to your current search topic (keywords in caption/username match)
 \u2705 High engagement visible (many likes/comments)
 \u2705 Carousel post (slide indicators like "1 of 4") \u2014 extra valuable, multiple images
-\u2705 Recent timestamp visible
+\u2705 Recent timestamp visible (1h, 1d, 2d \u2014 NOT weeks old)
 \u274C Already explored this post (check deeplyExploredPosts count)
 \u274C Ad or sponsored content
-\u274C Very low engagement AND not relevant to interests
+\u274C Posts older than 1 week (stale content on profiles)
 
-WHEN TO CAPTURE ON THE FEED (no clicking needed):
-\u2705 Post matches user interests (caption, hashtags, username)
-\u2705 Fresh timestamp (minutes or hours old)
-\u2705 High engagement
-\u2705 High-engagement or trending content even if not directly matching interests \u2014 a good digest reflects the user's full world, not just their stated topics
-\u274C Stale content (2+ weeks old)
-\u274C Ads / "Sponsored" posts
-\u274C "Suggested for you" panels (not real posts)
+FEED POST WORKFLOW \u2014 exactly 4 actions per post, no more:
+1\uFE0F\u20E3 click(timestamp link) \u2192 URL changes, post detail page opens
+2\uFE0F\u20E3 wait(1) + captureNow: true \u2192 screenshot taken INSTANTLY (ONE TIME ONLY)
+3\uFE0F\u20E3 back() \u2192 returns to feed (same scroll position \u2014 captured post is STILL visible!)
+4\uFE0F\u20E3 scroll(down, medium) \u2192 MANDATORY: moves past captured post, brings NEXT post into view, THEN repeat from 1\uFE0F\u20E3
+\u26A0\uFE0F Step 4 is NOT optional. After back(), you are looking at the SAME post. If you skip scroll, you WILL click the same post again.
+
+\u2705 The deduplication system handles duplicates \u2014 just capture once and move on
+\u2705 Carousel posts \u2192 on detail page, ArrowRight through slides, captureNow once per slide
+\u274C Ads / "Sponsored" posts \u2192 skip (scroll past)
+\u274C "Suggested for you" panels \u2192 skip (scroll past)
+\u274C NEVER send captureNow more than once per post \u2014 the screenshot is instant
+\u274C NEVER click BUTTONS with numbers (like "390.2K", "663") \u2014 those don't navigate
 
 POST MODAL (appears after clicking a thumbnail on a profile/explore/hashtag grid):
 The modal is a "dialog" container overlaying the page. Layout:
@@ -7110,11 +7394,11 @@ CAPTURING IN A MODAL:
 
 IMPORTANT: After capturing, CLOSE the modal (Escape) and click the NEXT thumbnail. Don't stay in one modal forever.
 
-ENGAGEMENT DEPTH (for grid \u2192 modal interactions):
-- "quick": Open thumbnail, capture modal, close (5-10 seconds)
-- "moderate": Open thumbnail, capture, browse carousel slides, close (10-20 seconds)
-- "deep": Open thumbnail, capture all slides, read comments, maybe visit profile (20-40 seconds)
-For feed posts: no depth needed \u2014 just scroll past and capture via targetId.
+ENGAGEMENT DEPTH (for modal interactions \u2014 applies to BOTH feed and grid):
+- "quick": Open post, capture modal, close (5-10 seconds) \u2014 DEFAULT for feed posts
+- "moderate": Open post, capture, browse carousel slides, close (10-20 seconds)
+- "deep": Open post, capture all slides, read comments, maybe visit profile (20-40 seconds)
+For feed posts: always open via timestamp link \u2192 capture (captureNow: true) \u2192 back(). Use "quick" depth unless it's a carousel (then "moderate").
 
 Include engagement decisions in your strategic field:
 - "engageDepth": "quick" | "moderate" | "deep" | null
@@ -7182,19 +7466,18 @@ Typing \u2192 seeing result links \u2192 scrolling away or typing again
 WHY: You never clicked a result, so you never navigated anywhere!
 FIX: After typing, look for links with follower counts and CLICK one.
 
-PROFILE EXPLORATION \u2014 REQUIRED WORKFLOW:
-When you land on a profile page, this is your REQUIRED workflow:
+PROFILE EXPLORATION:
+When you land on a profile page:
 1. Scroll down to see the profile's posts grid
-2. Click the MOST RECENT post (top-left of grid) to open it in detail view
+2. Click a recent post (top-left of grid) to open it in detail view
 3. In the modal: read caption, navigate carousel slides, capture screenshots
-4. Close modal (Escape), then click 2-4 MORE posts from the grid
-5. Each opened post = capture the detail view (level 1 quality!)
-6. Open AT LEAST 3 posts from any profile you visit (if under 60 seconds remaining, capture 1-2 and move on)
-7. Only leave the profile after you've explored multiple posts in detail
+4. Close modal (Escape), then click more posts from the grid
+5. Each opened post = high-quality capture
+6. Only leave the profile after you've explored posts in detail \u2014 use your judgement on how many based on time remaining
 
 COMMON PROFILE FAILURE:
 Landing on profile \u2192 scrolling the grid \u2192 capturing grid thumbnails \u2192 leaving WITHOUT opening any posts
-WHY: Grid thumbnails are LOW VALUE (level 5). The real content is inside individual posts opened as modals.
+WHY: Grid thumbnails are too small. The real content is inside individual posts opened as modals.
 FIX: Click thumbnails to open modals \u2014 see full captions, all carousel slides, and comments.
 
 OUTPUT FORMAT (JSON only):
@@ -7202,15 +7485,16 @@ OUTPUT FORMAT (JSON only):
   "reasoning": "Explain your decision",
   "action": "click|hover|scroll|type|press|clear|back|wait",
   "params": { ... },
-  NOTE: For click/hover, params MUST include "expectedName" \u2014 the element name you expect to interact with.
-  Example: "params": {"id": 5, "expectedName": "Search"}
-  This prevents clicking the wrong element if you mix up IDs.
+  NOTE: For click/hover, params MUST include "expectedName" \u2014 copy the EXACT element name from the ACCESSIBILITY TREE.
+  \u26A0\uFE0F DO NOT invent or copy names from examples \u2014 use the ACTUAL name shown in the tree for that element ID.
+  Example: If tree shows id:42 link "View all 106 comments", use "params": {"id": 42, "expectedName": "View all 106 comments"}
+  If the name doesn't match, the click will be REJECTED.
   "expectedOutcome": "What should happen",
   "confidence": 0.0-1.0,
   "capture": {
     "shouldCapture": true,
     "targetId": 12,
-    "reason": "Interesting coffee post with 5K likes \u2014 crop to this article"
+    "reason": "Post detail modal open \u2014 capture for the digest"
   },
   "strategic": {
     "switchPhase": "search"|"stories"|"feed"|null,
@@ -7225,52 +7509,73 @@ OUTPUT FORMAT (JSON only):
 
 STRATEGIC DECISION EXAMPLES:
 
-1. Starting a session, want to search first:
+1. Starting a session on the feed \u2014 open the first post via TIMESTAMP LINK:
+(You MUST replace the id and expectedName with ACTUAL values from the accessibility tree!)
 {
-  "reasoning": "Session just started, will search for user interests first",
+  "reasoning": "Session started. Inside the first article, I see the timestamp link (role=link). Clicking to navigate to post detail page.",
   "action": "click",
-  "params": {"id": 3, "expectedName": "Search"},
-  "expectedOutcome": "Search panel opens",
+  "params": {"id": "[ACTUAL ID OF TIMESTAMP LINK]", "expectedName": "[ACTUAL TIMESTAMP e.g. '16h' or '2d']"},
+  "expectedOutcome": "Navigates to post detail page",
   "strategic": {
-    "switchPhase": "search",
+    "switchPhase": "feed",
+    "engageDepth": "quick",
     "lingerDuration": "short",
-    "reason": "Beginning with search phase to find targeted content"
+    "reason": "Opening first feed post via timestamp link"
   }
 }
 
-2. Found interesting post on feed, capturing it directly (no click needed):
+2. Alternative \u2014 using "View all X comments" link if it exists (not always present):
 {
-  "reasoning": "Feed post about coffee with 5.2K likes matches user interests \u2014 capturing the article directly",
-  "action": "scroll",
-  "params": {"direction": "down", "amount": "small"},
-  "expectedOutcome": "Scroll to next post after capturing this one",
-  "capture": {
-    "shouldCapture": true,
-    "targetId": 15,
-    "reason": "Coffee post with 5.2K likes \u2014 crop to this article element on the feed"
-  },
+  "reasoning": "I see a link with 'comments' in the name inside this article. Clicking to open detail.",
+  "action": "click",
+  "params": {"id": "[ACTUAL ID]", "expectedName": "[ACTUAL NAME e.g. 'View all 106 comments']"},
+  "expectedOutcome": "Post detail opens",
   "strategic": {
+    "engageDepth": "quick",
     "lingerDuration": "short",
-    "reason": "Feed post captured, scrolling to discover more content"
+    "reason": "Opening feed post via comments link"
   }
 }
 
-2b. Capturing a feed post while lingering (no scroll needed):
+2b. STEP 2 \u2014 Capture (ONE TIME, then immediately proceed to step 2c):
 {
-  "reasoning": "This NFL post from nflaunz has 70K likes and is 1h old \u2014 highly engaging and fresh, capturing it now",
+  "reasoning": "Post detail page is open \u2014 capturing NOW, then immediately going back",
   "action": "wait",
   "params": {"seconds": 1},
-  "expectedOutcome": "Linger on current view while capture fires",
+  "expectedOutcome": "Screenshot taken, next action will be back()",
   "capture": {
     "shouldCapture": true,
-    "targetId": 9,
-    "reason": "NFL Melbourne game announcement \u2014 70K likes, 1h old, crop to this article"
+    "reason": "Feed post detail \u2014 full view for digest"
   },
   "strategic": {
-    "lingerDuration": "short",
-    "reason": "Captured current feed post, will scroll to next after"
+    "captureNow": true,
+    "lingerDuration": "short"
   }
 }
+\u26A0\uFE0F After this action, your VERY NEXT output MUST be back(). Do NOT send another wait or captureNow.
+
+2c. STEP 3 \u2014 Back to feed (IMMEDIATELY after 2b, no extra waits):
+{
+  "reasoning": "Capture taken \u2014 going back to feed for next post",
+  "action": "back",
+  "params": {},
+  "expectedOutcome": "Returns to feed at same scroll position \u2014 must scroll before clicking",
+  "strategic": {
+    "closeEngagement": true
+  }
+}
+
+2d. STEP 4 \u2014 Scroll to next post (MANDATORY after back, before clicking anything):
+{
+  "reasoning": "Back on feed \u2014 same post is still visible. Must scroll down to bring the NEXT post into view before clicking its timestamp.",
+  "action": "scroll",
+  "params": {"direction": "down", "amount": "medium"},
+  "expectedOutcome": "Next uncaptured post becomes visible, ready to click its timestamp link",
+  "strategic": {
+    "lingerDuration": "short"
+  }
+}
+\u26A0\uFE0F After this scroll, look for the NEXT timestamp link (a different one than you just clicked) and go back to step 2a.
 
 3. Content exhausted, switching phases:
 {
@@ -7286,7 +7591,7 @@ STRATEGIC DECISION EXAMPLES:
 
 4. Session complete:
 {
-  "reasoning": "Collected 15 posts, watched 5 stories, time running low",
+  "reasoning": "Good variety of content captured, time running low",
   "action": "wait",
   "params": {"seconds": 1},
   "expectedOutcome": "Session ends",
@@ -7297,15 +7602,16 @@ STRATEGIC DECISION EXAMPLES:
 }
 
 5. On a profile grid, clicking a thumbnail to open it in a modal:
+(Replace id and expectedName with ACTUAL values from the tree!)
 {
-  "reasoning": "Profile grid thumbnail about travel with 5,234 likes \u2014 clicking to open in modal for full view",
+  "reasoning": "Profile grid \u2014 tree shows a link with caption text. Clicking to open in modal.",
   "action": "click",
-  "params": {"id": 12, "expectedName": "Travel photo caption text"},
+  "params": {"id": "[ACTUAL ID]", "expectedName": "[ACTUAL NAME FROM TREE]"},
   "expectedOutcome": "Post modal opens with full image, caption, and comments",
   "strategic": {
     "engageDepth": "moderate",
     "lingerDuration": "medium",
-    "reason": "High engagement post on grid, will capture modal and browse carousel"
+    "reason": "Opening grid post for full detail capture"
   }
 }
 
@@ -7338,7 +7644,69 @@ STRATEGIC DECISION EXAMPLES:
   }
 }
 
-Remember: YOU are in control. Make intelligent decisions about the entire session, not just individual actions. On the feed, capture posts directly. On grids, click into posts for full detail. Prioritize content matching user interests, but also capture high-quality, timely, or high-engagement content that makes the digest feel complete. A good digest reflects what's happening in the user's world, not just one topic.`;
+CRITICAL REMINDERS:
+1. CAPTURE IS NOT AUTOMATIC. You MUST include "strategic": {"captureNow": true} for EVERY screenshot. No captureNow = no screenshot.
+2. Feed post flow is EXACTLY 4 actions per post: click TIMESTAMP LINK \u2192 wait+captureNow \u2192 back() \u2192 SCROLL. Then repeat for next post.
+3. captureNow is ONE-SHOT. Send it ONCE, then IMMEDIATELY back(). NEVER send captureNow twice for the same post. The screenshot is instant.
+4. The expectedName MUST be the EXACT name from the accessibility tree below. Do NOT copy names from these examples.
+5. Only click LINKS (role=link) to navigate. BUTTONS with numbers (e.g., button "390.2K", button "663") are like/comment counts \u2014 they do NOT navigate.
+6. If a click produces "no state change detected", NEVER retry the same element. Try the TIMESTAMP LINK or move on.
+7. Feed and stories: capture EVERYTHING. Search topics are ONLY for the search phase.
+8. After clicking a timestamp link, you navigate to a NEW PAGE \u2014 use back() to return (not Escape).
+9. If you find yourself sending wait+captureNow more than once on the same page, STOP \u2014 the capture already happened. Send back() immediately.
+10. After back(), ALWAYS SCROLL before clicking any timestamp. The feed is at the SAME scroll position \u2014 the post you just captured is still visible. Clicking without scrolling will reopen the same post.
+11. Stories: capture EVERY story frame with captureNow as it plays. Click Next/tap right side to advance to next frame, captureNow again. Repeat until stories end.`;
+  }
+  /**
+   * Build a dynamic progress audit from the current context.
+   * Analyzes recent actions and state to produce targeted warnings
+   * that help the LLM recognize when it's stuck and redirect.
+   */
+  buildProgressAudit(context) {
+    const warnings = [];
+    const recentActions = context.recentActions || [];
+    let consecutiveWaits = 0;
+    for (let i = recentActions.length - 1; i >= 0; i--) {
+      if (recentActions[i].action === "wait") {
+        consecutiveWaits++;
+      } else {
+        break;
+      }
+    }
+    if (consecutiveWaits >= 2) {
+      warnings.push(`\u26A0\uFE0F CAPTURE LOOP DETECTED: You've sent ${consecutiveWaits} consecutive wait actions on the same page. The capture was already taken on the first captureNow (or rejected as duplicate). STOP waiting \u2014 send back() NOW to return to the feed.`);
+    }
+    if (context.lastCaptureAttempt && !context.lastCaptureAttempt.succeeded) {
+      warnings.push(`\u26A0\uFE0F LAST CAPTURE REJECTED: ${context.lastCaptureAttempt.reason}. Do NOT send captureNow again \u2014 it will be rejected again. Send back() immediately and move to the next post.`);
+    }
+    const elapsedMs = Date.now() - context.startTime;
+    if (elapsedMs > 6e4) {
+      const capturesPerMin = (context.captureCount || 0) / (elapsedMs / 6e4);
+      if (capturesPerMin < 0.5) {
+        const elapsedMin = Math.round(elapsedMs / 6e4);
+        warnings.push(`\u26A0\uFE0F LOW CAPTURE RATE: Only ${context.captureCount || 0} captures in ${elapsedMin} minutes. You should have ~${elapsedMin * 2}+. Follow the 4-step rhythm strictly: click timestamp \u2192 wait+captureNow \u2192 back \u2192 scroll.`);
+      }
+    }
+    const lastAction = recentActions[recentActions.length - 1];
+    if (lastAction?.verified === "scrolled_in_dialog") {
+      warnings.push(`\u26A0\uFE0F SCROLL IN MODAL: Your last scroll happened INSIDE a modal/dialog, NOT the main feed. The feed did not move. Close the modal first (back() if URL changed, or Escape for overlay), THEN scroll the feed.`);
+    } else if (context.engagementState?.level === "post_modal") {
+      warnings.push(`\u{1F4CD} MODAL OPEN: You are inside a post modal. If you scroll, it will scroll within the modal, NOT the feed. To return to feed: use back() if URL changed, or press Escape.`);
+    }
+    if (recentActions.length >= 5) {
+      const last5 = recentActions.slice(-5);
+      const urls = last5.map((a) => a.url).filter(Boolean);
+      const allSameUrl = urls.length >= 5 && urls.every((u) => u === urls[0]);
+      const noCaptureIncrease = last5.every((a) => a.action === "wait" || a.action === "scroll");
+      if (allSameUrl && noCaptureIncrease) {
+        warnings.push(`\u26A0\uFE0F STAGNANT: ${last5.length} actions on the same page with no navigation progress. Break the pattern: back() to feed \u2192 scroll \u2192 click a NEW timestamp link.`);
+      }
+    }
+    if (warnings.length === 0) return "";
+    return `
+\u{1F6A8} PROGRESS AUDIT (read these warnings BEFORE deciding your next action):
+${warnings.join("\n")}
+`;
   }
   /**
    * Build the user prompt with current context and elements.
@@ -7359,19 +7727,19 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
         goalDesc = `Search for posts about "${context.currentGoal.target}"`;
         break;
       case "watch_stories":
-        goalDesc = "Watch stories from followed accounts";
+        goalDesc = "Watch stories \u2014 capture EVERY frame with captureNow: true, then advance to next frame, repeat";
         break;
       case "browse_feed":
-        goalDesc = "Browse the home feed and collect interesting posts";
+        goalDesc = "Browsing the home feed \u2014 capture EVERY post (click TIMESTAMP LINK \u2192 post detail page \u2192 captureNow: true \u2192 back \u2192 next)";
         break;
       case "explore_profile":
-        goalDesc = `Explore profile: ${context.currentGoal.target} \u2014 open 3+ posts to capture full captions, carousel slides, and comments`;
+        goalDesc = `Currently on profile: ${context.currentGoal.target}`;
         break;
       case "analyze_account":
-        goalDesc = "Build a comprehensive digest \u2014 click into individual posts for full content. Scrolling the feed alone is not enough.";
+        goalDesc = "Capture the full feed (every post via detail modal) and all stories. Search topics are bonus content.";
         break;
       default:
-        goalDesc = "General browsing - YOU decide what to do";
+        goalDesc = "General browsing";
     }
     const elementsByContainer = this.groupElementsByContainer(elements);
     const overlays = this.detectActiveOverlays(elements);
@@ -7393,20 +7761,25 @@ Remember: YOU are in control. Make intelligent decisions about the entire sessio
     let contentStatsStr = "No stats yet";
     if (context.contentStats) {
       const cs = context.contentStats;
-      contentStatsStr = `Unique: ${(cs.uniquePostsRatio * 100).toFixed(0)}%, Ads: ${(cs.adRatio * 100).toFixed(0)}%, Quality: ${cs.engagementLevel}`;
+      const elapsedMs = Date.now() - context.startTime;
+      const parts = [`Unique: ${(cs.uniquePostsRatio * 100).toFixed(0)}%`, `Ads: ${(cs.adRatio * 100).toFixed(0)}%`];
+      if (elapsedMs > 6e4) {
+        parts.push(`Capture pace: ${cs.engagementLevel}`);
+      }
+      contentStatsStr = parts.join(", ");
     }
     return `YOU HAVE FULL STRATEGIC CONTROL. Decide what to do next.
 
 CURRENT GOAL: ${goalDesc}
 
-USER INTERESTS (topics the user cares about): ${interestsStr}
+SEARCH TOPICS (use ONLY during search phase \u2014 NOT for filtering feed/stories): ${interestsStr}
 
 SESSION STATUS:
 - Current activity: ${context.currentPhase || "exploring"}
 - Time: ${elapsedSec}s elapsed, ${remainingSec}s remaining (of ${targetSec}s total)
 - Collected: ${context.postsCollected} posts, ${context.storiesWatched} stories
 - Captures: ${context.captureCount || 0} screenshots taken
-
+${this.buildProgressAudit(context)}
 ACTIVITY HISTORY: ${phaseHistoryStr}
 
 CURRENT STATE:
@@ -7432,24 +7805,10 @@ RECENT ACTIONS:
 ${recentActionsStr}
 ${context.loopWarning ? `
 \u26A0\uFE0F LOOP DETECTED (${context.loopWarning.severity}): ${context.loopWarning.reason}
-WARNING #${context.loopWarning.consecutiveWarnings} \u2014 You are repeating actions with no effect. Change your approach NOW.
-${context.loopWarning.consecutiveWarnings >= 2 ? "CRITICAL: Auto-recovery will override your next action if you do not change strategy." : ""}
+WARNING #${context.loopWarning.consecutiveWarnings} \u2014 The same action has been repeated ${context.loopWarning.consecutiveWarnings} times with no visible effect.
+${context.loopWarning.consecutiveWarnings >= 2 ? "NOTE: Auto-recovery will take over on the next action if the loop continues." : ""}
 ` : ""}
-${this.buildDepthReminder(context)}
 Make your decision. Include strategic decisions to signal captures, activity changes, or session termination.`;
-  }
-  /**
-   * Build a depth reminder if the LLM has been scrolling without clicking into posts.
-   */
-  buildDepthReminder(context) {
-    const atFeedLevel = !context.engagementState || context.engagementState.level === "feed";
-    if (!atFeedLevel) return "";
-    const recentScrollCount = context.recentActions.slice(-6).filter((a) => a.action === "scroll").length;
-    if (recentScrollCount >= 3) {
-      return `\u26A0\uFE0F DEPTH REMINDER: You've scrolled ${recentScrollCount} times without clicking into a post. Open a post to get high-quality detail captures instead of low-value feed screenshots.
-`;
-    }
-    return "";
   }
   /**
    * Detect active overlays from container roles in the accessibility tree.
@@ -7715,7 +8074,6 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
       }
       const forbiddenHints = [
         "like_button",
-        "comment_button",
         "share_button",
         "save_button",
         "follow_button"
@@ -7728,18 +8086,6 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
           params: { direction: "down", amount: "small" },
           reasoning: `SAFETY: Blocked interaction with ${targetElement.semanticHint}, scrolling instead`
         };
-      }
-      if (!decision.capture) {
-        const nameLower = targetElement.name.toLowerCase();
-        const isPostLike = nameLower.includes("photo") || nameLower.includes("video") || nameLower.includes("shared by") || targetElement.containerRole === "article";
-        if (isPostLike) {
-          decision.capture = {
-            shouldCapture: true,
-            targetId: clickParams.id,
-            reason: `Auto-capture: clicked post element "${targetElement.name.slice(0, 30)}..."`
-          };
-          console.log(`\u{1F4F8} Auto-added capture for post click: id=${clickParams.id}`);
-        }
       }
     }
     if (decision.action === "type") {
@@ -7967,15 +8313,12 @@ var NavigationExecutor = class {
       const targetLower = target.name.toLowerCase();
       const nameMatches = targetLower.includes(expectedLower) || expectedLower.includes(targetLower);
       if (!nameMatches) {
-        const byName = elements.find(
-          (e) => e.name.toLowerCase().includes(expectedLower) || expectedLower.includes(e.name.toLowerCase())
+        console.warn(`\u26A0\uFE0F Element ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}"`);
+        return this.failureResult(
+          decision,
+          startTime,
+          `ID mismatch: id=${params.id} is "${target.name.slice(0, 50)}", not "${params.expectedName}". Check the accessibility tree for the correct ID.`
         );
-        if (byName) {
-          console.warn(`\u26A0\uFE0F Element ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}". Corrected to id:${byName.id} "${byName.name}"`);
-          target = byName;
-        } else {
-          console.warn(`\u26A0\uFE0F Element ID mismatch: id:${params.id} is "${target.name}", LLM expected "${params.expectedName}". No name match found, using original ID.`);
-        }
       }
     }
     const boundingBox = target.boundingBox;
@@ -7985,14 +8328,20 @@ var NavigationExecutor = class {
     const preClickUrl = this.page.url();
     const preClickState = await this.getQuickDOMSignature();
     await this.ghost.clickElement(boundingBox);
-    await this.humanDelay(200, 500);
-    const postClickUrl = this.page.url();
-    const postClickState = await this.getQuickDOMSignature();
     let verified = "no_change_detected";
-    if (preClickUrl !== postClickUrl) {
-      verified = "url_changed";
-    } else if (preClickState !== postClickState) {
-      verified = "dom_changed";
+    let postClickUrl = preClickUrl;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await this.humanDelay(200, 400);
+      postClickUrl = this.page.url();
+      if (preClickUrl !== postClickUrl) {
+        verified = "url_changed";
+        break;
+      }
+      const postClickState = await this.getQuickDOMSignature();
+      if (preClickState !== postClickState) {
+        verified = "dom_changed";
+        break;
+      }
     }
     const record = this.recordAction(decision, true, void 0, {
       url: postClickUrl,
@@ -8019,6 +8368,7 @@ var NavigationExecutor = class {
    */
   async executeScroll(decision, startTime) {
     const params = decision.params;
+    const hasDialog = await this.detectActiveDialog();
     const viewportHeight = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
     const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
     const baseDistance = Math.round(viewportHeight * proportion);
@@ -8038,14 +8388,16 @@ var NavigationExecutor = class {
     const scrollYAfter = await this.scroll.getScrollPosition();
     this.recordAction(decision, true, void 0, {
       scrollY: scrollYAfter,
-      url: this.page.url()
+      url: this.page.url(),
+      ...hasDialog ? { verified: "scrolled_in_dialog" } : {}
     });
     return {
       success: true,
       actionTaken: "scroll",
       params,
       resultingUrl: this.page.url(),
-      durationMs: Date.now() - startTime
+      durationMs: Date.now() - startTime,
+      ...hasDialog ? { verified: "scrolled_in_dialog" } : {}
     };
   }
   /**
@@ -8139,13 +8491,12 @@ var NavigationExecutor = class {
       const targetLower = target.name.toLowerCase();
       const nameMatches = targetLower.includes(expectedLower) || expectedLower.includes(targetLower);
       if (!nameMatches) {
-        const byName = elements.find(
-          (e) => e.name.toLowerCase().includes(expectedLower) || expectedLower.includes(e.name.toLowerCase())
+        console.warn(`\u26A0\uFE0F Hover ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}"`);
+        return this.failureResult(
+          decision,
+          startTime,
+          `ID mismatch: id=${params.id} is "${target.name.slice(0, 50)}", not "${params.expectedName}". Check the accessibility tree for the correct ID.`
         );
-        if (byName) {
-          console.warn(`\u26A0\uFE0F Hover ID mismatch: id:${params.id} is "${target.name}", but LLM expected "${params.expectedName}". Corrected to id:${byName.id} "${byName.name}"`);
-          target = byName;
-        }
       }
     }
     const boundingBox = target.boundingBox;
@@ -8181,6 +8532,19 @@ var NavigationExecutor = class {
       resultingUrl: this.page.url(),
       durationMs: Date.now() - startTime
     };
+  }
+  /**
+   * Detect if a dialog/modal overlay is currently open on the page.
+   * Used to inform the LLM that scroll events will be captured by the dialog, not the main feed.
+   */
+  async detectActiveDialog() {
+    try {
+      return await this.page.evaluate(() => {
+        return document.querySelectorAll('[role="dialog"]').length > 0;
+      });
+    } catch {
+      return false;
+    }
   }
   /**
    * Execute a clear action (select all + delete on currently focused input).
@@ -8259,6 +8623,13 @@ var NavigationExecutor = class {
     }
     const clickFailures = recent.filter((a) => a.action === "click" && !a.success);
     if (clickFailures.length >= 3) return { inLoop: true, severity: "moderate" };
+    const recentWaits = recent.filter((a) => a.action === "wait");
+    if (recentWaits.length >= 3) {
+      const urls = recentWaits.map((a) => a.url).filter(Boolean);
+      if (urls.length >= 3 && urls.every((u) => u === urls[0])) {
+        return { inLoop: true, severity: "moderate" };
+      }
+    }
     return { inLoop: false, severity: "mild" };
   }
   /**
@@ -8557,9 +8928,6 @@ var DebugOverlay = class {
                 <div class="debug-row">
                     <span><span class="debug-label">Captures</span> ${state.captureCount}</span>
                     <span><span class="debug-label">Posts</span> ${state.postsCollected}</span>
-                </div>
-                <div class="debug-row">
-                    <span><span class="debug-label">Actions left</span> ${state.actionsRemaining}</span>
                 </div>
             </div>
 
@@ -8899,7 +9267,7 @@ var InstagramScraper = class {
    * Return to Instagram home page.
    */
   async returnToHome() {
-    if (!this.navigator.isOnFeed()) {
+    if (!await this.navigator.isOnFeed()) {
       console.log("\u{1F3E0} Returning to home...");
       await this.page.goto("https://www.instagram.com/", {
         waitUntil: "domcontentloaded"
@@ -8968,8 +9336,9 @@ var InstagramScraper = class {
     this.scroll = new HumanScroll(this.page);
     this.navigator = new A11yNavigator(this.page);
     this.vision = new ContentVision(this.apiKey);
+    const estimatedMaxCaptures = Math.max(150, Math.ceil(targetMinutes * 4));
     this.screenshotCollector = new ScreenshotCollector(this.page, {
-      maxCaptures: 150,
+      maxCaptures: estimatedMaxCaptures,
       jpegQuality: 85,
       minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.1),
       saveToDirectory: path5.join(os.homedir(), "Documents", "debug-screenshots")
@@ -8988,14 +9357,8 @@ var InstagramScraper = class {
       await this.debugOverlay.enable();
     }
     const loopConfig = {
-      maxActions: config?.maxActions || 500,
-      // LLM controls termination via strategic decisions
-      maxDurationMs: config?.maxDurationMs || 5 * 60 * 1e3,
-      // 5 minutes default
-      minPostsForCompletion: config?.minPostsForCompletion || 5,
-      // LLM decides actual completion
+      maxDurationMs: config?.maxDurationMs || targetDurationMs,
       actionDelayMs: config?.actionDelayMs || [300, 1e3]
-      // Faster - LLM controls pacing via linger
     };
     try {
       console.log("\u{1F310} Navigating to Instagram...");
@@ -9069,6 +9432,7 @@ var InstagramScraper = class {
     let adsSkipped = 0;
     const stagnationEvents = [];
     let consecutiveLoopWarnings = 0;
+    let lastCaptureAttempt;
     const engagementState = {
       level: "feed",
       levelEnteredAt: Date.now(),
@@ -9077,7 +9441,14 @@ var InstagramScraper = class {
     console.log("\n\u{1F916} LLM-DRIVEN NAVIGATION LOOP STARTED");
     console.log(`   Total budget: ${(config.maxDurationMs / 1e3 / 60).toFixed(1)} minutes`);
     console.log(`   Interests: ${userInterests.join(", ")}`);
-    while (actionCount < config.maxActions) {
+    this.screenshotCollector.appendLogRaw(`# Session Log`);
+    this.screenshotCollector.appendLogRaw(`**Started:** ${(/* @__PURE__ */ new Date()).toISOString()}`);
+    this.screenshotCollector.appendLogRaw(`**Budget:** ${(config.maxDurationMs / 1e3 / 60).toFixed(1)} minutes`);
+    this.screenshotCollector.appendLogRaw(`**Interests:** ${userInterests.join(", ")}`);
+    this.screenshotCollector.appendLogRaw(`
+---
+`);
+    while (true) {
       const elapsed = Date.now() - startTime;
       if (elapsed >= config.maxDurationMs) {
         console.log("\u23F0 Time limit reached, stopping navigation");
@@ -9094,10 +9465,12 @@ var InstagramScraper = class {
           consecutiveWarnings: consecutiveLoopWarnings
         };
         console.log(`  \u26A0\uFE0F Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity}): ${recovery.reason}`);
+        this.screenshotCollector.appendLog(`  \u26A0\uFE0F Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity}): ${recovery.reason}`);
       } else {
         consecutiveLoopWarnings = 0;
       }
       const state = await this.navigator.getContentState();
+      this.screenshotCollector.appendLog(`--- view: ${state.currentView} | phase: ${currentPhase} | captures: ${this.screenshotCollector.getPhotoCount()}`);
       const elements = await this.navigator.getNavigationElements();
       const treeSummary = await this.navigator.buildTreeSummaryForLLM();
       const context = {
@@ -9106,12 +9479,11 @@ var InstagramScraper = class {
         targetDurationMs: config.maxDurationMs,
         url: this.page.url(),
         view: state.currentView,
-        currentGoal: this.getGoalForPhase(currentPhase, userInterests, interestsSearched, state.currentView, this.page.url()),
+        currentGoal: await this.getGoalForPhase(currentPhase, userInterests, interestsSearched, state.currentView, this.page.url()),
         userInterests,
         postsCollected,
         storiesWatched,
         interestsSearched,
-        actionsRemaining: config.maxActions - actionCount,
         recentActions: this.navigationExecutor.getRecentActions(15),
         // Strategic context for LLM decision-making
         timeRemainingMs: config.maxDurationMs - elapsed,
@@ -9140,28 +9512,41 @@ var InstagramScraper = class {
         // Cross-session memory
         sessionMemoryDigest,
         // Loop warning (LLM decides recovery, auto-recovery only as last resort)
-        loopWarning
+        loopWarning,
+        // Last capture attempt feedback
+        lastCaptureAttempt
       };
       const decision = await this.navigationLLM.decideAction(context, elements);
       console.log(`  \u{1F916} Decision: ${decision.action} - ${decision.reasoning}`);
+      this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`${decision.action}\` \u2014 ${decision.reasoning}`);
       if (decision.strategic) {
+        const strategicParts = [];
         if (decision.strategic.switchPhase) {
           console.log(`  \u{1F3AF} Strategic: Switch to ${decision.strategic.switchPhase} phase`);
+          strategicParts.push(`phase\u2192${decision.strategic.switchPhase}`);
         }
         if (decision.strategic.terminateSession) {
           console.log(`  \u{1F3AF} Strategic: Terminate session - ${decision.strategic.reason}`);
+          strategicParts.push(`TERMINATE: ${decision.strategic.reason}`);
         }
         if (decision.strategic.captureNow) {
           console.log(`  \u{1F3AF} Strategic: Capture now`);
+          strategicParts.push("capture");
         }
         if (decision.strategic.lingerDuration) {
           console.log(`  \u{1F3AF} Strategic: Linger ${decision.strategic.lingerDuration}`);
+          strategicParts.push(`linger=${decision.strategic.lingerDuration}`);
         }
         if (decision.strategic.engageDepth) {
           console.log(`  \u{1F50D} Strategic: Engage at depth ${decision.strategic.engageDepth}`);
+          strategicParts.push(`engage=${decision.strategic.engageDepth}`);
         }
         if (decision.strategic.closeEngagement) {
           console.log(`  \u{1F6AA} Strategic: Close engagement`);
+          strategicParts.push("close-engagement");
+        }
+        if (strategicParts.length > 0) {
+          this.screenshotCollector.appendLog(`  Strategic: ${strategicParts.join(", ")}`);
         }
       }
       if (this.debugOverlay) {
@@ -9186,8 +9571,7 @@ var InstagramScraper = class {
           targetRole: targetElement?.role,
           confidence: decision.confidence,
           reasoning: decision.reasoning,
-          postsCollected,
-          actionsRemaining: config.maxActions - actionCount
+          postsCollected
         };
         await this.debugOverlay.updateState(debugState);
         if (decision.action === "click" && targetElement?.boundingBox) {
@@ -9207,6 +9591,7 @@ var InstagramScraper = class {
       if (decision.strategic?.terminateSession) {
         console.log(`
 \u2705 LLM terminated session: ${decision.strategic.reason || "Content exhausted"}`);
+        this.screenshotCollector.appendLog(`\u2705 **Session terminated by LLM:** ${decision.strategic.reason || "Content exhausted"}`);
         break;
       }
       if (decision.strategic?.switchPhase && decision.strategic.switchPhase !== currentPhase) {
@@ -9219,6 +9604,9 @@ var InstagramScraper = class {
         console.log(`
 \u{1F504} LLM Phase transition: ${currentPhase} \u2192 ${newPhase}`);
         console.log(`   Reason: ${decision.strategic.reason || "LLM decision"}`);
+        this.screenshotCollector.appendLogRaw(`
+### Phase: ${currentPhase} \u2192 ${newPhase}`);
+        this.screenshotCollector.appendLog(`Reason: ${decision.strategic.reason || "LLM decision"}`);
         currentPhase = newPhase;
         phaseStartTime = Date.now();
         phaseItemsCollected = 0;
@@ -9235,8 +9623,10 @@ var InstagramScraper = class {
         if (result.verified) {
           const verifyLabel = result.verified === "url_changed" ? "URL changed" : result.verified === "dom_changed" ? "DOM changed" : result.verified === "no_change_detected" ? "no state change detected" : "";
           console.log(`  \u2705 Action succeeded (${result.actionTaken}${verifyLabel ? ` - ${verifyLabel}` : ""})`);
+          this.screenshotCollector.appendLog(`  \u2705 ${result.actionTaken} \u2014 ${verifyLabel || "ok"}`);
         } else {
           console.log(`  \u2705 Action succeeded (${result.actionTaken})`);
+          this.screenshotCollector.appendLog(`  \u2705 ${result.actionTaken}`);
         }
         const currentUrl = result.resultingUrl || "";
         const isPostView = currentUrl.includes("/p/") || currentUrl.includes("/reel/");
@@ -9278,9 +9668,27 @@ var InstagramScraper = class {
             if (targetElement?.backendNodeId) {
               freshBox = await this.navigator.refetchBoundingBox(targetElement.backendNodeId);
             }
-            const captureBox = freshBox || targetElement?.boundingBox;
-            const viewportHeight = this.page.viewportSize()?.height || 1920;
-            const offViewport = captureBox && (captureBox.y + captureBox.height < 0 || captureBox.y > viewportHeight);
+            let captureBox = freshBox || targetElement?.boundingBox;
+            const viewportSize = this.page.viewportSize() || { width: 1080, height: 1920 };
+            const offViewport = captureBox && (captureBox.y + captureBox.height < 0 || captureBox.y > viewportSize.height);
+            const tooSmall = captureBox && (captureBox.width < viewportSize.width * 0.2 || captureBox.height < viewportSize.height * 0.2);
+            if (tooSmall && captureBox && !offViewport) {
+              console.log(`  \u{1F4F8} Target element too small (${captureBox.width.toFixed(0)}x${captureBox.height.toFixed(0)}px), expanding to article/viewport`);
+              const postBounds = await this.navigator.findPostContentBounds();
+              if (postBounds) {
+                captureBox = postBounds;
+              } else {
+                const cap = await this.screenshotCollector.captureCurrentPost(
+                  source,
+                  context.currentGoal.target
+                );
+                if (cap) {
+                  captured = true;
+                  console.log(`  \u{1F4F8} Capture (full viewport, expanded from small targetId=${decision.capture.targetId}): ${captureReason}`);
+                }
+                captureBox = null;
+              }
+            }
             if (captureBox && !offViewport) {
               const cap = await this.screenshotCollector.captureFocusedElement(
                 captureBox,
@@ -9294,20 +9702,28 @@ var InstagramScraper = class {
               }
             } else if (offViewport) {
               console.warn(`  \u26A0\uFE0F capture.targetId=${decision.capture.targetId} is off-viewport (y=${captureBox.y.toFixed(0)}), skipping`);
-            } else {
-              console.warn(`  \u26A0\uFE0F capture.targetId=${decision.capture.targetId} not found or no boundingBox, falling back`);
+            } else if (!captured) {
+              console.warn(`  \u26A0\uFE0F capture.targetId=${decision.capture.targetId} not found, falling back`);
               const postBounds = await this.navigator.findPostContentBounds();
-              const fallbackBounds = postBounds || result.focusedElement?.boundingBox;
-              if (fallbackBounds) {
+              if (postBounds) {
                 const cap = await this.screenshotCollector.captureFocusedElement(
-                  fallbackBounds,
+                  postBounds,
                   source,
                   context.currentGoal.target,
                   captureReason
                 );
                 if (cap) {
                   captured = true;
-                  console.log(`  \u{1F4F8} Capture (fallback from invalid targetId): ${captureReason}`);
+                  console.log(`  \u{1F4F8} Capture (article fallback): ${captureReason}`);
+                }
+              } else {
+                const cap = await this.screenshotCollector.captureCurrentPost(
+                  source,
+                  context.currentGoal.target
+                );
+                if (cap) {
+                  captured = true;
+                  console.log(`  \u{1F4F8} Capture (viewport fallback): ${captureReason}`);
                 }
               }
             }
@@ -9339,6 +9755,10 @@ var InstagramScraper = class {
           if (captured) {
             postsCollected++;
             phaseItemsCollected++;
+            this.screenshotCollector.appendLog(`  \u{1F4F8} **Capture #${postsCollected}** (${source}) \u2014 ${captureReason}`);
+            lastCaptureAttempt = { succeeded: true };
+          } else {
+            lastCaptureAttempt = { succeeded: false, reason: "filtered as duplicate" };
           }
         }
         if (decision.strategic?.lingerDuration) {
@@ -9347,6 +9767,7 @@ var InstagramScraper = class {
         const engagementLevel = await this.navigator.detectEngagementLevel();
         if (engagementLevel.level !== engagementState.level) {
           console.log(`  \u{1F4CD} Engagement: ${engagementState.level} \u2192 ${engagementLevel.level}`);
+          this.screenshotCollector.appendLog(`  \u{1F4CD} Engagement: ${engagementState.level} \u2192 ${engagementLevel.level}`);
           engagementState.level = engagementLevel.level;
           engagementState.levelEnteredAt = Date.now();
           if (engagementLevel.level === "post_modal" && engagementLevel.postUrl) {
@@ -9398,11 +9819,13 @@ var InstagramScraper = class {
         }
       } else {
         console.log(`  \u274C Action failed: ${result.errorMessage}`);
+        this.screenshotCollector.appendLog(`  \u274C FAILED: ${result.errorMessage}`);
       }
       actionCount++;
       if (consecutiveLoopWarnings >= 3) {
         const recovery = this.navigationExecutor.getRecoveryAction(loopStatus.severity);
         console.log(`  \u{1F6A8} Auto-recovery (LLM failed to recover after ${consecutiveLoopWarnings} warnings): ${recovery.reason}`);
+        this.screenshotCollector.appendLog(`  \u{1F6A8} **Auto-recovery** after ${consecutiveLoopWarnings} warnings: ${recovery.reason}`);
         const scrollYBefore = await this.scroll.getScrollPosition();
         if (recovery.action === "press" && recovery.key) {
           await this.page.keyboard.press(recovery.key);
@@ -9441,6 +9864,18 @@ var InstagramScraper = class {
     console.log(`   Unique content ratio: ${(uniquePosts.size / Math.max(totalPostsSeen, 1) * 100).toFixed(0)}%`);
     console.log(`   Posts deeply explored: ${engagementState.deeplyExploredPostUrls.length}`);
     console.log(`   Phase history: ${phaseHistory.map((p) => `${p.phase}(${(p.durationMs / 1e3).toFixed(0)}s)`).join(" \u2192 ")}`);
+    this.screenshotCollector.appendLogRaw(`
+---
+
+## Summary`);
+    this.screenshotCollector.appendLogRaw(`- **Actions:** ${actionCount}`);
+    this.screenshotCollector.appendLogRaw(`- **Posts captured:** ${postsCollected}`);
+    this.screenshotCollector.appendLogRaw(`- **Stories watched:** ${storiesWatched}`);
+    this.screenshotCollector.appendLogRaw(`- **Unique content ratio:** ${(uniquePosts.size / Math.max(totalPostsSeen, 1) * 100).toFixed(0)}%`);
+    this.screenshotCollector.appendLogRaw(`- **Posts deeply explored:** ${engagementState.deeplyExploredPostUrls.length}`);
+    this.screenshotCollector.appendLogRaw(`- **Phase history:** ${phaseHistory.map((p) => `${p.phase}(${(p.durationMs / 1e3).toFixed(0)}s)`).join(" \u2192 ")}`);
+    this.screenshotCollector.appendLogRaw(`- **Duration:** ${((Date.now() - startTime) / 1e3 / 60).toFixed(1)} minutes`);
+    this.screenshotCollector.flushSessionLog();
     const sessionSummary = {
       id: `session-${startTime}`,
       timestamp: startTime,
@@ -9488,24 +9923,23 @@ var InstagramScraper = class {
    * Note: Time allocation is now fully LLM-controlled.
    * These goals provide hints but LLM decides actual duration.
    */
-  getGoalForPhase(phase, userInterests, interestsSearched, currentView, currentUrl) {
+  async getGoalForPhase(phase, userInterests, interestsSearched, currentView, currentUrl) {
     if (currentUrl && (currentUrl.includes("/p/") || currentUrl.includes("/reel/"))) {
       return {
         type: "analyze_account",
-        target: "Capture this post detail view, navigate carousel slides, then close modal"
+        target: "Currently viewing a post detail page (modal open)"
       };
     }
     if (currentView === "profile") {
-      const username = this.navigator.getProfileUsername() || "this profile";
+      const username = await this.navigator.getProfileUsername() || "unknown profile";
       return {
         type: "explore_profile",
-        target: username,
-        minItems: 3
+        target: username
       };
     }
     return {
       type: "analyze_account",
-      target: "Click into individual posts for detail captures"
+      target: "General Instagram session in progress"
     };
   }
   // NOTE: shouldTransitionPhase() and getNextPhase() removed
@@ -10429,7 +10863,6 @@ var SchedulerService = class _SchedulerService {
     const settings = store.get("settings") || {};
     const now = /* @__PURE__ */ new Date();
     const scheduledTime = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    const MINIMUM_CAPTURES = 10;
     const BROWSE_DURATION_MS = 5 * 60 * 1e3;
     const browserManager = BrowserManager.getInstance();
     let context = null;
@@ -10458,20 +10891,20 @@ var SchedulerService = class _SchedulerService {
       const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);
       const session2 = await scraper.browseAndCapture(
         5,
-        // 5 minutes of human-paced browsing
+        // Debug mode: 5 minutes
         settings.interests || []
       );
       console.log(`\u{1F9EA} Browsing complete: ${session2.captureCount} screenshots captured`);
       await browserManager.close();
       context = null;
-      if (session2.captureCount < MINIMUM_CAPTURES) {
-        console.warn(`\u{1F9EA} Insufficient captures: ${session2.captureCount} (need ${MINIMUM_CAPTURES})`);
-        throw new Error("INSUFFICIENT_CONTENT");
+      if (session2.captureCount < 3) {
+        console.warn(`\u{1F9EA} Very few captures (${session2.captureCount}), digest quality may be low`);
       }
       console.log("\u{1F9EA} Tagging captured images for smart selection...");
       const tagger = new ImageTagger(apiKey, settings.interests || []);
       const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session2.captures);
-      const bestCaptures = tagger.selectBest(session2.captures, tags, 25);
+      const selectCount = Math.min(50, session2.captureCount);
+      const bestCaptures = tagger.selectBest(session2.captures, tags, selectCount);
       console.log(`\u{1F9EA} Tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
       console.log("\u{1F9EA} Generating digest from selected screenshots...");
       const digestGenerator = new BatchDigestGenerator(apiKey);
@@ -10570,7 +11003,6 @@ var SchedulerService = class _SchedulerService {
    */
   async triggerBakerScreenshotFirst(now, store, scheduledTime) {
     const settings = store.get("settings") || {};
-    const MINIMUM_CAPTURES_FOR_DIGEST = 10;
     console.log(`\u{1F950} Baker (Screenshot-First) - Starting Instagram browsing at ${(/* @__PURE__ */ new Date()).toLocaleString()}`);
     const browserManager = BrowserManager.getInstance();
     let context = null;
@@ -10589,21 +11021,21 @@ var SchedulerService = class _SchedulerService {
       console.log("\u{1F4F1} Baker browsing Instagram (Screenshot-First mode)...");
       const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
       const session2 = await scraper.browseAndCapture(
-        5,
-        // 5 minutes of human-paced browsing
+        90,
+        // Normal mode: 90 minutes (range: 60-150 min)
         settings.interests || []
       );
       console.log(`\u{1F4F8} Baker browsing complete: ${session2.captureCount} screenshots captured`);
       await browserManager.close();
       context = null;
-      if (session2.captureCount < MINIMUM_CAPTURES_FOR_DIGEST) {
-        console.warn(`\u26A0\uFE0F Baker: Insufficient captures: ${session2.captureCount} (need ${MINIMUM_CAPTURES_FOR_DIGEST})`);
-        throw new Error("INSUFFICIENT_CONTENT");
+      if (session2.captureCount < 3) {
+        console.warn(`\u26A0\uFE0F Baker: Very few captures (${session2.captureCount}), digest quality may be low`);
       }
       console.log("\u{1F3F7}\uFE0F Baker tagging captured images for smart selection...");
       const tagger = new ImageTagger(apiKey, settings.interests || []);
       const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session2.captures);
-      const bestCaptures = tagger.selectBest(session2.captures, tags, 25);
+      const selectCount = Math.min(50, session2.captureCount);
+      const bestCaptures = tagger.selectBest(session2.captures, tags, selectCount);
       console.log(`\u{1F3F7}\uFE0F Baker tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
       console.log("\u{1F916} Baker generating digest from selected screenshots...");
       const digestGenerator = new BatchDigestGenerator(apiKey);

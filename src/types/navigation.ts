@@ -47,9 +47,6 @@ export interface NavigationContext {
     storiesWatched: number;
     interestsSearched: string[];
 
-    // Budget tracking
-    actionsRemaining: number;
-
     // Action history (for loop detection and context)
     recentActions: ActionRecord[];
 
@@ -103,6 +100,12 @@ export interface NavigationContext {
         severity: 'mild' | 'moderate' | 'severe';
         reason: string;
         consecutiveWarnings: number;   // How many times LLM has been warned without recovering
+    };
+
+    // Last capture attempt feedback (so LLM knows when captures are being rejected)
+    lastCaptureAttempt?: {
+        succeeded: boolean;
+        reason?: string;  // e.g., 'filtered as duplicate', 'ok'
     };
 }
 
@@ -368,7 +371,7 @@ export interface ActionRecord {
     // State context for stagnation detection
     scrollY?: number;
     url?: string;
-    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified';
+    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified' | 'scrolled_in_dialog';
     elementCount?: number;
     // What element was actually acted on (for LLM feedback)
     clickedElementName?: string;
@@ -399,7 +402,7 @@ export interface ExecutionResult {
     errorMessage?: string;
     durationMs: number;
     focusedElement?: FocusedElement;         // Element that was clicked (for capture)
-    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified';
+    verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified' | 'scrolled_in_dialog';
 }
 
 /**
@@ -417,9 +420,7 @@ export interface NavigationLLMConfig {
  * Configuration for the navigation loop.
  */
 export interface NavigationLoopConfig {
-    maxActions: number;                      // Maximum actions before stopping
-    maxDurationMs: number;                   // Maximum duration before stopping
-    minPostsForCompletion: number;           // Minimum posts to consider session successful
+    maxDurationMs: number;                   // Maximum duration before stopping (the ONLY hard limit)
     actionDelayMs?: [number, number];        // Min/max delay between actions [default: 500, 2000]
 }
 

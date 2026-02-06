@@ -644,7 +644,6 @@ export class SchedulerService {
         const now = new Date();
         const scheduledTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-        const MINIMUM_CAPTURES = 10;
         const BROWSE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
         const browserManager = BrowserManager.getInstance();
         let context = null;
@@ -682,7 +681,7 @@ export class SchedulerService {
             console.log('🧪 Browsing Instagram (Screenshot-First mode)...');
             const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);  // debugMode = true
             const session = await scraper.browseAndCapture(
-                5,  // 5 minutes of human-paced browsing
+                5,  // Debug mode: 5 minutes
                 settings.interests || []
             );
 
@@ -692,20 +691,20 @@ export class SchedulerService {
             await browserManager.close();
             context = null;
 
-            // 6. Check minimum captures threshold
-            if (session.captureCount < MINIMUM_CAPTURES) {
-                console.warn(`🧪 Insufficient captures: ${session.captureCount} (need ${MINIMUM_CAPTURES})`);
-                throw new Error('INSUFFICIENT_CONTENT');
+            // 6. Warn if very few captures, but don't abort — time is the only limit
+            if (session.captureCount < 3) {
+                console.warn(`🧪 Very few captures (${session.captureCount}), digest quality may be low`);
             }
 
-            // 6.5. Tag and select best images
+            // 6.5. Tag and select best images (scale with capture count, cap at 50 for token limits)
             console.log('🧪 Tagging captured images for smart selection...');
             const tagger = new ImageTagger(apiKey, settings.interests || []);
             const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session.captures);
-            const bestCaptures = tagger.selectBest(session.captures, tags, 25);
+            const selectCount = Math.min(50, session.captureCount);
+            const bestCaptures = tagger.selectBest(session.captures, tags, selectCount);
             console.log(`🧪 Tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
 
-            // 7. Generate digest from SELECTED screenshots (best 25)
+            // 7. Generate digest from SELECTED screenshots
             console.log('🧪 Generating digest from selected screenshots...');
             const digestGenerator = new BatchDigestGenerator(apiKey);
             const analysis = await digestGenerator.generateDigest(bestCaptures, {
@@ -837,7 +836,7 @@ export class SchedulerService {
      */
     private async triggerBakerScreenshotFirst(now: Date, store: any, scheduledTime: string) {
         const settings = store.get('settings') || {};
-        const MINIMUM_CAPTURES_FOR_DIGEST = 10;
+        // No minimum capture gate — time is the only limit
 
         console.log(`🥐 Baker (Screenshot-First) - Starting Instagram browsing at ${new Date().toLocaleString()}`);
 
@@ -866,7 +865,7 @@ export class SchedulerService {
             console.log('📱 Baker browsing Instagram (Screenshot-First mode)...');
             const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
             const session = await scraper.browseAndCapture(
-                5,  // 5 minutes of human-paced browsing
+                90,  // Normal mode: 90 minutes (range: 60-150 min)
                 settings.interests || []
             );
 
@@ -876,20 +875,20 @@ export class SchedulerService {
             await browserManager.close();
             context = null;
 
-            // 6. Check minimum captures threshold
-            if (session.captureCount < MINIMUM_CAPTURES_FOR_DIGEST) {
-                console.warn(`⚠️ Baker: Insufficient captures: ${session.captureCount} (need ${MINIMUM_CAPTURES_FOR_DIGEST})`);
-                throw new Error('INSUFFICIENT_CONTENT');
+            // 6. Warn if very few captures, but don't abort
+            if (session.captureCount < 3) {
+                console.warn(`⚠️ Baker: Very few captures (${session.captureCount}), digest quality may be low`);
             }
 
-            // 6.5. Tag and select best images
+            // 6.5. Tag and select best images (scale with capture count, cap at 50 for token limits)
             console.log('🏷️ Baker tagging captured images for smart selection...');
             const tagger = new ImageTagger(apiKey, settings.interests || []);
             const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session.captures);
-            const bestCaptures = tagger.selectBest(session.captures, tags, 25);
+            const selectCount = Math.min(50, session.captureCount);
+            const bestCaptures = tagger.selectBest(session.captures, tags, selectCount);
             console.log(`🏷️ Baker tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
 
-            // 7. Generate digest from SELECTED screenshots (best 25)
+            // 7. Generate digest from SELECTED screenshots
             console.log('🤖 Baker generating digest from selected screenshots...');
             const digestGenerator = new BatchDigestGenerator(apiKey);
             const analysis = await digestGenerator.generateDigest(bestCaptures, {

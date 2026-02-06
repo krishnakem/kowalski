@@ -159,10 +159,8 @@ export interface EdgeButtonOptions {
  * Configuration for when to stop browsing the feed.
  */
 export interface FeedTerminationConfig {
-    maxScrolls: number;           // Hard limit on scroll count
-    maxPosts: number;             // Stop after extracting N posts
-    maxDurationMs: number;        // Time-based cutoff
-    duplicateThreshold: number;   // Stop if N consecutive posts are duplicates
+    maxDurationMs: number;        // Time-based cutoff (the ONLY hard limit)
+    duplicateThreshold: number;   // Stop if N consecutive posts are duplicates (loop safeguard)
 }
 
 /**
@@ -170,7 +168,7 @@ export interface FeedTerminationConfig {
  */
 export interface TerminationResult {
     shouldStop: boolean;
-    reason: 'TIME_LIMIT' | 'SCROLL_LIMIT' | 'CONTENT_QUOTA' | 'DUPLICATE_LOOP' | '';
+    reason: 'TIME_LIMIT' | 'DUPLICATE_LOOP' | '';
 }
 
 // ============================================================================
