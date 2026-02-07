@@ -64,8 +64,6 @@ export class AnalysisGenerator {
     private prepareContentSummary(session: ScrapedSession): string {
         const posts: string[] = [];
         let itemId = 1;
-        let skippedCount = 0;
-
         // Process all feed content (includes search results, carousels, profiles, etc.)
         for (const post of session.feedContent) {
             const caption = post.caption || '';
@@ -96,12 +94,6 @@ export class AnalysisGenerator {
                 cleanCaption = caption.replace(/\[HIGHLIGHT: [^\]]+\]\s*/, '');
             }
 
-            // Saliency filter: Skip low-value content
-            if (this.isLowSaliencyContent(cleanCaption, post.visualDescription || '', post.username)) {
-                skippedCount++;
-                continue;
-            }
-
             const truncatedCaption = this.truncateCaption(cleanCaption);
             const truncatedImage = this.truncateCaption(post.visualDescription || '');
 
@@ -124,12 +116,6 @@ Source: ${source}`;
 
         // Process stories separately
         for (const story of session.storiesContent) {
-            // Saliency filter for stories
-            if (this.isLowSaliencyContent(story.caption || '', story.visualDescription || '', story.username)) {
-                skippedCount++;
-                continue;
-            }
-
             const truncatedCaption = this.truncateCaption(story.caption || '');
             const truncatedImage = this.truncateCaption(story.visualDescription || '');
 
@@ -149,13 +135,8 @@ Source: story
         const storyCount = posts.filter(p => p.includes('Source: story')).length;
         const otherCount = posts.length - searchCount - feedCount - storyCount;
 
-        // Log if we skipped any low-value content
-        if (skippedCount > 0) {
-            console.log(`📋 Skipped ${skippedCount} low-saliency posts (ads, generic intros)`);
-        }
-
         // Format with summary header
-        return `CONTENT DATA (${posts.length} posts total, ${skippedCount} skipped):
+        return `CONTENT DATA (${posts.length} posts total):
 - Search results: ${searchCount}
 - Feed posts: ${feedCount}
 - Stories: ${storyCount}
@@ -164,58 +145,6 @@ Source: story
 ${posts.join('\n\n')}`;
     }
 
-    /**
-     * Filter out low-saliency content that adds noise to the analysis.
-     * Returns true if the content should be SKIPPED.
-     */
-    private isLowSaliencyContent(caption: string, imageDesc: string, username: string): boolean {
-        const captionLower = caption.toLowerCase();
-        const imageLower = imageDesc.toLowerCase();
-        const combined = `${captionLower} ${imageLower}`;
-
-        // Skip "Meet the Class" style intro posts (low signal)
-        const introPatterns = [
-            'meet the class',
-            'welcome to the class',
-            'introducing the class',
-            'class of 20',
-            'meet our new',
-            'welcome our new',
-            'join us in welcoming',
-            'excited to introduce'
-        ];
-        if (introPatterns.some(p => combined.includes(p))) {
-            return true;
-        }
-
-        // Skip generic commercial noise
-        const adPatterns = [
-            'shop now',
-            'limited time',
-            'use code',
-            'link in bio',
-            'swipe up',
-            'click the link',
-            'free shipping',
-            'order now',
-            'get yours',
-            'don\'t miss out',
-            'sale ends',
-            '% off'
-        ];
-        // Only skip if it's mostly ad content (not mixed with real content)
-        const adMatchCount = adPatterns.filter(p => combined.includes(p)).length;
-        if (adMatchCount >= 2 && caption.length < 150) {
-            return true;
-        }
-
-        // Skip empty content (no caption AND no meaningful image description)
-        if (!caption.trim() && (!imageDesc.trim() || imageLower.includes('generic') || imageLower.includes('stock photo'))) {
-            return true;
-        }
-
-        return false;
-    }
 
     /**
      * Truncate caption to reasonable length, preserving meaning.

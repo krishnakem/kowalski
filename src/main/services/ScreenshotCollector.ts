@@ -42,10 +42,10 @@ export class ScreenshotCollector {
     private outputDir: string | null = null;
 
     // Deduplication tracking
-    private capturedPostIds = new Set<string>();      // Track by Instagram post ID
+    private capturedFingerprints = new Set<string>(); // Track by tree-based fingerprint
     private capturedHashes = new Set<string>();       // Track by image hash (for carousel/story)
-    private capturedPositions = new Set<string>();    // Track by URL-path + scroll position bucket
-    private lastCaptureUrl: string = '';
+    private capturedPositions = new Set<string>();    // Track by source + scroll position bucket
+    private lastCaptureSource: string = '';
 
     // Session log buffer (written to .md file alongside screenshots)
     private logBuffer: string[] = [];
@@ -95,46 +95,43 @@ export class ScreenshotCollector {
      *
      * @param source - Where this content came from (feed, story, search, etc.)
      * @param interest - For search results, which interest triggered this capture
+     * @param fingerprint - Tree-based post fingerprint for dedup (null for stories/grids → falls through to hash dedup)
      * @returns true if captured, false if skipped (max reached or duplicate position)
      */
-    async captureCurrentPost(source: CaptureSource, interest?: string): Promise<boolean> {
+    async captureCurrentPost(source: CaptureSource, interest?: string, fingerprint?: string): Promise<boolean> {
         // Check memory limit
         if (this.captures.length >= this.config.maxCaptures) {
-            console.log(`📸 Max captures (${this.config.maxCaptures}) reached, skipping`);
+            console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached`);
             return false;
         }
 
         // Get current scroll position for deduplication
         const scrollPosition = await this.getScrollPosition();
 
-        // Extract post ID from URL (for embed support and deduplication)
-        const postId = this.extractPostId();
-
-        // PRIMARY DEDUP: Skip if we've already captured this exact post
-        // Carousel slides share the same postId (same URL) — rely on hash dedup instead
-        if (postId && source !== 'carousel' && this.capturedPostIds.has(postId)) {
-            console.log(`📸 Skipping duplicate post: ${postId}`);
+        // PRIMARY DEDUP: Skip if we've already captured this exact post (by tree fingerprint)
+        // Carousel slides may share the same fingerprint — rely on hash dedup instead
+        if (fingerprint && source !== 'carousel' && this.capturedFingerprints.has(fingerprint)) {
+            console.log(`[CAPTURE-REJECT] fingerprint_dedup: ${fingerprint} (source=${source})`);
             return false;
         }
 
-        // POSITION-BASED DEDUP: Track by URL path + scroll position bucket
-        // Different pages (e.g., feed vs post detail) have independent position tracking
-        // Exception: carousel slides and stories rely on hash dedup instead
-        const currentUrl = this.page.url();
-        const urlPath = new URL(currentUrl).pathname;
+        // POSITION-BASED DEDUP: Track by page identity + scroll position bucket
+        // Uses fingerprint (from tree) or URL postId to distinguish different post detail pages
+        // Falls back to source for feed/story/search viewport captures
         const vpSize = this.page.viewportSize();
         const bucketSize = vpSize ? Math.round(vpSize.height * 0.078) : 75;
         const positionBucket = Math.round(scrollPosition / bucketSize);
-        const positionKey = `${urlPath}:${positionBucket}`;
+        const pageScope = fingerprint || this.extractPostIdForEmbed() || source;
+        const positionKey = `${pageScope}:${positionBucket}`;
         if (source !== 'carousel' && source !== 'story' && this.capturedPositions.has(positionKey)) {
-            console.log(`📸 Skipping duplicate position: bucket ${positionBucket} on ${urlPath}`);
+            console.log(`[CAPTURE-REJECT] position_dedup: bucket ${positionBucket} key=${positionKey}`);
             return false;
         }
 
-        // Skip if we haven't scrolled enough (likely same content) - for feed only, same page only
-        const onSamePage = currentUrl === this.lastCaptureUrl;
+        // Skip if we haven't scrolled enough (likely same content) - for feed only, same source only
+        const onSamePage = source === this.lastCaptureSource;
         if (onSamePage && source === 'feed' && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
-            console.log(`📸 Scroll delta too small (${Math.abs(scrollPosition - this.lastScrollPosition)}px), skipping duplicate`);
+            console.log(`[CAPTURE-REJECT] scroll_delta: ${Math.abs(scrollPosition - this.lastScrollPosition)}px < ${this.config.minScrollDelta}px min`);
             return false;
         }
 
@@ -149,24 +146,25 @@ export class ScreenshotCollector {
             // SECONDARY DEDUP: Perceptual hash — catches near-duplicates (scroll jitter, compression)
             const hash = await this.computePerceptualHash(screenshot);
             if (this.isSimilarToExisting(hash)) {
-                console.log(`📸 Skipping near-duplicate (perceptual hash): ${hash}`);
+                console.log(`[CAPTURE-REJECT] perceptual_hash: ${hash} (source=${source})`);
                 return false;
             }
 
-            // Store capture
+            // Store capture (postId from URL kept for embed rendering only)
+            const postId = this.extractPostIdForEmbed();
             this.captures.push({
                 id: this.captures.length + 1,
                 screenshot,
                 source,
                 interest,
-                postId,  // For Instagram embed rendering
+                postId,  // For Instagram embed rendering (display-only, not dedup)
                 timestamp: Date.now(),
                 scrollPosition
             });
 
             // Track for deduplication
-            if (postId) {
-                this.capturedPostIds.add(postId);
+            if (fingerprint) {
+                this.capturedFingerprints.add(fingerprint);
             }
             this.capturedHashes.add(hash);
             // Only track position for sources that check it (not carousel/story)
@@ -174,8 +172,8 @@ export class ScreenshotCollector {
                 this.capturedPositions.add(positionKey);
             }
 
-            // Update last position and URL for feed content
-            this.lastCaptureUrl = currentUrl;
+            // Update last position and source for feed content
+            this.lastCaptureSource = source;
             if (source === 'feed') {
                 this.lastScrollPosition = scrollPosition;
             }
@@ -183,7 +181,7 @@ export class ScreenshotCollector {
             // Save to disk for debugging if configured
             this.saveScreenshotToDisk(screenshot, source, this.captures.length);
 
-            console.log(`📸 Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ''}${postId ? ` [postId: ${postId}]` : ''})`);
+            console.log(`📸 Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ''}${fingerprint ? ` [fp: ${fingerprint.slice(0, 30)}]` : ''})`);
             return true;
 
         } catch (error) {
@@ -200,17 +198,19 @@ export class ScreenshotCollector {
      * @param source - Where this content came from (feed, story, search, etc.)
      * @param interest - For search results, which interest triggered this capture
      * @param reason - Why the LLM decided to capture this (for logging)
+     * @param fingerprint - Tree-based post fingerprint for dedup (null → falls through to hash dedup)
      * @returns The captured post, or null if capture failed/skipped
      */
     async captureFocusedElement(
         elementBox: BoundingBox,
         source: CaptureSource,
         interest?: string,
-        reason?: string
+        reason?: string,
+        fingerprint?: string
     ): Promise<CapturedPost | null> {
         // Check memory limit
         if (this.captures.length >= this.config.maxCaptures) {
-            console.log(`📸 Max captures (${this.config.maxCaptures}) reached, skipping focused capture`);
+            console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached (focused)`);
             return null;
         }
 
@@ -264,28 +264,28 @@ export class ScreenshotCollector {
             // Perceptual hash deduplication — catches near-duplicates
             const hash = await this.computePerceptualHash(screenshot);
             if (this.isSimilarToExisting(hash)) {
-                console.log(`  📸 Capture skipped (perceptual hash similar): ${hash}`);
+                console.log(`[CAPTURE-REJECT] perceptual_hash: ${hash} (focused, source=${source})`);
                 return null;
             }
             this.capturedHashes.add(hash);
 
-            // Extract post ID from URL if available
-            const postId = this.extractPostId();
-            if (postId) {
-                if (source !== 'carousel' && this.capturedPostIds.has(postId)) {
-                    console.log(`  📸 Capture skipped (duplicate postId: ${postId})`);
-                    return null;
-                }
-                this.capturedPostIds.add(postId);
+            // Fingerprint-based dedup: skip if we've already captured this post
+            if (fingerprint && source !== 'carousel' && this.capturedFingerprints.has(fingerprint)) {
+                console.log(`[CAPTURE-REJECT] fingerprint_dedup: ${fingerprint.slice(0, 30)} (focused, source=${source})`);
+                return null;
+            }
+            if (fingerprint) {
+                this.capturedFingerprints.add(fingerprint);
             }
 
-            // Create captured post
+            // Create captured post (postId from URL kept for embed rendering only)
+            const postId = this.extractPostIdForEmbed();
             const captured: CapturedPost = {
                 id: this.captures.length + 1,
                 screenshot,
                 source,
                 interest,
-                postId,
+                postId,  // For Instagram embed rendering (display-only, not dedup)
                 timestamp: Date.now(),
                 scrollPosition: elementBox.y  // Use element Y as position
             };
@@ -358,9 +358,10 @@ export class ScreenshotCollector {
     clear(): void {
         this.captures = [];
         this.lastScrollPosition = 0;
-        this.capturedPostIds.clear();
+        this.capturedFingerprints.clear();
         this.capturedHashes.clear();
         this.capturedPositions.clear();
+        this.lastCaptureSource = '';
         console.log('📸 Collector cleared');
     }
 
@@ -372,14 +373,16 @@ export class ScreenshotCollector {
      * @param source - Where this content came from (feed, story, etc.)
      * @param watchDurationMs - How long to watch (human-like: 8-20 seconds)
      * @param frameIntervalMs - Interval between frames (2-3 seconds)
+     * @param fingerprint - Tree-based post fingerprint for video grouping
      * @returns Number of unique frames captured
      */
     async captureVideoFrames(
         source: CaptureSource,
         watchDurationMs: number = 12000,  // 12 second default watch time
-        frameIntervalMs: number = 2500     // Capture every 2.5 seconds
+        frameIntervalMs: number = 2500,    // Capture every 2.5 seconds
+        fingerprint?: string
     ): Promise<number> {
-        const videoId = this.extractPostId() || `video_${Date.now()}`;
+        const videoId = fingerprint || this.extractPostIdForEmbed() || `video_${Date.now()}`;
         const maxFrames = Math.floor(watchDurationMs / frameIntervalMs);
         let capturedFrames = 0;
         let lastCapturedTime = -1;  // Track video playback time of last capture
@@ -451,7 +454,7 @@ export class ScreenshotCollector {
                     id: this.captures.length + 1,
                     screenshot,
                     source,
-                    postId: this.extractPostId(),
+                    postId: this.extractPostIdForEmbed(),
                     timestamp: Date.now(),
                     scrollPosition: 0,
                     isVideoFrame: true,
@@ -501,11 +504,12 @@ export class ScreenshotCollector {
     }
 
     /**
-     * Extract Instagram post ID from current URL.
+     * Extract Instagram post ID from current URL for embed rendering.
      * Post URLs follow pattern: instagram.com/p/{POST_ID}/
      * Returns undefined for non-post pages (stories, feed, etc.)
+     * NOTE: This is display-only (for Instagram embeds), NOT used for dedup.
      */
-    private extractPostId(): string | undefined {
+    private extractPostIdForEmbed(): string | undefined {
         const url = this.page.url();
         const match = url.match(/\/p\/([A-Za-z0-9_-]+)\//);
         return match?.[1];

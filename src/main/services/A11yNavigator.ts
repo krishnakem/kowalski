@@ -25,7 +25,8 @@ import {
     AXTreeNode,
     EdgeButtonOptions
 } from '../../types/instagram.js';
-import { NavigationElement, SemanticHint } from '../../types/navigation.js';
+import { NavigationElement } from '../../types/navigation.js';
+import { getPostFingerprint as _getPostFingerprint, PostFingerprint } from '../../shared/PostIdentifier.js';
 import type { GhostMouse } from './GhostMouse.js';
 
 /**
@@ -649,6 +650,16 @@ export class A11yNavigator {
     invalidateTreeCache(): void {
         this._cachedTree = null;
         this._cacheTimestamp = 0;
+    }
+
+    /**
+     * Extract a post fingerprint from the current accessibility tree.
+     * Returns null for non-post pages (stories, explore grids, feed with multiple articles).
+     * Uses cached tree so it's free to call multiple times per turn.
+     */
+    async getPostFingerprint(): Promise<PostFingerprint | null> {
+        const tree = await this.getCachedTree();
+        return tree ? _getPostFingerprint(tree) : null;
     }
 
     // =========================================================================
@@ -2532,9 +2543,6 @@ export class A11yNavigator {
                 // Get sibling count (elements in same container)
                 const siblingCount = container ? this.countSiblings(tree, node, container) : 0;
 
-                // Only detect forbidden actions (like, comment, share, save, follow)
-                const semanticHint = this.inferForbiddenActionHint(name);
-
                 // Extract state from properties
                 const state = this.extractElementState(node);
 
@@ -2567,7 +2575,6 @@ export class A11yNavigator {
                     containerName: container?.name?.value?.slice(0, 200),
                     depth: node.depth,
                     siblingCount,
-                    semanticHint: semanticHint !== 'unknown' ? semanticHint : undefined,
                     state: Object.keys(state).length > 0 ? state : undefined,
                     backendNodeId: node.backendDOMNodeId,
                     boundingBox: box,
@@ -2642,33 +2649,6 @@ export class A11yNavigator {
 
         count = countInContainer(container);
         return count;
-    }
-
-    /**
-     * Detect only forbidden action hints (like, comment, share, save, follow).
-     * No position-based detection - let the LLM discover patterns from container context.
-     */
-    private inferForbiddenActionHint(name: string): SemanticHint {
-        const nameLower = name.toLowerCase();
-
-        // Search input detection (useful for navigation)
-        if (/^search$/i.test(nameLower)) {
-            return 'search_input';
-        }
-
-        // Close button detection (useful for modal handling)
-        if (/^close$|^x$|dismiss/i.test(nameLower)) {
-            return 'close_button';
-        }
-
-        // Forbidden interaction buttons - LLM should NOT click these
-        if (/^like$/i.test(nameLower)) return 'like_button';
-        if (/^comment$/i.test(nameLower)) return 'comment_button';
-        if (/^share$/i.test(nameLower)) return 'share_button';
-        if (/^save$/i.test(nameLower)) return 'save_button';
-        if (/^follow$/i.test(nameLower)) return 'follow_button';
-
-        return 'unknown';
     }
 
     // =========================================================================

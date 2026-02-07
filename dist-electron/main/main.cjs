@@ -29598,7 +29598,7 @@ var HumanScroll = class {
       baseDistance = Math.round(vh * 0.4),
       variability = 0.3,
       microAdjustProb = 0.25,
-      readingPauseMs = [2e3, 5e3]
+      readingPauseMs = [400, 800]
     } = config;
     const variation = 1 + (Math.random() - 0.5) * 2 * variability;
     const targetDistance = Math.round(baseDistance * variation);
@@ -29615,7 +29615,7 @@ var HumanScroll = class {
    *
    * Uses cubic ease-out: fast start, gradual slow down.
    */
-  async smoothScrollWithEasing(distance3) {
+  async smoothScrollWithEasing(distance3, axis = "y") {
     const steps = 15 + Math.floor(Math.random() * 10);
     const direction = distance3 > 0 ? 1 : -1;
     const absDistance = Math.abs(distance3);
@@ -29625,7 +29625,11 @@ var HumanScroll = class {
       const easing = 1 - Math.pow(1 - progress, 3);
       const targetScrolled = absDistance * easing;
       const stepDistance = (targetScrolled - scrolled) * direction;
-      await this.page.mouse.wheel(0, stepDistance);
+      if (axis === "x") {
+        await this.page.mouse.wheel(stepDistance, 0);
+      } else {
+        await this.page.mouse.wheel(0, stepDistance);
+      }
       scrolled = targetScrolled;
       const delay = 10 + Math.random() * 30;
       await new Promise((resolve2) => setTimeout(resolve2, delay));
@@ -29807,6 +29811,13 @@ var HumanScroll = class {
     return scrollY ?? 0;
   }
   /**
+   * Get current horizontal scroll position via CDP (undetectable).
+   */
+  async getScrollPositionX() {
+    const scrollX = await this.cdpEvaluate("window.scrollX");
+    return scrollX ?? 0;
+  }
+  /**
    * Check if we're near the bottom of the page via CDP (undetectable).
    * Useful for detecting "infinite scroll loaded more content".
    */
@@ -29846,7 +29857,7 @@ var HumanScroll = class {
       baseDistance = Math.round(vh * 0.4 * this.sessionTimingMultiplier),
       variability = 0.3,
       microAdjustProb = 0.25,
-      readingPauseMs = [2e3 * this.sessionTimingMultiplier, 4e3 * this.sessionTimingMultiplier]
+      readingPauseMs = [400 * this.sessionTimingMultiplier, 800 * this.sessionTimingMultiplier]
     } = config;
     const variation = 1 + (Math.random() - 0.5) * 2 * variability;
     const targetDistance = Math.round(baseDistance * variation);
@@ -29873,7 +29884,148 @@ var HumanScroll = class {
       pauseDurationMs: pauseDuration
     };
   }
+  /**
+   * Horizontal scroll with human-like behavior: easing, micro-adjustments, reading pause.
+   * Same physics pipeline as vertical scrollWithIntent but on the X axis.
+   */
+  async scrollHorizontalWithIntent(config = {}) {
+    const vw = await this.cdpEvaluate("window.innerWidth") ?? 1080;
+    const {
+      baseDistance = Math.round(vw * 0.4 * this.sessionTimingMultiplier),
+      variability = 0.3,
+      microAdjustProb = 0.25,
+      readingPauseMs = [400 * this.sessionTimingMultiplier, 800 * this.sessionTimingMultiplier]
+    } = config;
+    const variation = 1 + (Math.random() - 0.5) * 2 * variability;
+    const targetDistance = Math.round(baseDistance * variation);
+    const scrollXBefore = await this.getScrollPositionX();
+    await this.smoothScrollWithEasing(targetDistance, "x");
+    const scrollXAfter = await this.getScrollPositionX();
+    const actualDelta = scrollXAfter - scrollXBefore;
+    console.log(`  \u{1F4DC} H-SCROLL: Target=${targetDistance}px, Actual=${actualDelta}px`);
+    let scrollFailed = false;
+    if (actualDelta === 0 && Math.abs(targetDistance) > 50) {
+      console.log("  \u26A0\uFE0F Horizontal Scroll Failed");
+      scrollFailed = true;
+    }
+    if (Math.random() < microAdjustProb) {
+      const overshoot = vw * 0.05 + Math.random() * vw * 0.1;
+      const dir = targetDistance > 0 ? 1 : -1;
+      await this.page.mouse.wheel(overshoot * dir, 0);
+      await new Promise((resolve2) => setTimeout(resolve2, 200 + Math.random() * 300));
+      const correction = overshoot * (0.8 + Math.random() * 0.4);
+      await this.page.mouse.wheel(-correction * dir, 0);
+      await new Promise((resolve2) => setTimeout(resolve2, 100 + Math.random() * 200));
+    }
+    const pauseDuration = this.randomInRange(readingPauseMs[0], readingPauseMs[1]);
+    await new Promise((resolve2) => setTimeout(resolve2, pauseDuration));
+    return {
+      contentType: "mixed",
+      scrollDistance: targetDistance,
+      actualDelta,
+      scrollFailed,
+      pauseDurationMs: pauseDuration
+    };
+  }
 };
+
+// src/shared/PostIdentifier.ts
+function getPostFingerprint(tree) {
+  const articleNode = findPrimaryArticle(tree);
+  let descendants;
+  if (articleNode) {
+    descendants = collectDescendants(tree, articleNode);
+  } else {
+    descendants = Array.from(tree.nodeMap.values());
+    console.log(`[FINGERPRINT] No primary article found, scanning all ${descendants.length} nodes`);
+  }
+  const owner = extractOwner(descendants);
+  const captionSnippet = extractCaptionSnippet(descendants);
+  if (!owner) {
+    console.log(`[FINGERPRINT] Could not find owner in tree (${descendants.length} nodes scanned)`);
+    return null;
+  }
+  const hash = `${owner}|${captionSnippet}`;
+  console.log(`[FINGERPRINT] ${hash}`);
+  return { owner, captionSnippet, hash };
+}
+function findPrimaryArticle(tree) {
+  let dialogNode = null;
+  const articles = [];
+  for (const node of tree.nodeMap.values()) {
+    const role = node.role?.value;
+    if (role === "dialog") {
+      dialogNode = node;
+    }
+    if (role === "article") {
+      articles.push(node);
+    }
+  }
+  console.log(`[FINGERPRINT] findPrimaryArticle: articles=${articles.length}, dialog=${!!dialogNode}`);
+  if (dialogNode) {
+    for (const article of articles) {
+      if (isDescendantOf(tree, article.nodeId, dialogNode.nodeId)) {
+        return article;
+      }
+    }
+  }
+  if (articles.length === 1) {
+    return articles[0];
+  }
+  if (articles.length > 1) {
+    return null;
+  }
+  return null;
+}
+function isDescendantOf(tree, childNodeId, ancestorNodeId) {
+  let current = tree.nodeMap.get(childNodeId);
+  while (current?.parentId) {
+    if (current.parentId === ancestorNodeId) return true;
+    current = tree.nodeMap.get(current.parentId);
+  }
+  return false;
+}
+function collectDescendants(tree, parent) {
+  const result = [];
+  const queue = [...parent.childIds || []];
+  while (queue.length > 0) {
+    const nodeId = queue.shift();
+    const node = tree.nodeMap.get(nodeId);
+    if (!node) continue;
+    result.push(node);
+    if (node.childIds) {
+      queue.push(...node.childIds);
+    }
+  }
+  return result;
+}
+function extractOwner(descendants) {
+  const timestampPattern = /^\d+[smhdw]$/;
+  for (const node of descendants) {
+    if (node.role?.value !== "link") continue;
+    const name = node.name?.value?.trim();
+    if (!name) continue;
+    if (timestampPattern.test(name)) continue;
+    if (name === "Instagram" || name === "Close" || name === "More") continue;
+    const cleaned = name.replace(/\s*Verified\s*$/, "").trim();
+    if (cleaned.length > 0 && cleaned.length <= 50 && !cleaned.includes("View all")) {
+      return cleaned;
+    }
+  }
+  return "";
+}
+function extractCaptionSnippet(descendants) {
+  for (const node of descendants) {
+    const role = node.role?.value;
+    if (role !== "StaticText" && role !== "text") continue;
+    const text = node.name?.value?.trim();
+    if (!text || text.length < 10) continue;
+    if (/^\d[\d,.]*\s*(likes?|comments?)$/i.test(text)) continue;
+    if (/^View all \d/i.test(text)) continue;
+    return text.slice(0, 40);
+  }
+  return "";
+}
 
 // src/main/services/A11yNavigator.ts
 var A11yNavigator = class _A11yNavigator {
@@ -30347,6 +30499,15 @@ var A11yNavigator = class _A11yNavigator {
     this._cachedTree = null;
     this._cacheTimestamp = 0;
   }
+  /**
+   * Extract a post fingerprint from the current accessibility tree.
+   * Returns null for non-post pages (stories, explore grids, feed with multiple articles).
+   * Uses cached tree so it's free to call multiple times per turn.
+   */
+  async getPostFingerprint() {
+    const tree = await this.getCachedTree();
+    return tree ? getPostFingerprint(tree) : null;
+  }
   // =========================================================================
   // Tree Summary for LLM Dynamic Reasoning
   // =========================================================================
@@ -30474,7 +30635,7 @@ var A11yNavigator = class _A11yNavigator {
     const ancestorNode = tree.nodeMap.get(ancestorNodeId);
     if (!ancestorNode) return elements;
     const descendantNodeIds = [];
-    const collectDescendants = (nodeId) => {
+    const collectDescendants2 = (nodeId) => {
       const node = tree.nodeMap.get(nodeId);
       if (!node || node.ignored) return;
       const role = node.role?.value?.toLowerCase();
@@ -30485,13 +30646,13 @@ var A11yNavigator = class _A11yNavigator {
       }
       if (node.childIds) {
         for (const childId of node.childIds) {
-          collectDescendants(childId);
+          collectDescendants2(childId);
         }
       }
     };
     if (ancestorNode.childIds) {
       for (const childId of ancestorNode.childIds) {
-        collectDescendants(childId);
+        collectDescendants2(childId);
       }
     }
     return this.withSession(async (cdpSession) => {
@@ -31792,7 +31953,6 @@ var A11yNavigator = class _A11yNavigator {
         const normalizeY = (y2) => Math.round(y2 / viewport.height * 1e3);
         const container = this.findNearestContainer(tree, node);
         const siblingCount = container ? this.countSiblings(tree, node, container) : 0;
-        const semanticHint = this.inferForbiddenActionHint(name);
         const state = this.extractElementState(node);
         const isArticle = role.toLowerCase() === "article";
         const isInArticle = container?.role?.value?.toLowerCase() === "article";
@@ -31816,7 +31976,6 @@ var A11yNavigator = class _A11yNavigator {
           containerName: container?.name?.value?.slice(0, 200),
           depth: node.depth,
           siblingCount,
-          semanticHint: semanticHint !== "unknown" ? semanticHint : void 0,
           state: Object.keys(state).length > 0 ? state : void 0,
           backendNodeId: node.backendDOMNodeId,
           boundingBox: box,
@@ -31889,25 +32048,6 @@ var A11yNavigator = class _A11yNavigator {
     };
     count = countInContainer(container);
     return count;
-  }
-  /**
-   * Detect only forbidden action hints (like, comment, share, save, follow).
-   * No position-based detection - let the LLM discover patterns from container context.
-   */
-  inferForbiddenActionHint(name) {
-    const nameLower = name.toLowerCase();
-    if (/^search$/i.test(nameLower)) {
-      return "search_input";
-    }
-    if (/^close$|^x$|dismiss/i.test(nameLower)) {
-      return "close_button";
-    }
-    if (/^like$/i.test(nameLower)) return "like_button";
-    if (/^comment$/i.test(nameLower)) return "comment_button";
-    if (/^share$/i.test(nameLower)) return "share_button";
-    if (/^save$/i.test(nameLower)) return "save_button";
-    if (/^follow$/i.test(nameLower)) return "follow_button";
-    return "unknown";
   }
   // =========================================================================
   // Content Preview Extraction (for LLM value assessment)
@@ -45046,13 +45186,13 @@ var ScreenshotCollector = class {
   lastScrollPosition = 0;
   outputDir = null;
   // Deduplication tracking
-  capturedPostIds = /* @__PURE__ */ new Set();
-  // Track by Instagram post ID
+  capturedFingerprints = /* @__PURE__ */ new Set();
+  // Track by tree-based fingerprint
   capturedHashes = /* @__PURE__ */ new Set();
   // Track by image hash (for carousel/story)
   capturedPositions = /* @__PURE__ */ new Set();
-  // Track by URL-path + scroll position bucket
-  lastCaptureUrl = "";
+  // Track by source + scroll position bucket
+  lastCaptureSource = "";
   // Session log buffer (written to .md file alongside screenshots)
   logBuffer = [];
   sessionStartTime = Date.now();
@@ -45091,32 +45231,31 @@ var ScreenshotCollector = class {
    *
    * @param source - Where this content came from (feed, story, search, etc.)
    * @param interest - For search results, which interest triggered this capture
+   * @param fingerprint - Tree-based post fingerprint for dedup (null for stories/grids → falls through to hash dedup)
    * @returns true if captured, false if skipped (max reached or duplicate position)
    */
-  async captureCurrentPost(source, interest) {
+  async captureCurrentPost(source, interest, fingerprint) {
     if (this.captures.length >= this.config.maxCaptures) {
-      console.log(`\u{1F4F8} Max captures (${this.config.maxCaptures}) reached, skipping`);
+      console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached`);
       return false;
     }
     const scrollPosition = await this.getScrollPosition();
-    const postId = this.extractPostId();
-    if (postId && source !== "carousel" && this.capturedPostIds.has(postId)) {
-      console.log(`\u{1F4F8} Skipping duplicate post: ${postId}`);
+    if (fingerprint && source !== "carousel" && this.capturedFingerprints.has(fingerprint)) {
+      console.log(`[CAPTURE-REJECT] fingerprint_dedup: ${fingerprint} (source=${source})`);
       return false;
     }
-    const currentUrl = this.page.url();
-    const urlPath = new URL(currentUrl).pathname;
     const vpSize = this.page.viewportSize();
     const bucketSize = vpSize ? Math.round(vpSize.height * 0.078) : 75;
     const positionBucket = Math.round(scrollPosition / bucketSize);
-    const positionKey = `${urlPath}:${positionBucket}`;
+    const pageScope = fingerprint || this.extractPostIdForEmbed() || source;
+    const positionKey = `${pageScope}:${positionBucket}`;
     if (source !== "carousel" && source !== "story" && this.capturedPositions.has(positionKey)) {
-      console.log(`\u{1F4F8} Skipping duplicate position: bucket ${positionBucket} on ${urlPath}`);
+      console.log(`[CAPTURE-REJECT] position_dedup: bucket ${positionBucket} key=${positionKey}`);
       return false;
     }
-    const onSamePage = currentUrl === this.lastCaptureUrl;
+    const onSamePage = source === this.lastCaptureSource;
     if (onSamePage && source === "feed" && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
-      console.log(`\u{1F4F8} Scroll delta too small (${Math.abs(scrollPosition - this.lastScrollPosition)}px), skipping duplicate`);
+      console.log(`[CAPTURE-REJECT] scroll_delta: ${Math.abs(scrollPosition - this.lastScrollPosition)}px < ${this.config.minScrollDelta}px min`);
       return false;
     }
     try {
@@ -45128,32 +45267,33 @@ var ScreenshotCollector = class {
       });
       const hash = await this.computePerceptualHash(screenshot);
       if (this.isSimilarToExisting(hash)) {
-        console.log(`\u{1F4F8} Skipping near-duplicate (perceptual hash): ${hash}`);
+        console.log(`[CAPTURE-REJECT] perceptual_hash: ${hash} (source=${source})`);
         return false;
       }
+      const postId = this.extractPostIdForEmbed();
       this.captures.push({
         id: this.captures.length + 1,
         screenshot,
         source,
         interest,
         postId,
-        // For Instagram embed rendering
+        // For Instagram embed rendering (display-only, not dedup)
         timestamp: Date.now(),
         scrollPosition
       });
-      if (postId) {
-        this.capturedPostIds.add(postId);
+      if (fingerprint) {
+        this.capturedFingerprints.add(fingerprint);
       }
       this.capturedHashes.add(hash);
       if (source !== "carousel" && source !== "story") {
         this.capturedPositions.add(positionKey);
       }
-      this.lastCaptureUrl = currentUrl;
+      this.lastCaptureSource = source;
       if (source === "feed") {
         this.lastScrollPosition = scrollPosition;
       }
       this.saveScreenshotToDisk(screenshot, source, this.captures.length);
-      console.log(`\u{1F4F8} Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ""}${postId ? ` [postId: ${postId}]` : ""})`);
+      console.log(`\u{1F4F8} Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ""}${fingerprint ? ` [fp: ${fingerprint.slice(0, 30)}]` : ""})`);
       return true;
     } catch (error) {
       console.error("\u{1F4F8} Screenshot capture failed:", error);
@@ -45168,11 +45308,12 @@ var ScreenshotCollector = class {
    * @param source - Where this content came from (feed, story, search, etc.)
    * @param interest - For search results, which interest triggered this capture
    * @param reason - Why the LLM decided to capture this (for logging)
+   * @param fingerprint - Tree-based post fingerprint for dedup (null → falls through to hash dedup)
    * @returns The captured post, or null if capture failed/skipped
    */
-  async captureFocusedElement(elementBox, source, interest, reason) {
+  async captureFocusedElement(elementBox, source, interest, reason, fingerprint) {
     if (this.captures.length >= this.config.maxCaptures) {
-      console.log(`\u{1F4F8} Max captures (${this.config.maxCaptures}) reached, skipping focused capture`);
+      console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached (focused)`);
       return null;
     }
     let viewport = this.page.viewportSize();
@@ -45211,24 +45352,25 @@ var ScreenshotCollector = class {
       });
       const hash = await this.computePerceptualHash(screenshot);
       if (this.isSimilarToExisting(hash)) {
-        console.log(`  \u{1F4F8} Capture skipped (perceptual hash similar): ${hash}`);
+        console.log(`[CAPTURE-REJECT] perceptual_hash: ${hash} (focused, source=${source})`);
         return null;
       }
       this.capturedHashes.add(hash);
-      const postId = this.extractPostId();
-      if (postId) {
-        if (source !== "carousel" && this.capturedPostIds.has(postId)) {
-          console.log(`  \u{1F4F8} Capture skipped (duplicate postId: ${postId})`);
-          return null;
-        }
-        this.capturedPostIds.add(postId);
+      if (fingerprint && source !== "carousel" && this.capturedFingerprints.has(fingerprint)) {
+        console.log(`[CAPTURE-REJECT] fingerprint_dedup: ${fingerprint.slice(0, 30)} (focused, source=${source})`);
+        return null;
       }
+      if (fingerprint) {
+        this.capturedFingerprints.add(fingerprint);
+      }
+      const postId = this.extractPostIdForEmbed();
       const captured = {
         id: this.captures.length + 1,
         screenshot,
         source,
         interest,
         postId,
+        // For Instagram embed rendering (display-only, not dedup)
         timestamp: Date.now(),
         scrollPosition: elementBox.y
         // Use element Y as position
@@ -45289,9 +45431,10 @@ var ScreenshotCollector = class {
   clear() {
     this.captures = [];
     this.lastScrollPosition = 0;
-    this.capturedPostIds.clear();
+    this.capturedFingerprints.clear();
     this.capturedHashes.clear();
     this.capturedPositions.clear();
+    this.lastCaptureSource = "";
     console.log("\u{1F4F8} Collector cleared");
   }
   /**
@@ -45302,10 +45445,11 @@ var ScreenshotCollector = class {
    * @param source - Where this content came from (feed, story, etc.)
    * @param watchDurationMs - How long to watch (human-like: 8-20 seconds)
    * @param frameIntervalMs - Interval between frames (2-3 seconds)
+   * @param fingerprint - Tree-based post fingerprint for video grouping
    * @returns Number of unique frames captured
    */
-  async captureVideoFrames(source, watchDurationMs = 12e3, frameIntervalMs = 2500) {
-    const videoId = this.extractPostId() || `video_${Date.now()}`;
+  async captureVideoFrames(source, watchDurationMs = 12e3, frameIntervalMs = 2500, fingerprint) {
+    const videoId = fingerprint || this.extractPostIdForEmbed() || `video_${Date.now()}`;
     const maxFrames = Math.floor(watchDurationMs / frameIntervalMs);
     let capturedFrames = 0;
     let lastCapturedTime = -1;
@@ -45358,7 +45502,7 @@ var ScreenshotCollector = class {
           id: this.captures.length + 1,
           screenshot,
           source,
-          postId: this.extractPostId(),
+          postId: this.extractPostIdForEmbed(),
           timestamp: Date.now(),
           scrollPosition: 0,
           isVideoFrame: true,
@@ -45394,11 +45538,12 @@ var ScreenshotCollector = class {
     return new Promise((resolve2) => setTimeout(resolve2, ms));
   }
   /**
-   * Extract Instagram post ID from current URL.
+   * Extract Instagram post ID from current URL for embed rendering.
    * Post URLs follow pattern: instagram.com/p/{POST_ID}/
    * Returns undefined for non-post pages (stories, feed, etc.)
+   * NOTE: This is display-only (for Instagram embeds), NOT used for dedup.
    */
-  extractPostId() {
+  extractPostIdForEmbed() {
     const url = this.page.url();
     const match = url.match(/\/p\/([A-Za-z0-9_-]+)\//);
     return match?.[1];
@@ -46043,12 +46188,14 @@ var NavigationLLM = class {
   decisionCount = 0;
   // Session-level randomization for gaze jitter
   sessionJitter;
+  // LLM scratchpad — persisted between turns so the model remembers what it saw/captured
+  lastMemory = "";
   constructor(config) {
     this.apiKey = config.apiKey;
     this.model = config.model || DEFAULT_CONFIG3.model;
     this.maxTokens = config.maxTokens || DEFAULT_CONFIG3.maxTokens;
     this.debug = config.debug ?? true;
-    this.visionDetail = config.visionDetail || process.env.KOWALSKI_VISION_DETAIL || "low";
+    this.visionDetail = config.visionDetail || process.env.KOWALSKI_VISION_DETAIL || "high";
     this.sessionJitter = 0.85 + Math.random() * 0.3;
   }
   /**
@@ -46059,7 +46206,7 @@ var NavigationLLM = class {
 
 CORE GOAL: Build a thorough digest of the user's Instagram world by capturing posts and stories from their detail pages.
 - FEED: capture posts by navigating to each post's detail page first (NEVER capture the feed viewport itself \u2014 it produces unusable partial-post screenshots)
-- STORIES: capture EVERY frame (captureNow each frame, advance, repeat)
+- STORIES: capture EVERY frame (capture each frame, advance, repeat)
 - GRID (profiles/explore): click thumbnails to open modals before capturing (thumbnails are too small)
 - Skip: ads/sponsored, "Suggested for you", loading states
 
@@ -46071,26 +46218,26 @@ TIME ALLOCATION (proportional to session length):
 
 CAPTURE QUALITY \u2014 WHAT MAKES A GOOD CAPTURE:
 A capture is a screenshot that gets processed into structured data downstream.
-- GOOD capture: a SINGLE post's detail page \u2014 full-resolution image, complete caption, engagement stats visible. This is what captureNow is for.
+- GOOD capture: a SINGLE post's detail page \u2014 full-resolution image, complete caption, engagement stats visible. Use action "capture" here.
 - BAD capture: the feed viewport \u2014 multiple partial posts stacked, images cropped at viewport edge, captions truncated. The pipeline CANNOT extract clean data from this.
-- RULE: NEVER set captureNow while on the feed or explore grid. Always navigate INTO a post first.
+- RULE: NEVER use action "capture" while on the feed or explore grid. Always navigate INTO a post first.
 
 HOW TO CAPTURE FEED POSTS:
 Each feed post has a timestamp link (role=link, named "1h", "16h", "2d", "1w", etc.) inside its article. Click it to navigate to the post's detail page where the image is full-size and the caption is complete.
-- Click the timestamp link \u2192 page navigates to post detail \u2192 THEN captureNow: true
-- If carousel: ArrowRight + captureNow for each slide before leaving
+- Click the timestamp link \u2192 page navigates to post detail \u2192 THEN action "capture"
+- If carousel: ArrowRight + capture for each slide before leaving
 - After capturing, press Escape (if modal) or click the Instagram logo (link "Instagram" in sidebar) to return to the feed
 - Then scroll past the captured post before clicking the next one
 
 ARRIVING AT A POST DETAIL PAGE:
-When the URL contains /p/ or /reel/, you are on a post detail page.
-YOUR VERY FIRST ACTION must be: captureNow (set strategic.captureNow = true).
+You are on a post detail page when you see a single post with Like/Comment/Share/Save buttons, a comment input box, the author's username, and a timestamp \u2014 NOT when you see multiple posts stacked vertically (that's the feed).
+YOUR VERY FIRST ACTION must be: action "capture".
 Do NOT click any other element first. Do NOT scroll. Capture FIRST, always.
 
 FULL SEQUENCE ON DETAIL PAGE:
-1. Arrive \u2192 captureNow (IMMEDIATELY, no other actions first)
+1. Arrive \u2192 capture (IMMEDIATELY, no other actions first)
 2. Check tree for carousel indicators (dot indicators, Next button ON the image, "Slide 1 of N")
-   - If carousel: press ArrowRight \u2192 captureNow \u2192 repeat until last slide
+   - If carousel: press ArrowRight \u2192 capture \u2192 repeat until last slide
    - If not carousel: skip to step 3
 3. Leave: click Instagram logo (top-left) to return to feed (NOT Escape \u2014 see standalone vs modal below)
 4. Scroll down to bring fresh posts into view
@@ -46102,10 +46249,10 @@ COMMON MISTAKES (avoid these):
 - Pressing Escape on a standalone page \u2014 does nothing, use Instagram logo instead
 
 CAPTURE MECHANICS:
-- captureNow = ONE-SHOT. Send once, screenshot taken instantly, then MOVE ON.
-- Full viewport: set strategic.captureNow = true
-- Specific element: set capture.targetId to element ID (crops to bounding box)
-- NEVER send captureNow twice for the same content.
+- capture = ONE-SHOT. Send once, screenshot taken instantly, then MOVE ON.
+- Full viewport: action "capture" with no targetId
+- Specific element: action "capture" with targetId set to element ID (crops to bounding box)
+- NEVER send capture twice for the same content.
 
 CAPTURE PACE:
 If you have scrolled past 3 or more posts without capturing any, you are being too passive. Capture posts as you encounter them \u2014 the feed is finite and scrolling without capturing wastes session time.
@@ -46115,17 +46262,17 @@ On the feed, follow this rhythm:
 1. SCROLL to bring a fresh post into view
 2. FIND the timestamp link (role=link, named "1h", "3h", "16h", "2d", etc.) in the nearest article
 3. CLICK the timestamp link \u2192 navigates to post detail page
-4. CAPTURE (captureNow) \u2192 then leave (Escape or click Instagram logo)
+4. CAPTURE (action "capture") \u2192 then leave (Escape or click Instagram logo)
 5. Repeat
 Do NOT scroll more than 2 times in a row without clicking a timestamp link. Every scroll should be followed by a click.
 If you scroll 3+ times without clicking, you are wasting session time \u2014 STOP scrolling and click the nearest timestamp.
 
 GRID (profiles/explore/hashtags):
-- Click thumbnail link \u2192 modal opens \u2192 captureNow \u2192 navigate carousel slides \u2192 Escape \u2192 next thumbnail
+- Click thumbnail link \u2192 modal opens \u2192 capture \u2192 navigate carousel slides \u2192 Escape \u2192 next thumbnail
 - Modal: dialog container with image (left) + caption/comments (right). Close with Escape or "Close" button.
 
 STORIES:
-- Click story button \u2192 viewer opens \u2192 captureNow \u2192 advance (ArrowRight/click right) \u2192 captureNow \u2192 repeat
+- Click story button \u2192 viewer opens \u2192 capture \u2192 advance (ArrowRight/click right) \u2192 capture \u2192 repeat
 - Stories are ephemeral \u2014 capture EVERY frame.
 
 ELEMENT RULES:
@@ -46153,13 +46300,13 @@ PAGE CONTEXT (infer from tree + screenshot):
 - Multiple "article" containers = feed
 - Grid of images = profile/explore
 - "dialog" container = modal overlay
-- Use container roles, URL, and screenshot to understand layout
+- Use container roles and screenshot to understand layout
 
 STANDALONE PAGES vs MODALS:
 When you click a timestamp link from the feed, Instagram navigates to a STANDALONE post detail page.
 This is a full page, not a modal overlay. Escape does NOTHING here.
 - MODAL: You see a dialog container in the accessibility tree. Press Escape or click Close/X to dismiss.
-- STANDALONE PAGE: No dialog in the tree. You navigated to a new page (/p/ or /reel/ in URL). Click the Instagram logo (top-left link named "Instagram") to return to the feed.
+- STANDALONE PAGE: No dialog in the tree \u2014 you see a full post page with Like/Comment/Share buttons, caption, and comments. Click the Instagram logo (top-left link named "Instagram") to return to the feed.
 CRITICAL: If you press Escape and nothing changes, you are on a standalone page. Do NOT press Escape again \u2014 click the Instagram logo instead.
 
 CAROUSEL vs "MORE POSTS" \u2014 DO NOT CONFUSE THESE:
@@ -46178,7 +46325,7 @@ To navigate carousel slides: press ArrowRight, do NOT click links below the post
 STAGNATION RECOVERY:
 - Scroll stuck (scrollY unchanged): Press Escape (overlay?), click content area to restore focus, retry
 - Click fails: Try different link in same article, or scroll to next post
-- Capture loop (wait+captureNow repeated): capture already taken \u2014 press Escape or click Instagram logo to leave
+- Capture loop (capture action repeated): capture already taken \u2014 press Escape or click Instagram logo to leave
 - Reopened same post: forgot to scroll after returning \u2014 scroll(down, medium) first
 - General loop (3+ repeated actions): switch strategy entirely (feed\u2192search, search\u2192profile)
 - Content not loading: wait(2) for lazy loading
@@ -46192,14 +46339,25 @@ STRATEGIC DECISIONS:
 
 TERMINATE WHEN: time < 30s remaining, content exhausted, stuck and can't recover
 
+MEMORY / SCRATCHPAD:
+You have a "memory" field in your JSON output. Use it like an internal monologue \u2014 jot down:
+- Posts you already captured (username + brief description)
+- Posts you tried but failed (e.g., "click on X didn't open")
+- What you plan to do next ("need to scroll past suggested users")
+- Patterns you notice ("carousel posts in this feed", "lots of ads after scroll")
+Your memory from the previous turn will be shown to you as YOUR NOTES. Use it to avoid re-clicking posts you already captured and to maintain continuity between turns.
+
 AVAILABLE ACTIONS:
 - click(id): Click element. MUST include expectedName from tree.
 - hover(id): Hover element (reveals hidden UI)
-- scroll(direction, amount): up/down/left/right, small/medium/large
+- scroll(direction, amount, pixelAmount?): up/down/left/right, small/medium/large. Or set pixelAmount for exact pixel control (overrides amount).
+- capture(targetId?): Take a screenshot. Omit targetId for full viewport. Include targetId to crop to a specific element.
 - type(text): Type into focused input
 - press(key): Escape, Enter, ArrowRight, ArrowLeft, Backspace, Space, Home, End, etc.
 - clear(): Clear focused input
 - wait(seconds): Wait 1-5 seconds
+
+SCROLL FEEDBACK: After each scroll, you receive page position (scrollY/pageHeight) and whether you're near the bottom. Use this to decide when to stop scrolling.
 
 OUTPUT FORMAT (JSON only):
 {
@@ -46208,23 +46366,25 @@ OUTPUT FORMAT (JSON only):
   "params": { "id": 47, "expectedName": "16h" },
   "expectedOutcome": "Navigate to post detail page",
   "confidence": 0.9,
-  "capture": { "shouldCapture": false },
-  "strategic": { "captureNow": false, "lingerDuration": "short" }
+  "strategic": { "lingerDuration": "short" },
+  "memory": "Captured BR Giannis dunk post. Saw persian_edits reel - skipped. Need to scroll past suggested users."
 }
+To capture: { "action": "capture", "params": {}, ... } (full viewport) or { "action": "capture", "params": { "targetId": 47 }, ... } (crop to element)
 
 PARAMS BY ACTION TYPE:
 - click: { "id": <element_id>, "expectedName": "<name from tree>" }
 - hover: { "id": <element_id>, "expectedName": "<name from tree>" }
-- scroll: { "direction": "down", "amount": "medium" }
+- scroll: { "direction": "down", "amount": "medium" } or { "direction": "down", "pixelAmount": 300 }
+- capture: {} (full viewport) or { "targetId": <element_id> } (crop to element)
 - type: { "text": "search query" }
 - press: { "key": "Escape" }
 - wait: { "seconds": 2 }
 - clear: {}
-\u26A0\uFE0F "id" in click/hover params is the element ID from the tree (e.g., id:47). This is NOT the same as capture.targetId.
+\u26A0\uFE0F "id" in click/hover params is the element ID from the tree (e.g., id:47). This is the same ID you can use as capture targetId.
 \u26A0\uFE0F "expectedName" MUST be the EXACT name from the accessibility tree. Do NOT invent names.
 \u26A0\uFE0F User interests are SEARCH TOPICS ONLY \u2014 feed and stories capture EVERYTHING regardless of topic.
-\u26A0\uFE0F Carousel posts: check for "Next"/"Go Back" buttons or slide indicators. ArrowRight + captureNow each slide before leaving.
-\u26A0\uFE0F On a post detail page (/p/ or /reel/ in URL)? Your FIRST action must be captureNow. Do not click anything else first.`;
+\u26A0\uFE0F Carousel posts: check for "Next"/"Go Back" buttons or slide indicators. ArrowRight + capture each slide before leaving.
+\u26A0\uFE0F On a post detail page (single post with engagement buttons and comment box)? Your FIRST action must be capture. Do not click anything else first.`;
   }
   /**
    * Build a dynamic progress audit from the current context.
@@ -46240,10 +46400,13 @@ PARAMS BY ACTION TYPE:
       `- New content: ~${result.newArticles} new post(s), ${result.newElementsAppeared} interactive elements appeared, ${result.elementsDisappeared} left viewport`,
       `- Scroll health: ${health}`
     ];
+    if (result.pageHeightPx !== void 0) {
+      lines.push(`- Page position: ${result.scrollPositionPx}px / ${result.pageHeightPx}px${result.isNearBottom ? " (NEAR BOTTOM)" : ""}`);
+    }
     return lines.join("\n");
   }
   buildProgressAudit(context) {
-    const warnings = [];
+    const observations = [];
     const recentActions = context.recentActions || [];
     let consecutiveWaits = 0;
     for (let i = recentActions.length - 1; i >= 0; i--) {
@@ -46254,17 +46417,19 @@ PARAMS BY ACTION TYPE:
       }
     }
     if (consecutiveWaits >= 2) {
-      warnings.push(`\u26A0\uFE0F CAPTURE LOOP DETECTED: You've sent ${consecutiveWaits} consecutive wait actions on the same page. The capture was already taken on the first captureNow (or rejected as duplicate). STOP waiting \u2014 send back() NOW to return to the feed.`);
+      observations.push(`Note: ${consecutiveWaits} consecutive wait actions on this page. No state change detected.`);
     }
-    if (context.lastCaptureAttempt && !context.lastCaptureAttempt.succeeded) {
-      warnings.push(`\u26A0\uFE0F LAST CAPTURE REJECTED: ${context.lastCaptureAttempt.reason}. Do NOT send captureNow again \u2014 it will be rejected again. Send back() immediately and move to the next post.`);
+    if (context.lastCaptureAttempt?.succeeded) {
+      observations.push(`Capture status: This post was already captured successfully.`);
+    } else if (context.lastCaptureAttempt && !context.lastCaptureAttempt.succeeded) {
+      observations.push(`Capture status: Last capture was rejected (${context.lastCaptureAttempt.reason}).`);
     }
     const elapsedMs = Date.now() - context.startTime;
     if (elapsedMs > 6e4) {
       const capturesPerMin = (context.captureCount || 0) / (elapsedMs / 6e4);
       if (capturesPerMin < 0.5) {
         const elapsedMin = Math.round(elapsedMs / 6e4);
-        warnings.push(`\u26A0\uFE0F LOW CAPTURE RATE: Only ${context.captureCount || 0} captures in ${elapsedMin} minutes. You should have ~${elapsedMin * 2}+. On the feed, click a timestamp link to enter a post's detail page, then captureNow. Do not capture from the feed viewport.`);
+        observations.push(`Session stats: ${context.captureCount || 0} captures in ${elapsedMin} minutes (${capturesPerMin.toFixed(1)}/min).`);
       }
     }
     const lastAction = recentActions[recentActions.length - 1];
@@ -46274,30 +46439,28 @@ PARAMS BY ACTION TYPE:
       const allSameUrl = urls.length >= 5 && urls.every((u) => u === urls[0]);
       const noCaptureIncrease = last5.every((a) => a.action === "wait" || a.action === "scroll");
       if (allSameUrl && noCaptureIncrease) {
-        warnings.push(`\u26A0\uFE0F STAGNANT: ${last5.length} actions on the same page with no navigation progress. Break the pattern: scroll down \u2192 click a NEW timestamp link.`);
+        observations.push(`Stagnation: last ${last5.length} actions on the same page. Actions: ${last5.map((a) => a.action).join(", ")}.`);
       }
     }
     const recentClickFailures = recentActions.slice(-5).filter(
       (a) => a.action === "click" && a.verified === "no_change_detected"
     );
-    const isFeedUrl = context.url === "https://www.instagram.com/" || context.url?.startsWith("https://www.instagram.com/?");
-    if (recentClickFailures.length >= 2 && isFeedUrl) {
-      warnings.push(`\u26A0\uFE0F CLICK FAILURES: ${recentClickFailures.length} clicks with no navigation. The post you're clicking may already be captured or the link is stale. SCROLL DOWN to bring a FRESH post into view, then click ITS timestamp link. Do NOT use back() \u2014 you are already on the feed.`);
+    const isFeed = context.currentPhase === "feed";
+    if (recentClickFailures.length >= 2 && isFeed) {
+      observations.push(`Click feedback: ${recentClickFailures.length} of last 5 clicks verified as no_change_detected. Elements: ${recentClickFailures.map((a) => a.clickedElementName || "unknown").join(", ")}.`);
     }
-    if (isFeedUrl) {
+    if (isFeed) {
       const lastWasBack = lastAction?.action === "back";
       if (lastWasBack) {
-        warnings.push(`\u26A0\uFE0F DANGEROUS BACK: You just used back() while on the feed. This navigated AWAY from Instagram. NEVER use back() on the feed \u2014 it goes to the previous browser page (outside Instagram). Use scroll, click elements, or click the Home link to navigate.`);
+        observations.push(`Navigation: back() was used while on the feed.`);
       }
     }
-    if (isFeedUrl && recentActions.length >= 6) {
+    if (isFeed && recentActions.length >= 6) {
       const last8 = recentActions.slice(-8);
       const scrollCount = last8.filter((a) => a.action === "scroll").length;
       const clickCount = last8.filter((a) => a.action === "click").length;
       if (scrollCount >= 4 && clickCount === 0) {
-        warnings.push(
-          `\u26A0\uFE0F SCROLL LOOP: You have scrolled ${scrollCount} times in the last ${last8.length} actions without clicking any post. Scrolling the feed without entering posts produces ZERO captures. Find the nearest timestamp link (e.g., "1h", "16h", "2d") and CLICK IT to navigate to a post detail page, then captureNow.`
-        );
+        observations.push(`Pattern: ${scrollCount} scrolls, ${clickCount} clicks in last ${last8.length} actions.`);
       }
     }
     if (recentActions.length >= 2) {
@@ -46311,15 +46474,13 @@ PARAMS BY ACTION TYPE:
         }
       }
       if (consecutiveEscapes >= 2) {
-        warnings.push(
-          `\u26A0\uFE0F ESCAPE NOT WORKING: You pressed Escape ${consecutiveEscapes} times with no effect. You are on a STANDALONE PAGE, not a modal. Escape cannot close it. Click the Instagram logo (link "Instagram" in the sidebar/top-left) to return to the feed.`
-        );
+        observations.push(`Note: ${consecutiveEscapes} consecutive Escape presses had no visible effect.`);
       }
     }
-    if (warnings.length === 0) return "";
+    if (observations.length === 0) return "";
     return `
-\u{1F6A8} PROGRESS AUDIT (read these warnings BEFORE deciding your next action):
-${warnings.join("\n")}
+STATUS OBSERVATIONS:
+${observations.join("\n")}
 `;
   }
   /**
@@ -46333,6 +46494,7 @@ ${warnings.join("\n")}
       if (a.verified && a.verified !== "not_verified") parts.push(a.verified.replace(/_/g, " "));
       if (a.scrollY !== void 0) parts.push(`scrollY=${a.scrollY}`);
       if (parts.length > 0) line += ` [${parts.join(", ")}]`;
+      if (a.rewriteNote) line += ` [REWRITTEN: ${a.rewriteNote}]`;
       return line;
     }).join("\n") || "None yet";
     let goalDesc = "";
@@ -46341,10 +46503,10 @@ ${warnings.join("\n")}
         goalDesc = `Search for posts about "${context.currentGoal.target}"`;
         break;
       case "watch_stories":
-        goalDesc = "Watch stories \u2014 capture EVERY frame with captureNow: true, then advance to next frame, repeat";
+        goalDesc = 'Watch stories \u2014 capture EVERY frame with action "capture", then advance to next frame, repeat';
         break;
       case "browse_feed":
-        goalDesc = "Browsing the home feed \u2014 click timestamp links to enter post detail pages, then captureNow from the detail page (not the feed viewport)";
+        goalDesc = 'Browsing the home feed \u2014 click timestamp links to enter post detail pages, then action "capture" from the detail page (not the feed viewport)';
         break;
       case "explore_profile":
         goalDesc = `Currently on profile: ${context.currentGoal.target}`;
@@ -46359,6 +46521,7 @@ ${warnings.join("\n")}
     const overlays = this.detectActiveOverlays(elements);
     const overlayInfo = overlays.length > 0 ? `- Active dialogs: ${overlays.join(", ")}
 ` : "";
+    console.log(`[MEMORY-INJECT] Sending to LLM: ${this.lastMemory || "(empty)"}`);
     const elapsedSec = Math.round((Date.now() - context.startTime) / 1e3);
     const targetSec = Math.round(context.targetDurationMs / 1e3);
     const remainingSec = Math.max(0, targetSec - elapsedSec);
@@ -46382,6 +46545,7 @@ ${warnings.join("\n")}
 
 CURRENT GOAL: ${goalDesc}
 
+CAPTURES: ${context.captureCount || 0} taken (target: ~${Math.max(2, Math.round(targetSec / 60) * 2)} for this session)
 ${context.currentPhase === "search" ? `SEARCH TOPICS: ${interestsStr}` : ""}
 
 SESSION STATUS:
@@ -46393,7 +46557,6 @@ ${this.buildProgressAudit(context)}
 ACTIVITY HISTORY: ${phaseHistoryStr}
 
 CURRENT STATE:
-- URL: ${context.url}
 - Content: ${contentStatsStr}
 - Scroll position: ${context.scrollPosition !== void 0 ? `${context.scrollPosition}px from top` : "unknown"}
 - Content freshness: ${context.elementFingerprint || "unknown"}
@@ -46412,11 +46575,12 @@ ${elementsByContainer}
 RECENT ACTIONS:
 ${recentActionsStr}
 ${context.loopWarning ? `
-\u26A0\uFE0F LOOP DETECTED (${context.loopWarning.severity}): ${context.loopWarning.reason}
-WARNING #${context.loopWarning.consecutiveWarnings} \u2014 The same action has been repeated ${context.loopWarning.consecutiveWarnings} times with no visible effect.
-${context.loopWarning.consecutiveWarnings >= 2 ? "NOTE: Auto-recovery will take over on the next action if the loop continues." : ""}
+\u26A0\uFE0F LOOP DETECTED: severity=${context.loopWarning.severity}, consecutive_warnings=${context.loopWarning.consecutiveWarnings}. Recent pattern: ${context.recentActions.slice(-6).map((a) => a.action).join(", ")}.
 ` : ""}
-Make your decision. Include strategic decisions to signal captures, activity changes, or session termination.`;
+${this.lastMemory ? `YOUR NOTES (from your last turn):
+${this.lastMemory}
+` : ""}
+Make your decision. Include strategic decisions to signal captures, activity changes, or session termination. Use the "memory" field to jot down what you've seen, captured, and plan to do next.`;
   }
   /**
    * Detect active overlays from container roles in the accessibility tree.
@@ -46521,10 +46685,9 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
       const siblingInfo = elems[0]?.siblingCount ? ` (${elems[0].siblingCount} siblings)` : "";
       parts.push(`[${containerKey}${siblingInfo}]`);
       for (const e of elems) {
-        const hint = e.semanticHint ? ` \u26A0\uFE0F${e.semanticHint}` : "";
         const depth = e.depth !== void 0 ? ` depth=${e.depth}` : "";
         const disabled = e.state?.disabled ? " [disabled]" : "";
-        parts.push(`  id:${e.id} ${e.role} "${e.name}" Y=${e.position.y}${hint}${depth}${disabled}`);
+        parts.push(`  id:${e.id} ${e.role} "${e.name}" Y=${e.position.y}${depth}${disabled}`);
         if (e.contentPreview) {
           const cp = e.contentPreview;
           if (cp.captionText) {
@@ -46599,6 +46762,9 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
           if (validated.strategic.reason) {
             console.log(`  Reason: ${validated.strategic.reason}`);
           }
+        }
+        if (validated.memory) {
+          console.log(`  \u{1F4DD} Memory: ${validated.memory.slice(0, 200)}`);
         }
         console.log("========================\n");
       }
@@ -46682,31 +46848,35 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
       throw new Error("Empty LLM response");
     }
     const parsed = JSON.parse(content);
+    if (parsed.memory) {
+      this.lastMemory = parsed.memory;
+      console.log(`[MEMORY] Turn memory saved: ${parsed.memory}`);
+    }
     return parsed;
   }
   /**
    * Validate and sanitize the LLM decision.
    */
   validateDecision(decision, elements) {
-    if (decision.action === "captureNow" || decision.action === "capture") {
-      console.log(`  \u{1F504} Rewriting "${decision.action}" action \u2192 wait + captureNow`);
+    if (decision.action === "captureNow") {
+      console.log(`  \u{1F504} Normalizing "captureNow" action \u2192 "capture"`);
       decision = {
         ...decision,
-        action: "wait",
-        params: { seconds: 1 },
-        strategic: { ...decision.strategic, captureNow: true }
+        action: "capture",
+        params: { reason: decision.strategic?.reason }
       };
     }
     if (decision.action === "back") {
       console.log(`  \u{1F6E1}\uFE0F Blocking back() action \u2014 converting to scroll`);
-      return {
+      const rewritten = {
         ...decision,
         action: "scroll",
-        params: { direction: "down", amount: "medium" },
-        reasoning: `back() blocked (unreliable in SPA), scrolling instead. Use Escape to close modals or click Instagram logo to return to feed.`
+        params: { direction: "down", amount: "medium" }
       };
+      rewritten._rewriteNote = `back() blocked (unreliable in Instagram SPA \u2014 can navigate to about:blank). Use Escape to close modals or click the Instagram logo to return to feed.`;
+      return rewritten;
     }
-    const validActions = ["click", "scroll", "type", "press", "wait", "hover", "back", "clear"];
+    const validActions = ["click", "scroll", "capture", "type", "press", "wait", "hover", "back", "clear"];
     if (!validActions.includes(decision.action)) {
       return {
         ...decision,
@@ -46730,27 +46900,25 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
       }
       if (!targetElement) {
         console.warn(`  \u26A0\uFE0F Click target not found \u2014 params: ${JSON.stringify(decision.params)}`);
-        return {
+        const rewritten = {
           ...decision,
           action: "scroll",
-          params: { direction: "down", amount: "medium" },
-          reasoning: `Click target id=${clickParams.id} not found, scrolling instead`
+          params: { direction: "down", amount: "medium" }
         };
+        rewritten._rewriteNote = `Click target id=${clickParams.id} not found in current tree. Scrolled instead. The element may have scrolled off-screen.`;
+        return rewritten;
       }
-      const forbiddenHints = [
-        "like_button",
-        "share_button",
-        "save_button",
-        "follow_button"
-      ];
-      if (targetElement.semanticHint && forbiddenHints.includes(targetElement.semanticHint)) {
-        console.log(`  \u{1F6E1}\uFE0F Safety: click on ${targetElement.semanticHint} \u2192 scroll (forbidden element)`);
-        return {
+      const nameLower = targetElement.name.toLowerCase();
+      const isForbidden = /\b(like|unlike|share|save|follow)\b/i.test(nameLower);
+      if (isForbidden) {
+        console.log(`  \u{1F6E1}\uFE0F Safety: click on "${nameLower}" button \u2192 scroll (forbidden element)`);
+        const rewritten = {
           ...decision,
           action: "scroll",
-          params: { direction: "down", amount: "small" },
-          reasoning: `SAFETY: Blocked interaction with ${targetElement.semanticHint}, scrolling instead`
+          params: { direction: "down", amount: "small" }
         };
+        rewritten._rewriteNote = `SAFETY: Click on "${nameLower}" button (id=${clickParams.id}) was blocked. Scrolled instead.`;
+        return rewritten;
       }
     }
     if (decision.action === "type") {
@@ -46760,21 +46928,23 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
           const inputName = elem.name?.toLowerCase() || "";
           if (containerName.includes("message") || containerName.includes("direct") || containerName.includes("inbox") || containerName.includes("chat")) {
             console.log(`  \u{1F6E1}\uFE0F Safety: type in "${elem.containerName}" \u2192 Escape (message context)`);
-            return {
+            const rewritten = {
               ...decision,
               action: "press",
-              params: { key: "Escape" },
-              reasoning: `SAFETY: Blocked typing in message context "${elem.containerName}", pressing Escape to exit`
+              params: { key: "Escape" }
             };
+            rewritten._rewriteNote = `SAFETY: Typing blocked in message context "${elem.containerName}". Pressed Escape to exit.`;
+            return rewritten;
           }
           if (containerName.includes("comment") || inputName.includes("comment") || inputName.includes("reply") || inputName.includes("add a comment")) {
             console.log(`  \u{1F6E1}\uFE0F Safety: type in "${inputName}" \u2192 Escape (comment context)`);
-            return {
+            const rewritten = {
               ...decision,
               action: "press",
-              params: { key: "Escape" },
-              reasoning: `SAFETY: Blocked typing in comment context "${inputName}", pressing Escape to exit`
+              params: { key: "Escape" }
             };
+            rewritten._rewriteNote = `SAFETY: Typing blocked in comment context "${inputName}". Pressed Escape to exit.`;
+            return rewritten;
           }
         }
       }
@@ -46784,8 +46954,22 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
       if (!["up", "down", "left", "right"].includes(scrollParams.direction)) {
         scrollParams.direction = "down";
       }
+      if (scrollParams.pixelAmount !== void 0) {
+        scrollParams.pixelAmount = Math.max(-5e3, Math.min(5e3, scrollParams.pixelAmount));
+      }
       if (!["small", "medium", "large", "xlarge"].includes(scrollParams.amount)) {
         scrollParams.amount = "medium";
+      }
+    }
+    if (decision.action === "capture") {
+      const captureParams = decision.params;
+      if (captureParams.targetId !== void 0) {
+        const target = elements.find((e) => e.id === captureParams.targetId);
+        if (!target) {
+          const originalTargetId = captureParams.targetId;
+          captureParams.targetId = void 0;
+          decision._rewriteNote = `Capture targetId=${originalTargetId} not found in current tree, using full viewport.`;
+        }
       }
     }
     if (decision.action === "press") {
@@ -46838,28 +47022,6 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
    * Uses escalating strategies based on recent action patterns.
    */
   fallbackDecision(context, elements, reason) {
-    const recent = context.recentActions.slice(-15);
-    const scrollPositions = recent.filter((a) => a.scrollY !== void 0).map((a) => a.scrollY);
-    const scrollStagnant = scrollPositions.length >= 2 && scrollPositions.every((p) => p === scrollPositions[0]);
-    if (scrollStagnant) {
-      return {
-        reasoning: `Fallback: ${reason}. Scroll position stuck, trying escape.`,
-        action: "press",
-        params: { key: "Escape" },
-        expectedOutcome: "Close any blocking overlay",
-        confidence: 0.3
-      };
-    }
-    const recentFailures = recent.filter((a) => !a.success).length;
-    if (recentFailures >= 3) {
-      return {
-        reasoning: `Fallback: ${reason}. Multiple failures, pressing Escape.`,
-        action: "press",
-        params: { key: "Escape" },
-        expectedOutcome: "Close any blocking overlay",
-        confidence: 0.2
-      };
-    }
     return {
       reasoning: `Fallback: ${reason}. Scrolling to find more content.`,
       action: "scroll",
@@ -46929,37 +47091,54 @@ var NavigationExecutor = class {
    */
   async execute(decision, elements) {
     const startTime = Date.now();
+    const rewriteNote = decision._rewriteNote;
     try {
+      let result;
       switch (decision.action) {
         case "click":
-          return await this.executeClick(decision, elements, startTime);
+          result = await this.executeClick(decision, elements, startTime);
+          break;
         case "scroll":
-          return await this.executeScroll(decision, startTime);
+          result = await this.executeScroll(decision, startTime);
+          break;
+        case "capture":
+          result = await this.executeCapture(decision, startTime);
+          break;
         case "type":
-          return await this.executeType(decision, startTime);
+          result = await this.executeType(decision, startTime);
+          break;
         case "press":
-          return await this.executePress(decision, startTime);
+          result = await this.executePress(decision, startTime);
+          break;
         case "wait":
-          return await this.executeWait(decision, startTime);
+          result = await this.executeWait(decision, startTime);
+          break;
         case "hover":
-          return await this.executeHover(decision, elements, startTime);
+          result = await this.executeHover(decision, elements, startTime);
+          break;
         case "back":
-          return await this.executeBack(decision, startTime);
+          result = await this.executeBack(decision, startTime);
+          break;
         case "clear":
-          return await this.executeClear(decision, startTime);
+          result = await this.executeClear(decision, startTime);
+          break;
         default:
-          return this.failureResult(
+          result = this.failureResult(
             decision,
             startTime,
             `Unknown action: ${decision.action}`
           );
       }
+      if (rewriteNote) result.rewriteNote = rewriteNote;
+      return result;
     } catch (error) {
-      return this.failureResult(
+      const result = this.failureResult(
         decision,
         startTime,
         error instanceof Error ? error.message : String(error)
       );
+      if (rewriteNote) result.rewriteNote = rewriteNote;
+      return result;
     }
   }
   /**
@@ -46995,8 +47174,10 @@ var NavigationExecutor = class {
         break;
       }
     }
+    let autoRetried = false;
     if (verified === "no_change_detected" && target.role === "link") {
       console.log(`  \u{1F504} Link click no_change_detected \u2014 retrying after hydration delay (id:${target.id} "${target.name}")`);
+      autoRetried = true;
       await this.humanDelay(1200, 1800);
       await this.ghost.clickElement(boundingBox);
       for (let attempt = 0; attempt < 5; attempt++) {
@@ -47013,13 +47194,21 @@ var NavigationExecutor = class {
         }
       }
     }
+    if (verified === "url_changed") {
+      await this.page.waitForLoadState("networkidle", { timeout: 3e3 }).catch(() => {
+      });
+      await this.humanDelay(800, 1200);
+      console.log(`  \u23F3 Post-navigation hydration wait (url_changed)`);
+    }
     if (verified !== "no_change_detected") {
       this.navigator.invalidateTreeCache();
     }
+    const retryNote = autoRetried ? `Infrastructure auto-retried this link click after hydration delay. First click had no effect.` : void 0;
     const record = this.recordAction(decision, true, void 0, {
       url: postClickUrl,
       verified,
-      clickedElementName: target.name
+      clickedElementName: target.name,
+      rewriteNote: retryNote
     });
     return {
       success: true,
@@ -47042,33 +47231,46 @@ var NavigationExecutor = class {
   async executeScroll(decision, startTime) {
     const params = decision.params;
     if (params.direction === "left" || params.direction === "right") {
-      const viewportHeight = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
+      const vw = await this.page.evaluate(() => window.innerWidth).catch(() => 1080);
       const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
-      const baseDistance = Math.round(viewportHeight * proportion);
-      const deltaX = params.direction === "right" ? baseDistance : -baseDistance;
-      await this.page.mouse.wheel(deltaX, 0);
-      await this.humanDelay(300, 600);
+      const baseDistance = params.direction === "right" ? Math.round(vw * proportion) : -Math.round(vw * proportion);
+      const intentResult2 = await this.scroll.scrollHorizontalWithIntent({ baseDistance });
+      const scrollResultData2 = {
+        contentType: intentResult2.contentType,
+        requestedDirection: params.direction,
+        requestedAmount: params.amount,
+        actualDeltaPx: intentResult2.actualDelta,
+        scrollFailed: intentResult2.scrollFailed,
+        pauseDurationMs: intentResult2.pauseDurationMs,
+        newElementsAppeared: 0,
+        elementsDisappeared: 0,
+        newArticles: 0
+      };
       const scrollYAfter2 = await this.scroll.getScrollPosition();
       this.recordAction(decision, true, void 0, {
         scrollY: scrollYAfter2,
-        url: this.page.url()
+        url: this.page.url(),
+        scrollResult: scrollResultData2
       });
       return {
         success: true,
         actionTaken: "scroll",
         params,
         resultingUrl: this.page.url(),
-        durationMs: Date.now() - startTime
+        durationMs: Date.now() - startTime,
+        scrollResult: scrollResultData2
       };
     }
     const preSnapshot = await this.getQuickElementSnapshot();
     const overrides = {};
-    if (params.amount !== "medium") {
+    if (params.pixelAmount !== void 0) {
+      overrides.baseDistance = params.direction === "up" ? -Math.abs(params.pixelAmount) : Math.abs(params.pixelAmount);
+    } else if (params.amount !== "medium") {
       const vh = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
       const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
       overrides.baseDistance = Math.round(vh * proportion);
     }
-    if (params.direction === "up") {
+    if (params.direction === "up" && params.pixelAmount === void 0) {
       if (overrides.baseDistance) {
         overrides.baseDistance = -overrides.baseDistance;
       } else {
@@ -47082,6 +47284,9 @@ var NavigationExecutor = class {
     const disappeared = [...preSnapshot.interactive].filter(([id]) => !postSnapshot.interactive.has(id));
     const meaningfulNew = newInteractive.filter(([, name]) => name.length > 0).length;
     const newArticles = Math.max(0, postSnapshot.articleCount - preSnapshot.articleCount);
+    const scrollYAfter = await this.scroll.getScrollPosition();
+    const viewportInfo = await this.scroll.getViewportInfo();
+    const isNearBottom = await this.scroll.isNearBottom();
     const scrollResultData = {
       contentType: intentResult.contentType,
       requestedDirection: params.direction,
@@ -47091,9 +47296,11 @@ var NavigationExecutor = class {
       pauseDurationMs: intentResult.pauseDurationMs,
       newElementsAppeared: meaningfulNew,
       elementsDisappeared: disappeared.length,
-      newArticles
+      newArticles,
+      pageHeightPx: viewportInfo.scrollHeight,
+      scrollPositionPx: scrollYAfter,
+      isNearBottom
     };
-    const scrollYAfter = await this.scroll.getScrollPosition();
     this.recordAction(decision, true, void 0, {
       scrollY: scrollYAfter,
       url: this.page.url(),
@@ -47269,6 +47476,20 @@ var NavigationExecutor = class {
     };
   }
   /**
+   * Execute a capture action.
+   * The actual screenshot logic lives in InstagramScraper.runNavigationLoop()
+   * which checks the action type after execution. The executor just records it.
+   */
+  async executeCapture(decision, startTime) {
+    this.recordAction(decision, true);
+    return {
+      success: true,
+      actionTaken: "capture",
+      params: decision.params,
+      durationMs: Date.now() - startTime
+    };
+  }
+  /**
    * Create a failure result.
    */
   failureResult(decision, startTime, errorMessage) {
@@ -47285,13 +47506,15 @@ var NavigationExecutor = class {
    * Record an action to history with optional state context.
    */
   recordAction(decision, success, errorMessage, stateContext) {
+    const rewriteNote = stateContext?.rewriteNote || decision._rewriteNote;
     const record = {
       timestamp: Date.now(),
       action: decision.action,
       params: decision.params,
       success,
       errorMessage,
-      ...stateContext || {}
+      ...stateContext || {},
+      ...rewriteNote ? { rewriteNote } : {}
     };
     this.actionHistory.push(record);
     if (this.actionHistory.length > this.maxHistorySize) {
@@ -47335,19 +47558,6 @@ var NavigationExecutor = class {
       }
     }
     return { inLoop: false, severity: "mild" };
-  }
-  /**
-   * Get escalating recovery action based on loop severity.
-   */
-  getRecoveryAction(severity) {
-    switch (severity) {
-      case "mild":
-        return { action: "press", key: "Escape", reason: "Close any overlay" };
-      case "moderate":
-        return { action: "back", reason: "Navigate back to previous page" };
-      case "severe":
-        return { action: "navigate_home", reason: "Return to feed - page is stuck" };
-    }
   }
   /**
    * Human-like delay with session variance.
@@ -47988,6 +48198,10 @@ var InstagramScraper = class {
     const delay = min2 + Math.random() * (max2 - min2);
     return new Promise((resolve2) => setTimeout(resolve2, delay));
   }
+  extractPostIdFromUrl(url) {
+    const match = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+    return match ? match[2] : null;
+  }
   // =========================================================================
   // HUMAN-LIKE INTERACTION METHODS
   // =========================================================================
@@ -48138,6 +48352,7 @@ var InstagramScraper = class {
     const stagnationEvents = [];
     let consecutiveLoopWarnings = 0;
     let lastCaptureAttempt;
+    let lastCaptureAttemptUrl = "";
     let lastScrollResult;
     const engagementState = {
       level: "feed",
@@ -48165,18 +48380,22 @@ var InstagramScraper = class {
       let loopWarning = void 0;
       if (loopStatus.inLoop) {
         consecutiveLoopWarnings++;
-        const recovery = this.navigationExecutor.getRecoveryAction(loopStatus.severity);
         loopWarning = {
           severity: loopStatus.severity,
-          reason: recovery.reason,
+          reason: loopStatus.severity,
           consecutiveWarnings: consecutiveLoopWarnings
         };
-        console.log(`  \u26A0\uFE0F Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity}): ${recovery.reason}`);
-        this.screenshotCollector.appendLog(`  \u26A0\uFE0F Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity}): ${recovery.reason}`);
+        console.log(`  \u26A0\uFE0F Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity})`);
+        this.screenshotCollector.appendLog(`  \u26A0\uFE0F Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity})`);
       } else {
         consecutiveLoopWarnings = 0;
       }
       const currentUrl = this.page.url();
+      const currentPostId = this.extractPostIdFromUrl(currentUrl);
+      const lastPostId = this.extractPostIdFromUrl(lastCaptureAttemptUrl);
+      if (lastCaptureAttempt && currentPostId !== lastPostId) {
+        lastCaptureAttempt = void 0;
+      }
       this.screenshotCollector.appendLog(`--- url: ${currentUrl} | phase: ${currentPhase} | captures: ${this.screenshotCollector.getPhotoCount()}`);
       const elements = await this.navigator.getNavigationElements();
       const treeSummary = await this.navigator.buildTreeSummaryForLLM();
@@ -48225,7 +48444,7 @@ var InstagramScraper = class {
         elementFingerprint: elements.slice(0, 25).map((e) => `${e.role}:${e.name?.slice(0, 30)}`).join("|"),
         // Cross-session memory
         sessionMemoryDigest,
-        // Loop warning (LLM decides recovery, auto-recovery only as last resort)
+        // Loop warning (LLM decides recovery)
         loopWarning,
         // Last capture attempt feedback
         lastCaptureAttempt,
@@ -48359,36 +48578,42 @@ var InstagramScraper = class {
           console.log(`  \u2705 Action succeeded (${result.actionTaken})`);
           this.screenshotCollector.appendLog(`  \u2705 ${result.actionTaken}`);
         }
-        const currentUrl2 = result.resultingUrl || "";
-        const isPostView = currentUrl2.includes("/p/") || currentUrl2.includes("/reel/");
-        const isStoryView = currentUrl2.includes("/stories/");
         const isCaptureAction = decision.capture?.shouldCapture || decision.strategic?.captureNow;
-        if (isPostView || isStoryView || isCaptureAction) {
+        if (isCaptureAction) {
           totalPostsSeen++;
-          const postId = this.extractPostIdFromUrl(currentUrl2) || `action-${actionCount}`;
-          uniquePosts.add(postId);
+          const fingerprint = await this.navigator.getPostFingerprint();
+          const postKey = fingerprint?.hash || `action-${actionCount}`;
+          uniquePosts.add(postKey);
         }
-        const postActionUrl = result.resultingUrl || this.page.url();
-        if (postActionUrl.includes("/stories/")) {
+        if (currentPhase === "stories") {
           storiesWatched++;
           phaseItemsCollected++;
         }
-        const shouldCapture = decision.capture?.shouldCapture || decision.strategic?.captureNow;
+        const shouldCapture = decision.action === "capture" || decision.capture?.shouldCapture || decision.strategic?.captureNow;
         if (shouldCapture) {
-          await this.humanDelay(500, 800);
+          if (decision.action === "click") {
+            await this.page.waitForLoadState("networkidle").catch(() => {
+            });
+            await this.humanDelay(800, 1200);
+          } else {
+            await this.humanDelay(500, 800);
+          }
           let source = "feed";
-          if (postActionUrl.includes("/stories/")) {
+          if (currentPhase === "stories") {
             source = "story";
-          } else if (postActionUrl.includes("/explore") || postActionUrl.includes("search")) {
+          } else if (currentPhase === "search") {
             source = "search";
           }
           if (engagementState.carouselState && engagementState.carouselState.totalSlides > 1) {
             source = "carousel";
           }
-          const captureReason = decision.capture?.reason || decision.strategic?.reason || "LLM strategic capture";
+          const captureReason = (decision.action === "capture" ? decision.params.reason : void 0) || decision.capture?.reason || decision.strategic?.reason || "LLM strategic capture";
+          const fp = await this.navigator.getPostFingerprint();
+          const fpHash = fp?.hash;
           let captured = false;
-          if (decision.capture?.targetId !== void 0) {
-            const targetElement = elements.find((e) => e.id === decision.capture.targetId);
+          const captureTargetId = decision.action === "capture" ? decision.params.targetId : decision.capture?.targetId;
+          if (captureTargetId !== void 0) {
+            const targetElement = elements.find((e) => e.id === captureTargetId);
             let freshBox = null;
             if (targetElement?.backendNodeId) {
               freshBox = await this.navigator.refetchBoundingBox(targetElement.backendNodeId);
@@ -48405,11 +48630,12 @@ var InstagramScraper = class {
               } else {
                 const cap = await this.screenshotCollector.captureCurrentPost(
                   source,
-                  context.currentGoal.target
+                  context.currentGoal.target,
+                  fpHash
                 );
                 if (cap) {
                   captured = true;
-                  console.log(`  \u{1F4F8} Capture (full viewport, expanded from small targetId=${decision.capture.targetId}): ${captureReason}`);
+                  console.log(`  \u{1F4F8} Capture (full viewport, expanded from small targetId=${captureTargetId}): ${captureReason}`);
                 }
                 captureBox = null;
               }
@@ -48419,23 +48645,25 @@ var InstagramScraper = class {
                 captureBox,
                 source,
                 context.currentGoal.target,
-                captureReason
+                captureReason,
+                fpHash
               );
               if (cap) {
                 captured = true;
-                console.log(`  \u{1F4F8} Capture (targetId=${decision.capture.targetId}${freshBox ? "" : ", stale bounds"}): ${captureReason}`);
+                console.log(`  \u{1F4F8} Capture (targetId=${captureTargetId}${freshBox ? "" : ", stale bounds"}): ${captureReason}`);
               }
             } else if (offViewport) {
-              console.warn(`  \u26A0\uFE0F capture.targetId=${decision.capture.targetId} is off-viewport (y=${captureBox.y.toFixed(0)}), skipping`);
+              console.warn(`  \u26A0\uFE0F capture targetId=${captureTargetId} is off-viewport (y=${captureBox.y.toFixed(0)}), skipping`);
             } else if (!captured) {
-              console.warn(`  \u26A0\uFE0F capture.targetId=${decision.capture.targetId} not found, falling back`);
+              console.warn(`  \u26A0\uFE0F capture targetId=${captureTargetId} not found, falling back`);
               const postBounds = await this.navigator.findPostContentBounds();
               if (postBounds) {
                 const cap = await this.screenshotCollector.captureFocusedElement(
                   postBounds,
                   source,
                   context.currentGoal.target,
-                  captureReason
+                  captureReason,
+                  fpHash
                 );
                 if (cap) {
                   captured = true;
@@ -48444,7 +48672,8 @@ var InstagramScraper = class {
               } else {
                 const cap = await this.screenshotCollector.captureCurrentPost(
                   source,
-                  context.currentGoal.target
+                  context.currentGoal.target,
+                  fpHash
                 );
                 if (cap) {
                   captured = true;
@@ -48455,7 +48684,8 @@ var InstagramScraper = class {
           } else if (decision.strategic?.captureNow) {
             const cap = await this.screenshotCollector.captureCurrentPost(
               source,
-              context.currentGoal.target
+              context.currentGoal.target,
+              fpHash
             );
             if (cap) {
               captured = true;
@@ -48469,7 +48699,8 @@ var InstagramScraper = class {
                 captureBounds,
                 source,
                 context.currentGoal.target,
-                captureReason
+                captureReason,
+                fpHash
               );
               if (cap) {
                 captured = true;
@@ -48482,8 +48713,18 @@ var InstagramScraper = class {
             phaseItemsCollected++;
             this.screenshotCollector.appendLog(`  \u{1F4F8} **Capture #${postsCollected}** (${source}) \u2014 ${captureReason}`);
             lastCaptureAttempt = { succeeded: true };
+            lastCaptureAttemptUrl = this.page.url();
+            console.log(`[CAPTURE-OK] #${postsCollected} source=${source} fp=${fpHash?.slice(0, 20) || "null"} url=${this.page.url()}`);
           } else {
-            lastCaptureAttempt = { succeeded: false, reason: "filtered as duplicate" };
+            const currentPostId2 = this.extractPostIdFromUrl(this.page.url());
+            const lastPostId2 = this.extractPostIdFromUrl(lastCaptureAttemptUrl);
+            if (lastCaptureAttempt?.succeeded && currentPostId2 && currentPostId2 === lastPostId2) {
+              console.log(`[CAPTURE-KEPT-SUCCESS] same post ${currentPostId2}, not overwriting success with failure`);
+            } else {
+              lastCaptureAttempt = { succeeded: false, reason: "filtered as duplicate" };
+              lastCaptureAttemptUrl = this.page.url();
+              console.log(`[CAPTURE-FAILED] source=${source} fp=${fpHash?.slice(0, 20) || "null"} url=${this.page.url()} reason=see [CAPTURE-REJECT] above`);
+            }
           }
         }
         if (decision.strategic?.lingerDuration) {
@@ -48519,59 +48760,6 @@ var InstagramScraper = class {
         this.screenshotCollector.appendLog(`  \u274C FAILED: ${result.errorMessage}`);
       }
       actionCount++;
-      if (consecutiveLoopWarnings >= 3) {
-        const recovery = this.navigationExecutor.getRecoveryAction(loopStatus.severity);
-        console.log(`  \u{1F6A8} Auto-recovery (LLM failed to recover after ${consecutiveLoopWarnings} warnings): ${recovery.reason}`);
-        this.screenshotCollector.appendLog(`  \u{1F6A8} **Auto-recovery** after ${consecutiveLoopWarnings} warnings: ${recovery.reason}`);
-        const scrollYBefore = await this.scroll.getScrollPosition();
-        if (recovery.action === "press" && recovery.key) {
-          await this.page.keyboard.press(recovery.key);
-        } else if (recovery.action === "back") {
-          const recoveryUrl = this.navigator.getPageUrl();
-          const isOnFeedRoot = recoveryUrl === "https://www.instagram.com/" || recoveryUrl.startsWith("https://www.instagram.com/?");
-          if (isOnFeedRoot) {
-            console.log(`  \u{1F504} On feed root \u2014 scrolling instead of back() to stay on Instagram`);
-            await this.scroll.scroll({ baseDistance: 600, variability: 0.3, readingPauseMs: [300, 600] });
-          } else {
-            await this.page.goBack({ waitUntil: "domcontentloaded", timeout: 5e3 }).catch(() => {
-            });
-            await this.page.waitForLoadState("networkidle", { timeout: 3e3 }).catch(() => {
-            });
-            await this.humanDelay(800, 1500);
-            this.navigator.invalidateTreeCache();
-          }
-        } else if (recovery.action === "navigate_home") {
-          let navigated = false;
-          try {
-            const navElements = await this.navigator.getNavigationElements();
-            const homeLink = navElements.find(
-              (e) => e.role === "link" && (e.name === "Home" || e.name === "Instagram" || e.name.toLowerCase().includes("home"))
-            );
-            if (homeLink?.boundingBox) {
-              console.log(`  \u{1F3E0} Clicking Home link (id:${homeLink.id}, "${homeLink.name}") instead of page reload`);
-              await this.ghost.clickElement(homeLink.boundingBox);
-              await this.humanDelay(1500, 2500);
-              navigated = true;
-            }
-          } catch (e) {
-            console.warn(`  \u26A0\uFE0F Could not find Home link via accessibility tree`);
-          }
-          if (!navigated) {
-            console.log(`  \u{1F310} Home link not found, falling back to page.goto()`);
-            await this.page.goto("https://www.instagram.com/", { waitUntil: "domcontentloaded", timeout: 1e4 }).catch(() => {
-            });
-          }
-        }
-        await this.humanDelay(1e3, 2e3);
-        consecutiveLoopWarnings = 0;
-        const scrollYAfter = await this.scroll.getScrollPosition();
-        stagnationEvents.push({
-          scrollY: scrollYBefore,
-          phase: currentPhase,
-          recoveryAction: recovery.action,
-          recoveredSuccessfully: scrollYAfter !== scrollYBefore || recovery.action === "navigate_home"
-        });
-      }
       if (!decision.strategic?.lingerDuration) {
         const [minDelay, maxDelay] = config.actionDelayMs;
         await this.humanDelay(minDelay / 2, maxDelay / 2);
@@ -48637,16 +48825,8 @@ var InstagramScraper = class {
     return "low";
   }
   /**
-   * Extract post ID from a URL string.
-   * Matches instagram.com/p/{ID}/ or /reel/{ID}/ patterns.
-   */
-  extractPostIdFromUrl(url) {
-    const match = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-    return match ? match[2] : null;
-  }
-  /**
    * Get the navigation goal for a given phase.
-   * Returns a generic goal — the LLM determines context from URL + tree + screenshot.
+   * Returns a generic goal — the LLM determines context from tree + screenshot.
    */
   getGoalForPhase(phase, userInterests, interestsSearched) {
     const unsearched = userInterests.filter((i) => !interestsSearched.includes(i));
@@ -48782,18 +48962,14 @@ Location: ${config.location || "Not specified"}
 Date: ${dayName}, ${dateStr}
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-III. AD & SPONSORED CONTENT DETECTION (CRITICAL)
+III. AD & SPONSORED CONTENT FILTERING
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-COMPLETELY SKIP and do NOT include in the digest:
-- Posts with "Sponsored" label visible
-- Posts with "Paid partnership" label
-- Ads (product promotions with "Shop Now", "Learn More" buttons)
-- Brand accounts pushing products with pricing
-- Influencer sponsored content (typically has disclaimers)
-- Screenshots that are mostly blank, loading, or unclear
+Skip ads and sponsored posts UNLESS they are relevant to the user's interests (${interestsList}).
+Skip screenshots that are mostly blank, loading, or unclear.
 
 INCLUDE (even if commercial):
+- Content from brands or organizations relevant to user interests
 - News organization updates (even with subscription CTAs)
 - Personal accounts sharing genuine experiences
 - Entertainment/sports content (games, shows, events)
@@ -49019,7 +49195,7 @@ var ImageTagger = class {
       console.log(`\u{1F3F7}\uFE0F No tags available, using first ${count} captures`);
       return captures.slice(0, count);
     }
-    const validTags = tags.filter((t2) => !t2.isAd && !t2.isBlank);
+    const validTags = tags.filter((t2) => !t2.isBlank);
     if (validTags.length === 0) {
       console.warn("\u{1F3F7}\uFE0F All images filtered (ads/blank), using original captures");
       return captures.slice(0, count);

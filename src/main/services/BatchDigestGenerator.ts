@@ -190,18 +190,14 @@ Location: ${config.location || 'Not specified'}
 Date: ${dayName}, ${dateStr}
 
 ═══════════════════════════════════════════════════════════════════════════════
-III. AD & SPONSORED CONTENT DETECTION (CRITICAL)
+III. AD & SPONSORED CONTENT FILTERING
 ═══════════════════════════════════════════════════════════════════════════════
 
-COMPLETELY SKIP and do NOT include in the digest:
-- Posts with "Sponsored" label visible
-- Posts with "Paid partnership" label
-- Ads (product promotions with "Shop Now", "Learn More" buttons)
-- Brand accounts pushing products with pricing
-- Influencer sponsored content (typically has disclaimers)
-- Screenshots that are mostly blank, loading, or unclear
+Skip ads and sponsored posts UNLESS they are relevant to the user's interests (${interestsList}).
+Skip screenshots that are mostly blank, loading, or unclear.
 
 INCLUDE (even if commercial):
+- Content from brands or organizations relevant to user interests
 - News organization updates (even with subscription CTAs)
 - Personal accounts sharing genuine experiences
 - Entertainment/sports content (games, shows, events)

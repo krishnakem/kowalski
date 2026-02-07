@@ -158,8 +158,8 @@ export class ImageTagger {
             return captures.slice(0, count);
         }
 
-        // Filter out ads and blank images
-        const validTags = tags.filter(t => !t.isAd && !t.isBlank);
+        // Filter out blank images (ads remain — relevance scoring handles prioritization)
+        const validTags = tags.filter(t => !t.isBlank);
 
         if (validTags.length === 0) {
             console.warn('🏷️ All images filtered (ads/blank), using original captures');

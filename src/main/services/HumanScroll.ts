@@ -121,7 +121,7 @@ export class HumanScroll {
             baseDistance = Math.round(vh * 0.4),
             variability = 0.3,
             microAdjustProb = 0.25,
-            readingPauseMs = [2000, 5000]
+            readingPauseMs = [400, 800]
         } = config;
 
         // 1. Calculate actual scroll distance with variation
@@ -148,7 +148,7 @@ export class HumanScroll {
      *
      * Uses cubic ease-out: fast start, gradual slow down.
      */
-    private async smoothScrollWithEasing(distance: number): Promise<void> {
+    private async smoothScrollWithEasing(distance: number, axis: 'y' | 'x' = 'y'): Promise<void> {
         const steps = 15 + Math.floor(Math.random() * 10);  // 15-25 steps
         const direction = distance > 0 ? 1 : -1;
         const absDistance = Math.abs(distance);
@@ -164,7 +164,11 @@ export class HumanScroll {
             const stepDistance = (targetScrolled - scrolled) * direction;
 
             // Use wheel event (more human-like than scrollBy)
-            await this.page.mouse.wheel(0, stepDistance);
+            if (axis === 'x') {
+                await this.page.mouse.wheel(stepDistance, 0);
+            } else {
+                await this.page.mouse.wheel(0, stepDistance);
+            }
             scrolled = targetScrolled;
 
             // Variable delay between wheel events (human inconsistency)
@@ -404,6 +408,14 @@ export class HumanScroll {
     }
 
     /**
+     * Get current horizontal scroll position via CDP (undetectable).
+     */
+    async getScrollPositionX(): Promise<number> {
+        const scrollX = await this.cdpEvaluate<number>('window.scrollX');
+        return scrollX ?? 0;
+    }
+
+    /**
      * Check if we're near the bottom of the page via CDP (undetectable).
      * Useful for detecting "infinite scroll loaded more content".
      */
@@ -451,7 +463,7 @@ export class HumanScroll {
             baseDistance = Math.round(vh * 0.4 * this.sessionTimingMultiplier),
             variability = 0.3,
             microAdjustProb = 0.25,
-            readingPauseMs = [2000 * this.sessionTimingMultiplier, 4000 * this.sessionTimingMultiplier]
+            readingPauseMs = [400 * this.sessionTimingMultiplier, 800 * this.sessionTimingMultiplier]
         } = config;
 
         // 1. Calculate actual scroll distance with variation
@@ -483,6 +495,63 @@ export class HumanScroll {
         }
 
         // 4. Reading pause
+        const pauseDuration = this.randomInRange(readingPauseMs[0], readingPauseMs[1]);
+        await new Promise(resolve => setTimeout(resolve, pauseDuration));
+
+        return {
+            contentType: 'mixed',
+            scrollDistance: targetDistance,
+            actualDelta,
+            scrollFailed,
+            pauseDurationMs: pauseDuration
+        };
+    }
+
+    /**
+     * Horizontal scroll with human-like behavior: easing, micro-adjustments, reading pause.
+     * Same physics pipeline as vertical scrollWithIntent but on the X axis.
+     */
+    async scrollHorizontalWithIntent(
+        config: Partial<ScrollConfig> = {}
+    ): Promise<{ contentType: ContentType; scrollDistance: number; actualDelta: number; scrollFailed: boolean; pauseDurationMs: number }> {
+        const vw = await this.cdpEvaluate<number>('window.innerWidth') ?? 1080;
+
+        const {
+            baseDistance = Math.round(vw * 0.4 * this.sessionTimingMultiplier),
+            variability = 0.3,
+            microAdjustProb = 0.25,
+            readingPauseMs = [400 * this.sessionTimingMultiplier, 800 * this.sessionTimingMultiplier]
+        } = config;
+
+        const variation = 1 + (Math.random() - 0.5) * 2 * variability;
+        const targetDistance = Math.round(baseDistance * variation);
+
+        const scrollXBefore = await this.getScrollPositionX();
+
+        await this.smoothScrollWithEasing(targetDistance, 'x');
+
+        const scrollXAfter = await this.getScrollPositionX();
+        const actualDelta = scrollXAfter - scrollXBefore;
+
+        console.log(`  📜 H-SCROLL: Target=${targetDistance}px, Actual=${actualDelta}px`);
+
+        let scrollFailed = false;
+        if (actualDelta === 0 && Math.abs(targetDistance) > 50) {
+            console.log('  ⚠️ Horizontal Scroll Failed');
+            scrollFailed = true;
+        }
+
+        // Micro-adjust on horizontal too (25% chance)
+        if (Math.random() < microAdjustProb) {
+            const overshoot = vw * 0.05 + Math.random() * vw * 0.1;
+            const dir = targetDistance > 0 ? 1 : -1;
+            await this.page.mouse.wheel(overshoot * dir, 0);
+            await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 300));
+            const correction = overshoot * (0.8 + Math.random() * 0.4);
+            await this.page.mouse.wheel(-correction * dir, 0);
+            await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
+        }
+
         const pauseDuration = this.randomInRange(readingPauseMs[0], readingPauseMs[1]);
         await new Promise(resolve => setTimeout(resolve, pauseDuration));
 

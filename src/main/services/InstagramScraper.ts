@@ -39,6 +39,7 @@ import {
     EngagementLevel,
     PressParams,
     ClickParams,
+    CaptureParams,
 } from '../../types/navigation.js';
 import { Jimp } from 'jimp';
 import { NavigationLLM } from './NavigationLLM.js';
@@ -133,6 +134,11 @@ export class InstagramScraper {
     private humanDelay(min: number, max: number): Promise<void> {
         const delay = min + Math.random() * (max - min);
         return new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    private extractPostIdFromUrl(url: string): string | null {
+        const match = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+        return match ? match[2] : null;
     }
 
     // =========================================================================
@@ -343,11 +349,12 @@ export class InstagramScraper {
         // Stagnation events (for cross-session memory)
         const stagnationEvents: StagnationEvent[] = [];
 
-        // Loop warning tracking (LLM gets warned before auto-recovery kicks in)
+        // Loop warning tracking (injected into LLM context as neutral observation)
         let consecutiveLoopWarnings = 0;
 
         // Capture attempt feedback for LLM (so it knows when captures are being rejected)
         let lastCaptureAttempt: NavigationContext['lastCaptureAttempt'];
+        let lastCaptureAttemptUrl: string = ''; // URL where the rejection happened
 
         // Scroll feedback for LLM (content-aware scroll results)
         let lastScrollResult: NavigationContext['lastScrollResult'];
@@ -384,19 +391,27 @@ export class InstagramScraper {
             let loopWarning: NavigationContext['loopWarning'] = undefined;
             if (loopStatus.inLoop) {
                 consecutiveLoopWarnings++;
-                const recovery = this.navigationExecutor.getRecoveryAction(loopStatus.severity);
                 loopWarning = {
                     severity: loopStatus.severity,
-                    reason: recovery.reason,
+                    reason: loopStatus.severity,
                     consecutiveWarnings: consecutiveLoopWarnings
                 };
-                console.log(`  ⚠️ Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity}): ${recovery.reason}`);
-                this.screenshotCollector.appendLog(`  ⚠️ Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity}): ${recovery.reason}`);
+                console.log(`  ⚠️ Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity})`);
+                this.screenshotCollector.appendLog(`  ⚠️ Loop warning #${consecutiveLoopWarnings} (${loopStatus.severity})`);
             } else {
                 consecutiveLoopWarnings = 0;
             }
 
             const currentUrl = this.page.url();
+
+            // Clear stale capture feedback when navigating to a DIFFERENT post
+            // URL variants (/p/X/ vs /user/p/X/) share the same post ID — don't clear for variants
+            const currentPostId = this.extractPostIdFromUrl(currentUrl);
+            const lastPostId = this.extractPostIdFromUrl(lastCaptureAttemptUrl);
+            if (lastCaptureAttempt && currentPostId !== lastPostId) {
+                lastCaptureAttempt = undefined;
+            }
+
             this.screenshotCollector.appendLog(`--- url: ${currentUrl} | phase: ${currentPhase} | captures: ${this.screenshotCollector.getPhotoCount()}`);
             const elements = await this.navigator.getNavigationElements();
 
@@ -457,7 +472,7 @@ export class InstagramScraper {
                 // Cross-session memory
                 sessionMemoryDigest,
 
-                // Loop warning (LLM decides recovery, auto-recovery only as last resort)
+                // Loop warning (LLM decides recovery)
                 loopWarning,
 
                 // Last capture attempt feedback
@@ -628,21 +643,18 @@ export class InstagramScraper {
                     this.screenshotCollector.appendLog(`  ✅ ${result.actionTaken}`);
                 }
 
-                // Track content seen - only count actual post/story views, not every action
-                const currentUrl = result.resultingUrl || '';
-                const isPostView = currentUrl.includes('/p/') || currentUrl.includes('/reel/');
-                const isStoryView = currentUrl.includes('/stories/');
+                // Track content seen — count when LLM signals capture intent
                 const isCaptureAction = decision.capture?.shouldCapture || decision.strategic?.captureNow;
 
-                if (isPostView || isStoryView || isCaptureAction) {
+                if (isCaptureAction) {
                     totalPostsSeen++;
-                    const postId = this.extractPostIdFromUrl(currentUrl) || `action-${actionCount}`;
-                    uniquePosts.add(postId);
+                    const fingerprint = await this.navigator.getPostFingerprint();
+                    const postKey = fingerprint?.hash || `action-${actionCount}`;
+                    uniquePosts.add(postKey);
                 }
 
-                // Track story watching (metric bookkeeping via URL)
-                const postActionUrl = result.resultingUrl || this.page.url();
-                if (postActionUrl.includes('/stories/')) {
+                // Track story watching via LLM phase
+                if (currentPhase === 'stories') {
                     storiesWatched++;
                     phaseItemsCollected++;
                 }
@@ -651,34 +663,53 @@ export class InstagramScraper {
                 // 1. capture.targetId → crop to specific element the LLM chose
                 // 2. strategic.captureNow (no targetId) → full viewport
                 // 3. capture.shouldCapture (no targetId) → fallback to nearest article
-                const shouldCapture = decision.capture?.shouldCapture || decision.strategic?.captureNow;
+                const shouldCapture = decision.action === 'capture'
+                    || decision.capture?.shouldCapture
+                    || decision.strategic?.captureNow;
 
                 if (shouldCapture) {
-                    await this.humanDelay(500, 800); // Wait for content to stabilize
+                    // After a click with capture intent, the SPA needs extra time
+                    // to hydrate content. Wait for network idle + delay.
+                    if (decision.action === 'click') {
+                        await this.page.waitForLoadState('networkidle').catch(() => {});
+                        await this.humanDelay(800, 1200);
+                    } else {
+                        await this.humanDelay(500, 800); // Wait for content to stabilize
+                    }
 
-                    // Determine capture source from URL (infrastructure for dedup)
+                    // Determine capture source from LLM phase
                     let source: 'feed' | 'story' | 'search' | 'profile' | 'carousel' = 'feed';
-                    if (postActionUrl.includes('/stories/')) {
+                    if (currentPhase === 'stories') {
                         source = 'story';
-                    } else if (postActionUrl.includes('/explore') || postActionUrl.includes('search')) {
+                    } else if (currentPhase === 'search') {
                         source = 'search';
                     }
 
                     // Carousel: when in a post modal with multi-slide carousel detected,
-                    // use 'carousel' source to bypass postId dedup (all slides share same URL)
+                    // use 'carousel' source to bypass fingerprint dedup (all slides share same fingerprint)
                     if (engagementState.carouselState && engagementState.carouselState.totalSlides > 1) {
                         source = 'carousel';
                     }
 
-                    const captureReason = decision.capture?.reason ||
-                                         decision.strategic?.reason ||
-                                         'LLM strategic capture';
+                    const captureReason = (decision.action === 'capture' ? (decision.params as CaptureParams).reason : undefined)
+                                         || decision.capture?.reason
+                                         || decision.strategic?.reason
+                                         || 'LLM strategic capture';
+
+                    // Get tree-based fingerprint for dedup (null for stories/grids → falls through to hash dedup)
+                    const fp = await this.navigator.getPostFingerprint();
+                    const fpHash = fp?.hash;
 
                     let captured = false;
 
-                    // PRIORITY 1: LLM specified targetId → crop to that element (or its container)
-                    if (decision.capture?.targetId !== undefined) {
-                        const targetElement = elements.find(e => e.id === decision.capture!.targetId);
+                    // Resolve targetId: first-class capture params take priority, then legacy side-channel
+                    const captureTargetId = decision.action === 'capture'
+                        ? (decision.params as CaptureParams).targetId
+                        : decision.capture?.targetId;
+
+                    // PRIORITY 1: targetId specified → crop to that element (or its container)
+                    if (captureTargetId !== undefined) {
+                        const targetElement = elements.find(e => e.id === captureTargetId);
 
                         // Re-fetch bounding box — the action may have shifted the viewport
                         let freshBox: BoundingBox | null = null;
@@ -709,11 +740,11 @@ export class InstagramScraper {
                             } else {
                                 // No article found — use full viewport capture instead
                                 const cap = await this.screenshotCollector.captureCurrentPost(
-                                    source, context.currentGoal.target
+                                    source, context.currentGoal.target, fpHash
                                 );
                                 if (cap) {
                                     captured = true;
-                                    console.log(`  📸 Capture (full viewport, expanded from small targetId=${decision.capture.targetId}): ${captureReason}`);
+                                    console.log(`  📸 Capture (full viewport, expanded from small targetId=${captureTargetId}): ${captureReason}`);
                                 }
                                 captureBox = null; // Skip the cropped capture below
                             }
@@ -721,21 +752,21 @@ export class InstagramScraper {
 
                         if (captureBox && !offViewport) {
                             const cap = await this.screenshotCollector.captureFocusedElement(
-                                captureBox, source, context.currentGoal.target, captureReason
+                                captureBox, source, context.currentGoal.target, captureReason, fpHash
                             );
                             if (cap) {
                                 captured = true;
-                                console.log(`  📸 Capture (targetId=${decision.capture.targetId}${freshBox ? '' : ', stale bounds'}): ${captureReason}`);
+                                console.log(`  📸 Capture (targetId=${captureTargetId}${freshBox ? '' : ', stale bounds'}): ${captureReason}`);
                             }
                         } else if (offViewport) {
-                            console.warn(`  ⚠️ capture.targetId=${decision.capture.targetId} is off-viewport (y=${captureBox!.y.toFixed(0)}), skipping`);
+                            console.warn(`  ⚠️ capture targetId=${captureTargetId} is off-viewport (y=${captureBox!.y.toFixed(0)}), skipping`);
                         } else if (!captured) {
                             // Element not found — try article bounds or full viewport
-                            console.warn(`  ⚠️ capture.targetId=${decision.capture.targetId} not found, falling back`);
+                            console.warn(`  ⚠️ capture targetId=${captureTargetId} not found, falling back`);
                             const postBounds = await this.navigator.findPostContentBounds();
                             if (postBounds) {
                                 const cap = await this.screenshotCollector.captureFocusedElement(
-                                    postBounds, source, context.currentGoal.target, captureReason
+                                    postBounds, source, context.currentGoal.target, captureReason, fpHash
                                 );
                                 if (cap) {
                                     captured = true;
@@ -743,7 +774,7 @@ export class InstagramScraper {
                                 }
                             } else {
                                 const cap = await this.screenshotCollector.captureCurrentPost(
-                                    source, context.currentGoal.target
+                                    source, context.currentGoal.target, fpHash
                                 );
                                 if (cap) {
                                     captured = true;
@@ -756,7 +787,8 @@ export class InstagramScraper {
                     else if (decision.strategic?.captureNow) {
                         const cap = await this.screenshotCollector.captureCurrentPost(
                             source,
-                            context.currentGoal.target
+                            context.currentGoal.target,
+                            fpHash
                         );
                         if (cap) {
                             captured = true;
@@ -769,7 +801,7 @@ export class InstagramScraper {
                         const captureBounds = postBounds || result.focusedElement?.boundingBox;
                         if (captureBounds) {
                             const cap = await this.screenshotCollector.captureFocusedElement(
-                                captureBounds, source, context.currentGoal.target, captureReason
+                                captureBounds, source, context.currentGoal.target, captureReason, fpHash
                             );
                             if (cap) {
                                 captured = true;
@@ -783,8 +815,21 @@ export class InstagramScraper {
                         phaseItemsCollected++;
                         this.screenshotCollector.appendLog(`  📸 **Capture #${postsCollected}** (${source}) — ${captureReason}`);
                         lastCaptureAttempt = { succeeded: true };
+                        lastCaptureAttemptUrl = this.page.url();
+                        console.log(`[CAPTURE-OK] #${postsCollected} source=${source} fp=${fpHash?.slice(0, 20) || 'null'} url=${this.page.url()}`);
                     } else {
-                        lastCaptureAttempt = { succeeded: false, reason: 'filtered as duplicate' };
+                        // Don't overwrite success with failure for the same post
+                        // URL variants like /p/X/ and /user/p/X/ share the same post ID
+                        const currentPostId = this.extractPostIdFromUrl(this.page.url());
+                        const lastPostId = this.extractPostIdFromUrl(lastCaptureAttemptUrl);
+                        if (lastCaptureAttempt?.succeeded && currentPostId && currentPostId === lastPostId) {
+                            // Keep success — LLM needs to know this post is already captured
+                            console.log(`[CAPTURE-KEPT-SUCCESS] same post ${currentPostId}, not overwriting success with failure`);
+                        } else {
+                            lastCaptureAttempt = { succeeded: false, reason: 'filtered as duplicate' };
+                            lastCaptureAttemptUrl = this.page.url();
+                            console.log(`[CAPTURE-FAILED] source=${source} fp=${fpHash?.slice(0, 20) || 'null'} url=${this.page.url()} reason=see [CAPTURE-REJECT] above`);
+                        }
                     }
                 }
 
@@ -829,67 +874,6 @@ export class InstagramScraper {
             }
 
             actionCount++;
-
-            // Last-resort auto-recovery: only if LLM failed to self-recover after 3+ warnings
-            if (consecutiveLoopWarnings >= 3) {
-                const recovery = this.navigationExecutor.getRecoveryAction(loopStatus.severity);
-                console.log(`  🚨 Auto-recovery (LLM failed to recover after ${consecutiveLoopWarnings} warnings): ${recovery.reason}`);
-                this.screenshotCollector.appendLog(`  🚨 **Auto-recovery** after ${consecutiveLoopWarnings} warnings: ${recovery.reason}`);
-
-                const scrollYBefore = await this.scroll.getScrollPosition();
-
-                if (recovery.action === 'press' && recovery.key) {
-                    await this.page.keyboard.press(recovery.key);
-                } else if (recovery.action === 'back') {
-                    // Safety: don't back() from the feed root — it navigates away from Instagram entirely
-                    const recoveryUrl = this.navigator.getPageUrl();
-                    const isOnFeedRoot = recoveryUrl === 'https://www.instagram.com/' || recoveryUrl.startsWith('https://www.instagram.com/?');
-                    if (isOnFeedRoot) {
-                        console.log(`  🔄 On feed root — scrolling instead of back() to stay on Instagram`);
-                        await this.scroll.scroll({ baseDistance: 600, variability: 0.3, readingPauseMs: [300, 600] });
-                    } else {
-                        await this.page.goBack({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
-                        // Wait for SPA re-hydration after back() — same settle logic as NavigationExecutor.executeBack()
-                        await this.page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
-                        await this.humanDelay(800, 1500);
-                        this.navigator.invalidateTreeCache();
-                    }
-                } else if (recovery.action === 'navigate_home') {
-                    // Try clicking the Home link dynamically via accessibility tree (no page reload)
-                    let navigated = false;
-                    try {
-                        const navElements = await this.navigator.getNavigationElements();
-                        const homeLink = navElements.find(e =>
-                            e.role === 'link' &&
-                            (e.name === 'Home' || e.name === 'Instagram' || e.name.toLowerCase().includes('home'))
-                        );
-                        if (homeLink?.boundingBox) {
-                            console.log(`  🏠 Clicking Home link (id:${homeLink.id}, "${homeLink.name}") instead of page reload`);
-                            await this.ghost.clickElement(homeLink.boundingBox);
-                            await this.humanDelay(1500, 2500);
-                            navigated = true;
-                        }
-                    } catch (e) {
-                        console.warn(`  ⚠️ Could not find Home link via accessibility tree`);
-                    }
-                    if (!navigated) {
-                        // Fallback to page.goto only if Home link not found
-                        console.log(`  🌐 Home link not found, falling back to page.goto()`);
-                        await this.page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
-                    }
-                }
-                await this.humanDelay(1000, 2000);
-                consecutiveLoopWarnings = 0;  // Reset after forced recovery
-
-                // Track stagnation event for cross-session memory
-                const scrollYAfter = await this.scroll.getScrollPosition();
-                stagnationEvents.push({
-                    scrollY: scrollYBefore,
-                    phase: currentPhase,
-                    recoveryAction: recovery.action,
-                    recoveredSuccessfully: scrollYAfter !== scrollYBefore || recovery.action === 'navigate_home'
-                });
-            }
 
             // Minimal delay between actions (LLM controls pacing via linger)
             // Only add small delay if no linger was executed
@@ -965,17 +949,8 @@ export class InstagramScraper {
     }
 
     /**
-     * Extract post ID from a URL string.
-     * Matches instagram.com/p/{ID}/ or /reel/{ID}/ patterns.
-     */
-    private extractPostIdFromUrl(url: string): string | null {
-        const match = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-        return match ? match[2] : null;
-    }
-
-    /**
      * Get the navigation goal for a given phase.
-     * Returns a generic goal — the LLM determines context from URL + tree + screenshot.
+     * Returns a generic goal — the LLM determines context from tree + screenshot.
      */
     private getGoalForPhase(
         phase: BrowsingPhase,

@@ -98,38 +98,56 @@ export class NavigationExecutor {
         elements: NavigationElement[]
     ): Promise<ExecutionResult> {
         const startTime = Date.now();
+        // Propagate rewrite note from validation (transient field set by validateDecision)
+        const rewriteNote: string | undefined = (decision as any)._rewriteNote;
 
         try {
+            let result: ExecutionResult;
             switch (decision.action) {
                 case 'click':
-                    return await this.executeClick(decision, elements, startTime);
+                    result = await this.executeClick(decision, elements, startTime);
+                    break;
                 case 'scroll':
-                    return await this.executeScroll(decision, startTime);
+                    result = await this.executeScroll(decision, startTime);
+                    break;
+                case 'capture':
+                    result = await this.executeCapture(decision, startTime);
+                    break;
                 case 'type':
-                    return await this.executeType(decision, startTime);
+                    result = await this.executeType(decision, startTime);
+                    break;
                 case 'press':
-                    return await this.executePress(decision, startTime);
+                    result = await this.executePress(decision, startTime);
+                    break;
                 case 'wait':
-                    return await this.executeWait(decision, startTime);
+                    result = await this.executeWait(decision, startTime);
+                    break;
                 case 'hover':
-                    return await this.executeHover(decision, elements, startTime);
+                    result = await this.executeHover(decision, elements, startTime);
+                    break;
                 case 'back':
-                    return await this.executeBack(decision, startTime);
+                    result = await this.executeBack(decision, startTime);
+                    break;
                 case 'clear':
-                    return await this.executeClear(decision, startTime);
+                    result = await this.executeClear(decision, startTime);
+                    break;
                 default:
-                    return this.failureResult(
+                    result = this.failureResult(
                         decision,
                         startTime,
                         `Unknown action: ${decision.action}`
                     );
             }
+            if (rewriteNote) result.rewriteNote = rewriteNote;
+            return result;
         } catch (error) {
-            return this.failureResult(
+            const result = this.failureResult(
                 decision,
                 startTime,
                 error instanceof Error ? error.message : String(error)
             );
+            if (rewriteNote) result.rewriteNote = rewriteNote;
+            return result;
         }
     }
 
@@ -182,8 +200,10 @@ export class NavigationExecutor {
         }
 
         // Retry once for link elements — Instagram SPA may not have hydrated event handlers yet
+        let autoRetried = false;
         if (verified === 'no_change_detected' && target.role === 'link') {
             console.log(`  🔄 Link click no_change_detected — retrying after hydration delay (id:${target.id} "${target.name}")`);
+            autoRetried = true;
             await this.humanDelay(1200, 1800);
             await this.ghost.clickElement(boundingBox);
 
@@ -202,16 +222,28 @@ export class NavigationExecutor {
             }
         }
 
+        // After URL-changing clicks (like Instagram logo → feed), wait for SPA hydration
+        // so the next click finds interactive elements. Same treatment as executeBack().
+        if (verified === 'url_changed') {
+            await this.page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
+            await this.humanDelay(800, 1200);
+            console.log(`  ⏳ Post-navigation hydration wait (url_changed)`);
+        }
+
         // Invalidate tree cache if click caused a state change (page structure is now different)
         if (verified !== 'no_change_detected') {
             this.navigator.invalidateTreeCache();
         }
 
         // Record action with state context and clicked element name
+        const retryNote = autoRetried
+            ? `Infrastructure auto-retried this link click after hydration delay. First click had no effect.`
+            : undefined;
         const record = this.recordAction(decision, true, undefined, {
             url: postClickUrl,
             verified,
-            clickedElementName: target.name
+            clickedElementName: target.name,
+            rewriteNote: retryNote
         });
 
         return {
@@ -239,19 +271,33 @@ export class NavigationExecutor {
     ): Promise<ExecutionResult> {
         const params = decision.params as ScrollParams;
 
-        // Horizontal scroll: unchanged (mouse wheel, no content-aware logic)
+        // Horizontal scroll: use HumanScroll for easing, micro-adjust, reading pause
         if (params.direction === 'left' || params.direction === 'right') {
-            const viewportHeight = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
+            const vw = await this.page.evaluate(() => window.innerWidth).catch(() => 1080);
             const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
-            const baseDistance = Math.round(viewportHeight * proportion);
-            const deltaX = params.direction === 'right' ? baseDistance : -baseDistance;
-            await this.page.mouse.wheel(deltaX, 0);
-            await this.humanDelay(300, 600);
+            const baseDistance = params.direction === 'right'
+                ? Math.round(vw * proportion)
+                : -Math.round(vw * proportion);
+
+            const intentResult = await this.scroll.scrollHorizontalWithIntent({ baseDistance });
+
+            const scrollResultData: ScrollResult = {
+                contentType: intentResult.contentType,
+                requestedDirection: params.direction,
+                requestedAmount: params.amount,
+                actualDeltaPx: intentResult.actualDelta,
+                scrollFailed: intentResult.scrollFailed,
+                pauseDurationMs: intentResult.pauseDurationMs,
+                newElementsAppeared: 0,
+                elementsDisappeared: 0,
+                newArticles: 0,
+            };
 
             const scrollYAfter = await this.scroll.getScrollPosition();
             this.recordAction(decision, true, undefined, {
                 scrollY: scrollYAfter,
                 url: this.page.url(),
+                scrollResult: scrollResultData
             });
 
             return {
@@ -260,6 +306,7 @@ export class NavigationExecutor {
                 params: params,
                 resultingUrl: this.page.url(),
                 durationMs: Date.now() - startTime,
+                scrollResult: scrollResultData
             };
         }
 
@@ -268,17 +315,22 @@ export class NavigationExecutor {
         // Pre-scroll element snapshot (reuses cached tree from earlier in loop iteration)
         const preSnapshot = await this.getQuickElementSnapshot();
 
-        // Build config overrides based on LLM amount hint
+        // Build config overrides based on LLM amount hint or pixelAmount
         const overrides: Partial<ScrollConfig> = {};
-        if (params.amount !== 'medium') {
+        if (params.pixelAmount !== undefined) {
+            // Exact pixel control — still goes through HumanScroll for easing
+            overrides.baseDistance = params.direction === 'up'
+                ? -Math.abs(params.pixelAmount)
+                : Math.abs(params.pixelAmount);
+        } else if (params.amount !== 'medium') {
             const vh = await this.page.evaluate(() => window.innerHeight).catch(() => 1920);
             const proportion = SCROLL_PROPORTIONS[params.amount] || SCROLL_PROPORTIONS.medium;
             overrides.baseDistance = Math.round(vh * proportion);
         }
-        // For 'medium', pass no overrides — scrollWithIntent picks distance from content density
+        // For 'medium' with no pixelAmount, pass no overrides — scrollWithIntent picks distance from content density
 
-        // Handle direction: negate baseDistance for upward scrolls
-        if (params.direction === 'up') {
+        // Handle direction: negate baseDistance for upward scrolls (only if not already handled by pixelAmount)
+        if (params.direction === 'up' && params.pixelAmount === undefined) {
             if (overrides.baseDistance) {
                 overrides.baseDistance = -overrides.baseDistance;
             } else {
@@ -300,6 +352,13 @@ export class NavigationExecutor {
         const meaningfulNew = newInteractive.filter(([, name]) => name.length > 0).length;
         const newArticles = Math.max(0, postSnapshot.articleCount - preSnapshot.articleCount);
 
+        // Record action with scroll position and scroll result for stagnation detection
+        const scrollYAfter = await this.scroll.getScrollPosition();
+
+        // Get page height info for LLM awareness
+        const viewportInfo = await this.scroll.getViewportInfo();
+        const isNearBottom = await this.scroll.isNearBottom();
+
         const scrollResultData: ScrollResult = {
             contentType: intentResult.contentType,
             requestedDirection: params.direction,
@@ -309,11 +368,11 @@ export class NavigationExecutor {
             pauseDurationMs: intentResult.pauseDurationMs,
             newElementsAppeared: meaningfulNew,
             elementsDisappeared: disappeared.length,
-            newArticles
+            newArticles,
+            pageHeightPx: viewportInfo.scrollHeight,
+            scrollPositionPx: scrollYAfter,
+            isNearBottom
         };
-
-        // Record action with scroll position and scroll result for stagnation detection
-        const scrollYAfter = await this.scroll.getScrollPosition();
         this.recordAction(decision, true, undefined, {
             scrollY: scrollYAfter,
             url: this.page.url(),
@@ -566,6 +625,24 @@ export class NavigationExecutor {
     }
 
     /**
+     * Execute a capture action.
+     * The actual screenshot logic lives in InstagramScraper.runNavigationLoop()
+     * which checks the action type after execution. The executor just records it.
+     */
+    private async executeCapture(
+        decision: NavigationDecision,
+        startTime: number
+    ): Promise<ExecutionResult> {
+        this.recordAction(decision, true);
+        return {
+            success: true,
+            actionTaken: 'capture',
+            params: decision.params,
+            durationMs: Date.now() - startTime,
+        };
+    }
+
+    /**
      * Create a failure result.
      */
     private failureResult(
@@ -592,15 +669,17 @@ export class NavigationExecutor {
         decision: NavigationDecision,
         success: boolean,
         errorMessage?: string,
-        stateContext?: { scrollY?: number; url?: string; verified?: ActionRecord['verified']; elementCount?: number; clickedElementName?: string; scrollResult?: ScrollResult }
+        stateContext?: { scrollY?: number; url?: string; verified?: ActionRecord['verified']; elementCount?: number; clickedElementName?: string; scrollResult?: ScrollResult; rewriteNote?: string }
     ): ActionRecord {
+        const rewriteNote = stateContext?.rewriteNote || (decision as any)._rewriteNote;
         const record: ActionRecord = {
             timestamp: Date.now(),
             action: decision.action,
             params: decision.params,
             success,
             errorMessage,
-            ...(stateContext || {})
+            ...(stateContext || {}),
+            ...(rewriteNote ? { rewriteNote } : {})
         };
 
         this.actionHistory.push(record);
@@ -662,20 +741,6 @@ export class NavigationExecutor {
         }
 
         return { inLoop: false, severity: 'mild' };
-    }
-
-    /**
-     * Get escalating recovery action based on loop severity.
-     */
-    getRecoveryAction(severity: 'mild' | 'moderate' | 'severe'): { action: string; key?: string; reason: string } {
-        switch (severity) {
-            case 'mild':
-                return { action: 'press', key: 'Escape', reason: 'Close any overlay' };
-            case 'moderate':
-                return { action: 'back', reason: 'Navigate back to previous page' };
-            case 'severe':
-                return { action: 'navigate_home', reason: 'Return to feed - page is stuck' };
-        }
     }
 
     /**

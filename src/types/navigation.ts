@@ -162,21 +162,6 @@ export interface EngagementState {
 // ============================================================================
 
 /**
- * Semantic hint for common Instagram UI elements (backup detection).
- * Primarily used for forbidden action detection (like, comment, etc.).
- * The LLM should discover element purposes from container context.
- */
-export type SemanticHint =
-    | 'like_button'
-    | 'comment_button'
-    | 'share_button'
-    | 'save_button'
-    | 'follow_button'
-    | 'search_input'
-    | 'close_button'
-    | 'unknown';
-
-/**
  * Element representation optimized for LLM consumption.
  * Includes container context from accessibility tree for pattern discovery.
  */
@@ -196,9 +181,6 @@ export interface NavigationElement {
     containerName?: string;                  // e.g., 'Stories', 'Posts'
     depth?: number;                          // Tree depth (0 = root)
     siblingCount?: number;                   // How many siblings in same container
-
-    // Optional backup hint (mainly for forbidden actions)
-    semanticHint?: SemanticHint;
 
     state?: {
         expanded?: boolean;
@@ -232,6 +214,7 @@ export interface NavigationElement {
 export type NavigationAction =
     | 'click'
     | 'scroll'
+    | 'capture'
     | 'type'
     | 'press'
     | 'wait'
@@ -253,6 +236,15 @@ export interface ClickParams {
 export interface ScrollParams {
     direction: 'up' | 'down' | 'left' | 'right';
     amount: 'small' | 'medium' | 'large';    // Small ~200px, Medium ~500px, Large ~800px
+    pixelAmount?: number;                      // Exact pixels (overrides amount if set)
+}
+
+/**
+ * Parameters for capture action.
+ */
+export interface CaptureParams {
+    targetId?: number;                           // Element ID to crop to (full viewport if omitted)
+    reason?: string;                             // Why this is capture-worthy (for logging)
 }
 
 /**
@@ -297,7 +289,7 @@ export interface ClearParams {}
 /**
  * Union type for all action parameters.
  */
-export type ActionParams = ClickParams | ScrollParams | TypeParams | PressParams | WaitParams | HoverParams | BackParams | ClearParams;
+export type ActionParams = ClickParams | ScrollParams | CaptureParams | TypeParams | PressParams | WaitParams | HoverParams | BackParams | ClearParams;
 
 // ============================================================================
 // Decision Types
@@ -352,6 +344,7 @@ export interface NavigationDecision {
     confidence?: number;                     // 0-1 confidence in decision
     capture?: CaptureIntent;                 // Optional: signal to capture this element
     strategic?: StrategicDecision;           // Optional: strategic session-level decisions
+    memory?: string;                         // Free-form scratchpad persisted between turns
 }
 
 /**
@@ -369,6 +362,9 @@ export interface ScrollResult {
     newElementsAppeared: number;                 // Interactive elements with meaningful names
     elementsDisappeared: number;                 // Elements that scrolled off-screen
     newArticles: number;                         // New article-role elements (approx new posts)
+    pageHeightPx?: number;                       // Total scrollable height
+    scrollPositionPx?: number;                   // Current scrollY after scroll
+    isNearBottom?: boolean;                      // Within 20% of viewport from bottom
 }
 
 /**
@@ -390,6 +386,8 @@ export interface ActionRecord {
     clickedElementName?: string;
     // Content-aware scroll feedback
     scrollResult?: ScrollResult;
+    // If infrastructure rewrote the LLM's action, explain why
+    rewriteNote?: string;
 }
 
 // ============================================================================
@@ -419,6 +417,7 @@ export interface ExecutionResult {
     focusedElement?: FocusedElement;         // Element that was clicked (for capture)
     verified?: 'url_changed' | 'dom_changed' | 'no_change_detected' | 'not_verified';
     scrollResult?: ScrollResult;             // Content-aware scroll feedback
+    rewriteNote?: string;                    // If infrastructure rewrote the LLM's action, explain why
 }
 
 /**
