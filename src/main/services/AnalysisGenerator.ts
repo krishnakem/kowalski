@@ -1,8 +1,8 @@
 /**
- * AnalysisGenerator - GPT-4 Content Synthesis
+ * AnalysisGenerator - LLM Content Synthesis
  *
  * Transforms raw Instagram content into a personalized newspaper-style analysis.
- * Uses GPT-4-turbo for high-quality, thoughtful synthesis.
+ * Uses LLM (see ModelConfig.analysis) for high-quality, thoughtful synthesis.
  *
  * Key principles:
  * - NO garbage fallback (if we can't generate quality, we don't generate)
@@ -14,6 +14,7 @@
 import { ScrapedSession, ExtractedPost, GeneratorConfig } from '../../types/instagram.js';
 import { AnalysisObject } from '../../types/analysis.js';
 import { UsageService } from './UsageService.js';
+import { ModelConfig } from '../../shared/modelConfig.js';
 
 // Token management constants
 const MAX_CAPTION_LENGTH = 280;  // Tweet-length limit per caption
@@ -385,10 +386,9 @@ Return valid JSON:
                 'Authorization': `Bearer ${this.apiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',  // Best model for analysis
+                model: ModelConfig.analysis,
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 2000,
-                temperature: 0.3,  // Low for factual accuracy, strict attribution
+                max_completion_tokens: 16384,
                 response_format: { type: 'json_object' }
             })
         });
@@ -407,7 +407,12 @@ Return valid JSON:
             console.log(`💰 Generation cost tracked: ${data.usage.total_tokens} tokens`);
         }
 
-        const content = data.choices[0]?.message?.content;
+        const rawContent = data.choices[0]?.message?.content;
+        const content = typeof rawContent === 'string'
+            ? rawContent
+            : Array.isArray(rawContent)
+                ? rawContent.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
+                : '';
 
         if (!content) {
             throw new Error('GENERATION_FAILED');

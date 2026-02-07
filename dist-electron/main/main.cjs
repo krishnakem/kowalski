@@ -31987,6 +31987,25 @@ var A11yNavigator = class _A11yNavigator {
   }
 };
 
+// src/shared/modelConfig.ts
+var ModelConfig = {
+  // Navigation decision loop — called every turn (44+ times per session)
+  // Needs: strong vision, instruction following, structured JSON output, LOW LATENCY
+  navigation: process.env.KOWALSKI_NAV_MODEL || "gpt-5-mini",
+  // Content extraction from viewport screenshots — called per capture
+  // Needs: strong vision, detailed text extraction from images, caption/comment parsing
+  vision: process.env.KOWALSKI_VISION_MODEL || "gpt-5",
+  // Image tagging — categorize and describe captured screenshots
+  // Needs: basic vision, simple categorization, fast
+  tagging: process.env.KOWALSKI_TAGGING_MODEL || "gpt-5-mini",
+  // Batch digest generation — synthesize all captures into a digest
+  // Needs: strong reasoning, long context (many captures), good writing
+  digest: process.env.KOWALSKI_DIGEST_MODEL || "gpt-5.2",
+  // Analysis and insights generation
+  // Needs: complex reasoning, pattern recognition, good writing
+  analysis: process.env.KOWALSKI_ANALYSIS_MODEL || "gpt-5.2"
+};
+
 // src/main/services/ContentVision.ts
 var ContentVision = class {
   apiKey;
@@ -32111,8 +32130,7 @@ var ContentVision = class {
             "Authorization": `Bearer ${this.apiKey}`
           },
           body: JSON.stringify({
-            model: "gpt-4o",
-            // Best vision model
+            model: ModelConfig.vision,
             messages: [{
               role: "user",
               content: [
@@ -32150,7 +32168,7 @@ If no posts visible, return: {"posts": []}`
                 }
               ]
             }],
-            max_tokens: 1e3,
+            max_completion_tokens: 16384,
             response_format: { type: "json_object" }
           })
         }
@@ -32178,7 +32196,8 @@ If no posts visible, return: {"posts": []}`
       if (data.usage) {
         await this.usageService.incrementUsage(data.usage);
       }
-      const content = data.choices[0]?.message?.content;
+      const rawContent = data.choices[0]?.message?.content;
+      const content = typeof rawContent === "string" ? rawContent : Array.isArray(rawContent) ? rawContent.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
       const parsed = JSON.parse(content);
       const posts = Array.isArray(parsed) ? parsed : parsed.posts || [];
       return {
@@ -32225,8 +32244,7 @@ If no posts visible, return: {"posts": []}`
             "Authorization": `Bearer ${this.apiKey}`
           },
           body: JSON.stringify({
-            model: "gpt-4o",
-            // Best vision model
+            model: ModelConfig.vision,
             messages: [{
               role: "user",
               content: [
@@ -32248,7 +32266,7 @@ Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}
                 }
               ]
             }],
-            max_tokens: 300,
+            max_completion_tokens: 16384,
             response_format: { type: "json_object" }
           })
         }
@@ -32261,7 +32279,9 @@ Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}
       if (data.usage) {
         await this.usageService.incrementUsage(data.usage);
       }
-      let rawContent = data.choices[0]?.message?.content || "{}";
+      const rawMsg = data.choices[0]?.message?.content;
+      let rawContent = typeof rawMsg === "string" ? rawMsg : Array.isArray(rawMsg) ? rawMsg.filter((b) => b.type === "text").map((b) => b.text).join("") : "{}";
+      if (!rawContent) rawContent = "{}";
       rawContent = rawContent.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
       const content = JSON.parse(rawContent);
       return {
@@ -32279,958 +32299,8 @@ Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}
 
 // src/main/services/ScreenshotCollector.ts
 var import_crypto = require("crypto");
-var fs3 = __toESM(require("fs"), 1);
+var fs4 = __toESM(require("fs"), 1);
 var path3 = __toESM(require("path"), 1);
-var DEFAULT_CONFIG = {
-  maxCaptures: 200,
-  // Generous limit — LLM controls capture decisions
-  jpegQuality: 85,
-  // Good balance of quality and size
-  minScrollDelta: 100
-  // Must scroll at least 100px for new capture
-};
-var ScreenshotCollector = class {
-  page;
-  captures = [];
-  config;
-  lastScrollPosition = 0;
-  outputDir = null;
-  // Deduplication tracking
-  capturedPostIds = /* @__PURE__ */ new Set();
-  // Track by Instagram post ID
-  capturedHashes = /* @__PURE__ */ new Set();
-  // Track by image hash (for carousel/story)
-  capturedPositions = /* @__PURE__ */ new Set();
-  // Track by URL-path + scroll position bucket
-  lastCaptureUrl = "";
-  // Session log buffer (written to .md file alongside screenshots)
-  logBuffer = [];
-  sessionStartTime = Date.now();
-  constructor(page, config = {}) {
-    this.page = page;
-    this.config = { ...DEFAULT_CONFIG, ...config };
-    if (this.config.saveToDirectory) {
-      const sessionTimestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      this.outputDir = path3.join(this.config.saveToDirectory, `session_${sessionTimestamp}`);
-      this.ensureOutputDir();
-      console.log(`\u{1F4F8} Debug screenshots will be saved to: ${this.outputDir}`);
-    }
-  }
-  /**
-   * Ensure the output directory exists for saving screenshots.
-   */
-  ensureOutputDir() {
-    if (this.outputDir && !fs3.existsSync(this.outputDir)) {
-      fs3.mkdirSync(this.outputDir, { recursive: true });
-    }
-  }
-  /**
-   * Save a screenshot to disk for debugging.
-   * Only saves if outputDir is configured.
-   */
-  saveScreenshotToDisk(screenshot, source, id) {
-    if (!this.outputDir) return;
-    const filename = `${id.toString().padStart(3, "0")}_${source}.jpg`;
-    const filepath = path3.join(this.outputDir, filename);
-    fs3.writeFileSync(filepath, screenshot);
-    console.log(`  \u{1F4BE} Saved: ${filename}`);
-  }
-  /**
-   * Capture the current viewport as a post screenshot.
-   * Called after each scroll/story view when content is visible.
-   *
-   * @param source - Where this content came from (feed, story, search, etc.)
-   * @param interest - For search results, which interest triggered this capture
-   * @returns true if captured, false if skipped (max reached or duplicate position)
-   */
-  async captureCurrentPost(source, interest) {
-    if (this.captures.length >= this.config.maxCaptures) {
-      console.log(`\u{1F4F8} Max captures (${this.config.maxCaptures}) reached, skipping`);
-      return false;
-    }
-    const scrollPosition = await this.getScrollPosition();
-    const postId = this.extractPostId();
-    if (postId && source !== "carousel" && this.capturedPostIds.has(postId)) {
-      console.log(`\u{1F4F8} Skipping duplicate post: ${postId}`);
-      return false;
-    }
-    const currentUrl = this.page.url();
-    const urlPath = new URL(currentUrl).pathname;
-    const vpSize = this.page.viewportSize();
-    const bucketSize = vpSize ? Math.round(vpSize.height * 0.078) : 75;
-    const positionBucket = Math.round(scrollPosition / bucketSize);
-    const positionKey = `${urlPath}:${positionBucket}`;
-    if (source !== "carousel" && source !== "story" && this.capturedPositions.has(positionKey)) {
-      console.log(`\u{1F4F8} Skipping duplicate position: bucket ${positionBucket} on ${urlPath}`);
-      return false;
-    }
-    const onSamePage = currentUrl === this.lastCaptureUrl;
-    if (onSamePage && source === "feed" && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
-      console.log(`\u{1F4F8} Scroll delta too small (${Math.abs(scrollPosition - this.lastScrollPosition)}px), skipping duplicate`);
-      return false;
-    }
-    try {
-      const screenshot = await this.page.screenshot({
-        type: "jpeg",
-        quality: this.config.jpegQuality,
-        fullPage: false
-        // Viewport only
-      });
-      const hash = this.computeImageHash(screenshot);
-      if (this.capturedHashes.has(hash)) {
-        console.log(`\u{1F4F8} Skipping duplicate (hash match): ${hash.slice(0, 8)}...`);
-        return false;
-      }
-      this.captures.push({
-        id: this.captures.length + 1,
-        screenshot,
-        source,
-        interest,
-        postId,
-        // For Instagram embed rendering
-        timestamp: Date.now(),
-        scrollPosition
-      });
-      if (postId) {
-        this.capturedPostIds.add(postId);
-      }
-      this.capturedHashes.add(hash);
-      if (source !== "carousel" && source !== "story") {
-        this.capturedPositions.add(positionKey);
-      }
-      this.lastCaptureUrl = currentUrl;
-      if (source === "feed") {
-        this.lastScrollPosition = scrollPosition;
-      }
-      this.saveScreenshotToDisk(screenshot, source, this.captures.length);
-      console.log(`\u{1F4F8} Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ""}${postId ? ` [postId: ${postId}]` : ""})`);
-      return true;
-    } catch (error) {
-      console.error("\u{1F4F8} Screenshot capture failed:", error);
-      return false;
-    }
-  }
-  /**
-   * Capture a specific element that the LLM focused on.
-   * Takes a cropped screenshot centered on the element for high-quality captures.
-   *
-   * @param elementBox - Bounding box of the focused element
-   * @param source - Where this content came from (feed, story, search, etc.)
-   * @param interest - For search results, which interest triggered this capture
-   * @param reason - Why the LLM decided to capture this (for logging)
-   * @returns The captured post, or null if capture failed/skipped
-   */
-  async captureFocusedElement(elementBox, source, interest, reason) {
-    if (this.captures.length >= this.config.maxCaptures) {
-      console.log(`\u{1F4F8} Max captures (${this.config.maxCaptures}) reached, skipping focused capture`);
-      return null;
-    }
-    let viewport = this.page.viewportSize();
-    if (!viewport) {
-      await new Promise((r) => setTimeout(r, 100));
-      viewport = this.page.viewportSize();
-    }
-    if (!viewport) {
-      const dims = await this.page.evaluate(() => ({
-        width: window.innerWidth,
-        height: window.innerHeight
-      })).catch(() => ({ width: 1080, height: 1920 }));
-      console.log(`\u{1F4F8} Viewport unavailable from viewportSize(), using evaluate: ${dims.width}x${dims.height}`);
-      viewport = dims;
-    }
-    try {
-      const padding = Math.round(viewport.width * 0.046);
-      const captureRegion = {
-        x: Math.max(0, elementBox.x - padding),
-        y: Math.max(0, elementBox.y - padding),
-        width: Math.min(elementBox.width + padding * 2, viewport.width),
-        height: Math.min(elementBox.height + padding * 2, viewport.height)
-      };
-      if (captureRegion.x + captureRegion.width > viewport.width) {
-        captureRegion.width = viewport.width - captureRegion.x;
-      }
-      if (captureRegion.y + captureRegion.height > viewport.height) {
-        captureRegion.height = viewport.height - captureRegion.y;
-      }
-      captureRegion.width = Math.max(captureRegion.width, Math.round(viewport.width * 0.3));
-      captureRegion.height = Math.max(captureRegion.height, Math.round(viewport.height * 0.2));
-      const screenshot = await this.page.screenshot({
-        type: "jpeg",
-        quality: this.config.jpegQuality,
-        clip: captureRegion
-      });
-      const hash = this.computeImageHash(screenshot);
-      if (this.capturedHashes.has(hash)) {
-        console.log(`  \u{1F4F8} Capture skipped (duplicate hash)`);
-        return null;
-      }
-      this.capturedHashes.add(hash);
-      const postId = this.extractPostId();
-      if (postId) {
-        if (source !== "carousel" && this.capturedPostIds.has(postId)) {
-          console.log(`  \u{1F4F8} Capture skipped (duplicate postId: ${postId})`);
-          return null;
-        }
-        this.capturedPostIds.add(postId);
-      }
-      const captured = {
-        id: this.captures.length + 1,
-        screenshot,
-        source,
-        interest,
-        postId,
-        timestamp: Date.now(),
-        scrollPosition: elementBox.y
-        // Use element Y as position
-      };
-      this.captures.push(captured);
-      this.saveScreenshotToDisk(screenshot, source, captured.id);
-      console.log(`
-\u{1F4F8} === CAPTURED #${captured.id} ===`);
-      console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
-      console.log(`   Reason: ${reason || "LLM focus"}`);
-      console.log(`   Crop: ${captureRegion.width}x${captureRegion.height}px`);
-      console.log(`   Source: ${source}${interest ? `: ${interest}` : ""}`);
-      console.log(`==============================
-`);
-      return captured;
-    } catch (error) {
-      console.error("\u{1F4F8} Focused capture failed:", error);
-      return null;
-    }
-  }
-  /**
-   * Get all captured screenshots for batch processing.
-   */
-  getCaptures() {
-    return this.captures;
-  }
-  /**
-   * Get capture count.
-   */
-  getCaptureCount() {
-    return this.captures.length;
-  }
-  /**
-   * Get source breakdown for logging.
-   */
-  getSourceBreakdown() {
-    const breakdown = {
-      feed: 0,
-      story: 0,
-      search: 0,
-      profile: 0,
-      carousel: 0
-    };
-    for (const capture of this.captures) {
-      breakdown[capture.source]++;
-    }
-    return breakdown;
-  }
-  /**
-   * Get approximate memory usage in bytes.
-   */
-  getMemoryUsage() {
-    return this.captures.reduce((total, c2) => total + c2.screenshot.length, 0);
-  }
-  /**
-   * Clear all captures (call after processing to free memory).
-   */
-  clear() {
-    this.captures = [];
-    this.lastScrollPosition = 0;
-    this.capturedPostIds.clear();
-    this.capturedHashes.clear();
-    this.capturedPositions.clear();
-    console.log("\u{1F4F8} Collector cleared");
-  }
-  /**
-   * Capture multiple frames during video playback.
-   * Called when video content is detected. Simulates natural video watching
-   * by capturing frames at intervals during the watch duration.
-   *
-   * @param source - Where this content came from (feed, story, etc.)
-   * @param watchDurationMs - How long to watch (human-like: 8-20 seconds)
-   * @param frameIntervalMs - Interval between frames (2-3 seconds)
-   * @returns Number of unique frames captured
-   */
-  async captureVideoFrames(source, watchDurationMs = 12e3, frameIntervalMs = 2500) {
-    const videoId = this.extractPostId() || `video_${Date.now()}`;
-    const maxFrames = Math.floor(watchDurationMs / frameIntervalMs);
-    let capturedFrames = 0;
-    let lastCapturedTime = -1;
-    const startTime = Date.now();
-    console.log(`\u{1F3AC} Starting video frame capture: up to ${maxFrames} frames over ${(watchDurationMs / 1e3).toFixed(1)}s`);
-    while (Date.now() - startTime < watchDurationMs) {
-      if (this.captures.length >= this.config.maxCaptures) {
-        console.log(`\u{1F4F8} Max captures reached, stopping video frames`);
-        break;
-      }
-      if (capturedFrames >= maxFrames) {
-        break;
-      }
-      const videoState = await this.getVideoState();
-      if (!videoState?.found) {
-        console.log(`\u{1F3AC} No video found, waiting...`);
-        await this.delay(500);
-        continue;
-      }
-      if (videoState.paused) {
-        console.log(`\u{1F3AC} Video paused, waiting...`);
-        await this.delay(500);
-        continue;
-      }
-      if (videoState.buffering) {
-        console.log(`\u{1F3AC} Video buffering, waiting...`);
-        await this.delay(300);
-        continue;
-      }
-      const minTimeAdvance = 2;
-      if (lastCapturedTime >= 0 && videoState.currentTime - lastCapturedTime < minTimeAdvance) {
-        await this.delay(200);
-        continue;
-      }
-      try {
-        const screenshot = await this.page.screenshot({
-          type: "jpeg",
-          quality: this.config.jpegQuality,
-          fullPage: false
-        });
-        const hash = this.computeImageHash(screenshot);
-        if (this.capturedHashes.has(hash)) {
-          console.log(`\u{1F3AC} Frame at ${videoState.currentTime.toFixed(1)}s: duplicate, skipping`);
-          lastCapturedTime = videoState.currentTime;
-          await this.delay(frameIntervalMs);
-          continue;
-        }
-        this.capturedHashes.add(hash);
-        this.captures.push({
-          id: this.captures.length + 1,
-          screenshot,
-          source,
-          postId: this.extractPostId(),
-          timestamp: Date.now(),
-          scrollPosition: 0,
-          isVideoFrame: true,
-          videoId,
-          frameIndex: capturedFrames + 1,
-          totalFrames: maxFrames
-        });
-        this.saveScreenshotToDisk(screenshot, source, this.captures.length);
-        capturedFrames++;
-        lastCapturedTime = videoState.currentTime;
-        console.log(`\u{1F3AC} Frame ${capturedFrames} captured at ${videoState.currentTime.toFixed(1)}s`);
-        await this.delay(frameIntervalMs);
-      } catch (error) {
-        console.error(`\u{1F3AC} Frame capture failed:`, error);
-        await this.delay(500);
-      }
-    }
-    this.captures.filter((c2) => c2.videoId === videoId).forEach((c2) => c2.totalFrames = capturedFrames);
-    console.log(`\u{1F3AC} Video complete: ${capturedFrames} unique frames captured`);
-    return capturedFrames;
-  }
-  /**
-   * Get the current count of captured photos/screenshots.
-   * Used by LLM to track capture progress.
-   */
-  getPhotoCount() {
-    return this.captures.length;
-  }
-  /**
-   * Simple delay helper for video frame timing.
-   */
-  delay(ms) {
-    return new Promise((resolve2) => setTimeout(resolve2, ms));
-  }
-  /**
-   * Extract Instagram post ID from current URL.
-   * Post URLs follow pattern: instagram.com/p/{POST_ID}/
-   * Returns undefined for non-post pages (stories, feed, etc.)
-   */
-  extractPostId() {
-    const url = this.page.url();
-    const match = url.match(/\/p\/([A-Za-z0-9_-]+)\//);
-    return match?.[1];
-  }
-  /**
-   * Compute a simple hash of the screenshot for deduplication.
-   * Uses MD5 on the entire buffer - fast enough for our needs.
-   */
-  computeImageHash(screenshot) {
-    return (0, import_crypto.createHash)("md5").update(screenshot).digest("hex");
-  }
-  /**
-   * Get current scroll Y position via CDP (no page.evaluate needed).
-   */
-  async getScrollPosition() {
-    try {
-      const client = await this.page.context().newCDPSession(this.page);
-      const result = await client.send("Runtime.evaluate", {
-        expression: "window.scrollY",
-        returnByValue: true
-      });
-      await client.detach();
-      return result.result.value;
-    } catch {
-      return await this.page.evaluate(() => window.scrollY);
-    }
-  }
-  /**
-   * Get video element state via CDP for synced frame capture.
-   * Returns null if no video found on page.
-   */
-  async getVideoState() {
-    try {
-      const client = await this.page.context().newCDPSession(this.page);
-      const result = await client.send("Runtime.evaluate", {
-        expression: `
-                    (() => {
-                        const v = document.querySelector('video');
-                        if (!v) return JSON.stringify({ found: false });
-                        return JSON.stringify({
-                            found: true,
-                            paused: v.paused,
-                            currentTime: v.currentTime,
-                            buffering: v.readyState < 3,
-                            duration: v.duration || 0
-                        });
-                    })()
-                `,
-        returnByValue: true
-      });
-      await client.detach();
-      return JSON.parse(result.result.value);
-    } catch {
-      return null;
-    }
-  }
-  /**
-   * Append a line to the session log buffer.
-   * Lines are timestamped relative to session start.
-   */
-  appendLog(line) {
-    const elapsed = ((Date.now() - this.sessionStartTime) / 1e3).toFixed(1);
-    this.logBuffer.push(`[${elapsed}s] ${line}`);
-  }
-  /**
-   * Append a raw line (no timestamp prefix) to the session log buffer.
-   * Used for headers, separators, and pre-formatted content.
-   */
-  appendLogRaw(line) {
-    this.logBuffer.push(line);
-  }
-  /**
-   * Flush the session log buffer to a markdown file alongside screenshots.
-   * Called at session end. Only writes if outputDir is configured.
-   */
-  flushSessionLog() {
-    if (!this.outputDir || this.logBuffer.length === 0) return;
-    const filepath = path3.join(this.outputDir, "session_log.md");
-    const content = this.logBuffer.join("\n") + "\n";
-    fs3.writeFileSync(filepath, content, "utf-8");
-    console.log(`\u{1F4DD} Session log saved: ${filepath}`);
-  }
-  /**
-   * Log summary of captured content.
-   */
-  logSummary() {
-    const breakdown = this.getSourceBreakdown();
-    const memoryMB = (this.getMemoryUsage() / (1024 * 1024)).toFixed(2);
-    console.log(`
-\u{1F4F8} Screenshot Collection Summary:`);
-    console.log(`   Total: ${this.captures.length} captures`);
-    console.log(`   Feed: ${breakdown.feed}, Stories: ${breakdown.story}, Search: ${breakdown.search}`);
-    console.log(`   Memory: ${memoryMB}MB`);
-    console.log("");
-  }
-};
-
-// src/main/services/ContentReadiness.ts
-var DEFAULT_CONFIG2 = {
-  imageLoadTimeoutMs: 3e3,
-  networkIdleTimeoutMs: 2e3,
-  pollIntervalMs: 100
-};
-var ContentReadiness = class {
-  page;
-  config;
-  // CDP session management (following A11yNavigator pattern)
-  managedSession = null;
-  sessionLastUsed = 0;
-  SESSION_TIMEOUT_MS = 5e3;
-  constructor(page, config = {}) {
-    this.page = page;
-    this.config = { ...DEFAULT_CONFIG2, ...config };
-  }
-  // =========================================================================
-  // CDP Session Management
-  // =========================================================================
-  async withSession(operation) {
-    const now = Date.now();
-    if (this.managedSession && now - this.sessionLastUsed > this.SESSION_TIMEOUT_MS) {
-      await this.releaseSession();
-    }
-    if (!this.managedSession) {
-      this.managedSession = await this.page.context().newCDPSession(this.page);
-    }
-    this.sessionLastUsed = now;
-    try {
-      return await operation(this.managedSession);
-    } catch (error) {
-      await this.releaseSession();
-      throw error;
-    }
-  }
-  async releaseSession() {
-    if (this.managedSession) {
-      await this.managedSession.detach().catch(() => {
-      });
-      this.managedSession = null;
-    }
-  }
-  // =========================================================================
-  // Core Readiness Checks
-  // =========================================================================
-  /**
-   * Wait for images in the current viewport to be loaded.
-   * Uses CDP Runtime.evaluate to check img.complete status.
-   *
-   * @param timeoutMs - Maximum wait time (default: 3000ms)
-   * @returns ReadinessResult with status and timing info
-   */
-  async waitForImagesLoaded(timeoutMs) {
-    const timeout = timeoutMs ?? this.config.imageLoadTimeoutMs;
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeout) {
-      const imagesReady = await this.checkImagesLoaded();
-      if (imagesReady.allLoaded) {
-        return {
-          ready: true,
-          waitedMs: Date.now() - startTime,
-          details: `${imagesReady.loadedCount}/${imagesReady.totalCount} images loaded`
-        };
-      }
-      await new Promise((r) => setTimeout(r, this.config.pollIntervalMs));
-    }
-    const finalState = await this.checkImagesLoaded();
-    return {
-      ready: false,
-      reason: "images_loading",
-      waitedMs: Date.now() - startTime,
-      details: `${finalState.loadedCount}/${finalState.totalCount} images loaded (timeout)`
-    };
-  }
-  /**
-   * Check if all images in viewport are loaded (single check, no wait).
-   */
-  async checkImagesLoaded() {
-    return this.withSession(async (session2) => {
-      const { result } = await session2.send("Runtime.evaluate", {
-        expression: `
-                    (() => {
-                        const viewportHeight = window.innerHeight;
-                        const images = Array.from(document.images);
-
-                        // Only check images in viewport (visible)
-                        const visibleImages = images.filter(img => {
-                            const rect = img.getBoundingClientRect();
-                            return rect.top < viewportHeight && rect.bottom > 0 && rect.width > 0;
-                        });
-
-                        const loadedImages = visibleImages.filter(img =>
-                            img.complete && img.naturalHeight > 0
-                        );
-
-                        return JSON.stringify({
-                            allLoaded: loadedImages.length === visibleImages.length,
-                            totalCount: visibleImages.length,
-                            loadedCount: loadedImages.length
-                        });
-                    })()
-                `,
-        returnByValue: true
-      });
-      try {
-        return JSON.parse(result.value);
-      } catch {
-        return { allLoaded: true, totalCount: 0, loadedCount: 0 };
-      }
-    });
-  }
-  /**
-   * Wait for CSS transitions and animations to complete.
-   * Checks for running animations in the viewport.
-   *
-   * @param timeoutMs - Maximum wait time (default: 1500ms)
-   */
-  async waitForTransitionsComplete(timeoutMs = 1500) {
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeoutMs) {
-      const animating = await this.hasActiveAnimations();
-      if (!animating) {
-        return {
-          ready: true,
-          waitedMs: Date.now() - startTime
-        };
-      }
-      await new Promise((r) => setTimeout(r, this.config.pollIntervalMs));
-    }
-    return {
-      ready: false,
-      reason: "timeout",
-      waitedMs: Date.now() - startTime,
-      details: "Animations still running"
-    };
-  }
-  /**
-   * Check if there are active CSS animations/transitions.
-   */
-  async hasActiveAnimations() {
-    return this.withSession(async (session2) => {
-      const { result } = await session2.send("Runtime.evaluate", {
-        expression: `
-                    (() => {
-                        // Check for running animations via getAnimations API
-                        const animations = document.getAnimations ? document.getAnimations() : [];
-                        const runningAnimations = animations.filter(a =>
-                            a.playState === 'running' || a.playState === 'pending'
-                        );
-                        return runningAnimations.length > 0;
-                    })()
-                `,
-        returnByValue: true
-      });
-      return result.value === true;
-    });
-  }
-  /**
-   * Combined readiness check: overlays + images + transitions.
-   * This is the main method to call before taking a screenshot.
-   *
-   * @param timeoutMs - Maximum total wait time (default: 3000ms)
-   * @param dismissOverlays - Whether to dismiss blocking overlays (default: true)
-   * @returns ReadinessResult
-   */
-  async waitForContentReady(timeoutMs = 3e3, dismissOverlays = true) {
-    const startTime = Date.now();
-    const remainingTime = () => Math.max(0, timeoutMs - (Date.now() - startTime));
-    if (dismissOverlays) {
-      const viewportClear = await this.ensureViewportClear(2);
-      if (!viewportClear) {
-        return {
-          ready: false,
-          reason: "unknown",
-          waitedMs: Date.now() - startTime,
-          details: "Blocking overlay could not be dismissed"
-        };
-      }
-    }
-    const imageResult = await this.waitForImagesLoaded(Math.min(remainingTime(), 2500));
-    if (!imageResult.ready && remainingTime() <= 0) {
-      return {
-        ready: false,
-        reason: "images_loading",
-        waitedMs: Date.now() - startTime,
-        details: imageResult.details
-      };
-    }
-    if (remainingTime() > 200) {
-      const transitionResult = await this.waitForTransitionsComplete(Math.min(remainingTime(), 1e3));
-      if (!transitionResult.ready) {
-        console.log(`  \u23F3 Transitions still running, proceeding anyway`);
-      }
-    }
-    return {
-      ready: true,
-      waitedMs: Date.now() - startTime,
-      details: imageResult.details
-    };
-  }
-  /**
-   * Get element position by backend node ID.
-   * Used for position re-verification before capture.
-   *
-   * @param backendNodeId - CDP backend node ID
-   * @returns Bounding box or null if element not found
-   */
-  async getElementPosition(backendNodeId) {
-    return this.withSession(async (session2) => {
-      try {
-        const { model } = await session2.send("DOM.getBoxModel", {
-          backendNodeId
-        });
-        if (!model || !model.content) {
-          return null;
-        }
-        const [x1, y1, x2, , , y3] = model.content;
-        const width = x2 - x1;
-        const height = y3 - y1;
-        return {
-          x: x1,
-          y: y1,
-          width,
-          height,
-          centerY: y1 + height / 2
-        };
-      } catch {
-        return null;
-      }
-    });
-  }
-  /**
-   * Get current viewport center Y coordinate.
-   */
-  async getViewportCenterY() {
-    return this.withSession(async (session2) => {
-      const { result } = await session2.send("Runtime.evaluate", {
-        expression: "window.innerHeight / 2",
-        returnByValue: true
-      });
-      return result.value;
-    });
-  }
-  /**
-   * Check if an element has drifted from expected center position.
-   *
-   * @param backendNodeId - CDP backend node ID
-   * @param tolerance - Acceptable drift in pixels (default: 50)
-   * @returns Drift info or null if element not found
-   */
-  async checkElementDrift(backendNodeId, tolerance = 50) {
-    const position = await this.getElementPosition(backendNodeId);
-    if (!position) return null;
-    const viewportCenterY = await this.getViewportCenterY();
-    const drift = Math.abs(position.centerY - viewportCenterY);
-    return {
-      drifted: drift > tolerance,
-      drift,
-      elementCenterY: position.centerY,
-      viewportCenterY
-    };
-  }
-  /**
-   * Check video element state for synced frame capture.
-   *
-   * @returns Video state or null if no video found
-   */
-  async getVideoState() {
-    return this.withSession(async (session2) => {
-      const { result } = await session2.send("Runtime.evaluate", {
-        expression: `
-                    (() => {
-                        const v = document.querySelector('video');
-                        if (!v) return JSON.stringify({ found: false });
-                        return JSON.stringify({
-                            found: true,
-                            paused: v.paused,
-                            currentTime: v.currentTime,
-                            buffering: v.readyState < 3,
-                            duration: v.duration || 0
-                        });
-                    })()
-                `,
-        returnByValue: true
-      });
-      try {
-        return JSON.parse(result.value);
-      } catch {
-        return null;
-      }
-    });
-  }
-  /**
-   * Detect if any overlay panels are blocking the main content.
-   * Looks for common Instagram overlays: Notifications, Messages, Search, etc.
-   *
-   * @returns Overlay info or null if no overlay detected
-   */
-  async detectBlockingOverlay() {
-    return this.withSession(async (session2) => {
-      const { result } = await session2.send("Runtime.evaluate", {
-        expression: `
-                    (() => {
-                        // Look for common overlay patterns
-                        const overlayPatterns = [
-                            { type: 'notifications', heading: 'Notifications' },
-                            { type: 'messages', heading: 'Messages' },
-                            { type: 'search', heading: 'Search' }
-                        ];
-
-                        // Check for overlay headings
-                        for (const pattern of overlayPatterns) {
-                            // Look for heading elements with exact text
-                            const headings = document.querySelectorAll('h1, h2, [role="heading"]');
-                            for (const h of headings) {
-                                if (h.textContent?.trim() === pattern.heading) {
-                                    // Found overlay - look for close button (X) nearby
-                                    // Close button is typically a sibling or nearby element
-                                    const container = h.closest('div[role="dialog"], div[style*="position"]') || h.parentElement?.parentElement;
-
-                                    if (container) {
-                                        // Look for close button by aria-label or SVG with specific path
-                                        const closeBtn = container.querySelector('[aria-label="Close"], [aria-label*="close"], button svg');
-
-                                        if (closeBtn) {
-                                            const rect = closeBtn.getBoundingClientRect();
-                                            return JSON.stringify({
-                                                found: true,
-                                                type: pattern.type,
-                                                closeButton: {
-                                                    x: rect.x + rect.width / 2,
-                                                    y: rect.y + rect.height / 2,
-                                                    width: rect.width,
-                                                    height: rect.height
-                                                }
-                                            });
-                                        }
-                                    }
-
-                                    // Overlay found but no close button
-                                    return JSON.stringify({ found: true, type: pattern.type });
-                                }
-                            }
-                        }
-
-                        // Check for generic dialog/modal overlays
-                        const dialogs = document.querySelectorAll('[role="dialog"], [aria-modal="true"]');
-                        for (const dialog of dialogs) {
-                            const rect = dialog.getBoundingClientRect();
-                            // Only consider it blocking if it covers significant viewport area
-                            if (rect.width > window.innerWidth * 0.3 || rect.height > window.innerHeight * 0.3) {
-                                const closeBtn = dialog.querySelector('[aria-label="Close"], [aria-label*="close"]');
-                                if (closeBtn) {
-                                    const btnRect = closeBtn.getBoundingClientRect();
-                                    return JSON.stringify({
-                                        found: true,
-                                        type: 'dialog',
-                                        closeButton: {
-                                            x: btnRect.x + btnRect.width / 2,
-                                            y: btnRect.y + btnRect.height / 2,
-                                            width: btnRect.width,
-                                            height: btnRect.height
-                                        }
-                                    });
-                                }
-                                return JSON.stringify({ found: true, type: 'dialog' });
-                            }
-                        }
-
-                        // No blocking overlay found
-                        return JSON.stringify({ found: false, type: 'unknown' });
-                    })()
-                `,
-        returnByValue: true
-      });
-      try {
-        return JSON.parse(result.value);
-      } catch {
-        return null;
-      }
-    });
-  }
-  /**
-   * Dismiss any blocking overlay by clicking its close button.
-   * Uses keyboard shortcut (Escape) as fallback.
-   *
-   * @returns true if overlay was dismissed, false if none found or dismissal failed
-   */
-  async dismissOverlay() {
-    const overlay2 = await this.detectBlockingOverlay();
-    if (!overlay2?.found) {
-      return false;
-    }
-    console.log(`  \u{1F533} Detected blocking overlay: ${overlay2.type}`);
-    if (overlay2.closeButton) {
-      try {
-        await this.withSession(async (session2) => {
-          await session2.send("Input.dispatchMouseEvent", {
-            type: "mousePressed",
-            x: overlay2.closeButton.x,
-            y: overlay2.closeButton.y,
-            button: "left",
-            clickCount: 1
-          });
-          await session2.send("Input.dispatchMouseEvent", {
-            type: "mouseReleased",
-            x: overlay2.closeButton.x,
-            y: overlay2.closeButton.y,
-            button: "left",
-            clickCount: 1
-          });
-        });
-        await new Promise((r) => setTimeout(r, 300));
-        const stillOpen = await this.detectBlockingOverlay();
-        if (!stillOpen?.found) {
-          console.log(`  \u2713 Dismissed ${overlay2.type} overlay via close button`);
-          return true;
-        }
-      } catch (error) {
-        console.log(`  \u26A0\uFE0F Failed to click close button: ${error}`);
-      }
-    }
-    try {
-      await this.withSession(async (session2) => {
-        await session2.send("Input.dispatchKeyEvent", {
-          type: "keyDown",
-          key: "Escape",
-          code: "Escape",
-          windowsVirtualKeyCode: 27,
-          nativeVirtualKeyCode: 27
-        });
-        await session2.send("Input.dispatchKeyEvent", {
-          type: "keyUp",
-          key: "Escape",
-          code: "Escape",
-          windowsVirtualKeyCode: 27,
-          nativeVirtualKeyCode: 27
-        });
-      });
-      await new Promise((r) => setTimeout(r, 300));
-      const stillOpen = await this.detectBlockingOverlay();
-      if (!stillOpen?.found) {
-        console.log(`  \u2713 Dismissed ${overlay2.type} overlay via Escape key`);
-        return true;
-      }
-    } catch (error) {
-      console.log(`  \u26A0\uFE0F Failed to press Escape: ${error}`);
-    }
-    console.log(`  \u26A0\uFE0F Could not dismiss ${overlay2.type} overlay`);
-    return false;
-  }
-  /**
-   * Ensure viewport is clear for capture by dismissing any blocking overlays.
-   * This should be called before any screenshot capture.
-   *
-   * @param maxAttempts - Maximum dismissal attempts (default: 3)
-   * @returns true if viewport is clear, false if overlays persist
-   */
-  async ensureViewportClear(maxAttempts = 3) {
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const overlay2 = await this.detectBlockingOverlay();
-      if (!overlay2?.found) {
-        return true;
-      }
-      const dismissed = await this.dismissOverlay();
-      if (!dismissed) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    }
-    const finalCheck = await this.detectBlockingOverlay();
-    return !finalCheck?.found;
-  }
-  /**
-   * Release managed CDP session.
-   * Call this when done with the service.
-   */
-  async cleanup() {
-    await this.releaseSession();
-  }
-};
-
-// src/main/services/InstagramScraper.ts
-var path5 = __toESM(require("path"), 1);
-var os = __toESM(require("os"), 1);
 
 // node_modules/bmp-ts/dist/esm/header-types.js
 var HeaderTypes;
@@ -45960,17 +45030,1013 @@ var Jimp = createJimp({
   plugins: defaultPlugins
 });
 
+// src/main/services/ScreenshotCollector.ts
+var DEFAULT_CONFIG = {
+  maxCaptures: 200,
+  // Generous limit — LLM controls capture decisions
+  jpegQuality: 85,
+  // Good balance of quality and size
+  minScrollDelta: 100
+  // Must scroll at least 100px for new capture
+};
+var ScreenshotCollector = class {
+  page;
+  captures = [];
+  config;
+  lastScrollPosition = 0;
+  outputDir = null;
+  // Deduplication tracking
+  capturedPostIds = /* @__PURE__ */ new Set();
+  // Track by Instagram post ID
+  capturedHashes = /* @__PURE__ */ new Set();
+  // Track by image hash (for carousel/story)
+  capturedPositions = /* @__PURE__ */ new Set();
+  // Track by URL-path + scroll position bucket
+  lastCaptureUrl = "";
+  // Session log buffer (written to .md file alongside screenshots)
+  logBuffer = [];
+  sessionStartTime = Date.now();
+  constructor(page, config = {}) {
+    this.page = page;
+    this.config = { ...DEFAULT_CONFIG, ...config };
+    if (this.config.saveToDirectory) {
+      const sessionTimestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      this.outputDir = path3.join(this.config.saveToDirectory, `session_${sessionTimestamp}`);
+      this.ensureOutputDir();
+      console.log(`\u{1F4F8} Debug screenshots will be saved to: ${this.outputDir}`);
+    }
+  }
+  /**
+   * Ensure the output directory exists for saving screenshots.
+   */
+  ensureOutputDir() {
+    if (this.outputDir && !fs4.existsSync(this.outputDir)) {
+      fs4.mkdirSync(this.outputDir, { recursive: true });
+    }
+  }
+  /**
+   * Save a screenshot to disk for debugging.
+   * Only saves if outputDir is configured.
+   */
+  saveScreenshotToDisk(screenshot, source, id) {
+    if (!this.outputDir) return;
+    const filename = `${id.toString().padStart(3, "0")}_${source}.jpg`;
+    const filepath = path3.join(this.outputDir, filename);
+    fs4.writeFileSync(filepath, screenshot);
+    console.log(`  \u{1F4BE} Saved: ${filename}`);
+  }
+  /**
+   * Capture the current viewport as a post screenshot.
+   * Called after each scroll/story view when content is visible.
+   *
+   * @param source - Where this content came from (feed, story, search, etc.)
+   * @param interest - For search results, which interest triggered this capture
+   * @returns true if captured, false if skipped (max reached or duplicate position)
+   */
+  async captureCurrentPost(source, interest) {
+    if (this.captures.length >= this.config.maxCaptures) {
+      console.log(`\u{1F4F8} Max captures (${this.config.maxCaptures}) reached, skipping`);
+      return false;
+    }
+    const scrollPosition = await this.getScrollPosition();
+    const postId = this.extractPostId();
+    if (postId && source !== "carousel" && this.capturedPostIds.has(postId)) {
+      console.log(`\u{1F4F8} Skipping duplicate post: ${postId}`);
+      return false;
+    }
+    const currentUrl = this.page.url();
+    const urlPath = new URL(currentUrl).pathname;
+    const vpSize = this.page.viewportSize();
+    const bucketSize = vpSize ? Math.round(vpSize.height * 0.078) : 75;
+    const positionBucket = Math.round(scrollPosition / bucketSize);
+    const positionKey = `${urlPath}:${positionBucket}`;
+    if (source !== "carousel" && source !== "story" && this.capturedPositions.has(positionKey)) {
+      console.log(`\u{1F4F8} Skipping duplicate position: bucket ${positionBucket} on ${urlPath}`);
+      return false;
+    }
+    const onSamePage = currentUrl === this.lastCaptureUrl;
+    if (onSamePage && source === "feed" && Math.abs(scrollPosition - this.lastScrollPosition) < this.config.minScrollDelta) {
+      console.log(`\u{1F4F8} Scroll delta too small (${Math.abs(scrollPosition - this.lastScrollPosition)}px), skipping duplicate`);
+      return false;
+    }
+    try {
+      const screenshot = await this.page.screenshot({
+        type: "jpeg",
+        quality: this.config.jpegQuality,
+        fullPage: false
+        // Viewport only
+      });
+      const hash = await this.computePerceptualHash(screenshot);
+      if (this.isSimilarToExisting(hash)) {
+        console.log(`\u{1F4F8} Skipping near-duplicate (perceptual hash): ${hash}`);
+        return false;
+      }
+      this.captures.push({
+        id: this.captures.length + 1,
+        screenshot,
+        source,
+        interest,
+        postId,
+        // For Instagram embed rendering
+        timestamp: Date.now(),
+        scrollPosition
+      });
+      if (postId) {
+        this.capturedPostIds.add(postId);
+      }
+      this.capturedHashes.add(hash);
+      if (source !== "carousel" && source !== "story") {
+        this.capturedPositions.add(positionKey);
+      }
+      this.lastCaptureUrl = currentUrl;
+      if (source === "feed") {
+        this.lastScrollPosition = scrollPosition;
+      }
+      this.saveScreenshotToDisk(screenshot, source, this.captures.length);
+      console.log(`\u{1F4F8} Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ""}${postId ? ` [postId: ${postId}]` : ""})`);
+      return true;
+    } catch (error) {
+      console.error("\u{1F4F8} Screenshot capture failed:", error);
+      return false;
+    }
+  }
+  /**
+   * Capture a specific element that the LLM focused on.
+   * Takes a cropped screenshot centered on the element for high-quality captures.
+   *
+   * @param elementBox - Bounding box of the focused element
+   * @param source - Where this content came from (feed, story, search, etc.)
+   * @param interest - For search results, which interest triggered this capture
+   * @param reason - Why the LLM decided to capture this (for logging)
+   * @returns The captured post, or null if capture failed/skipped
+   */
+  async captureFocusedElement(elementBox, source, interest, reason) {
+    if (this.captures.length >= this.config.maxCaptures) {
+      console.log(`\u{1F4F8} Max captures (${this.config.maxCaptures}) reached, skipping focused capture`);
+      return null;
+    }
+    let viewport = this.page.viewportSize();
+    if (!viewport) {
+      await new Promise((r) => setTimeout(r, 100));
+      viewport = this.page.viewportSize();
+    }
+    if (!viewport) {
+      const dims = await this.page.evaluate(() => ({
+        width: window.innerWidth,
+        height: window.innerHeight
+      })).catch(() => ({ width: 1080, height: 1920 }));
+      console.log(`\u{1F4F8} Viewport unavailable from viewportSize(), using evaluate: ${dims.width}x${dims.height}`);
+      viewport = dims;
+    }
+    try {
+      const padding = Math.round(viewport.width * 0.046);
+      const captureRegion = {
+        x: Math.max(0, elementBox.x - padding),
+        y: Math.max(0, elementBox.y - padding),
+        width: Math.min(elementBox.width + padding * 2, viewport.width),
+        height: Math.min(elementBox.height + padding * 2, viewport.height)
+      };
+      if (captureRegion.x + captureRegion.width > viewport.width) {
+        captureRegion.width = viewport.width - captureRegion.x;
+      }
+      if (captureRegion.y + captureRegion.height > viewport.height) {
+        captureRegion.height = viewport.height - captureRegion.y;
+      }
+      captureRegion.width = Math.max(captureRegion.width, Math.round(viewport.width * 0.3));
+      captureRegion.height = Math.max(captureRegion.height, Math.round(viewport.height * 0.2));
+      const screenshot = await this.page.screenshot({
+        type: "jpeg",
+        quality: this.config.jpegQuality,
+        clip: captureRegion
+      });
+      const hash = await this.computePerceptualHash(screenshot);
+      if (this.isSimilarToExisting(hash)) {
+        console.log(`  \u{1F4F8} Capture skipped (perceptual hash similar): ${hash}`);
+        return null;
+      }
+      this.capturedHashes.add(hash);
+      const postId = this.extractPostId();
+      if (postId) {
+        if (source !== "carousel" && this.capturedPostIds.has(postId)) {
+          console.log(`  \u{1F4F8} Capture skipped (duplicate postId: ${postId})`);
+          return null;
+        }
+        this.capturedPostIds.add(postId);
+      }
+      const captured = {
+        id: this.captures.length + 1,
+        screenshot,
+        source,
+        interest,
+        postId,
+        timestamp: Date.now(),
+        scrollPosition: elementBox.y
+        // Use element Y as position
+      };
+      this.captures.push(captured);
+      this.saveScreenshotToDisk(screenshot, source, captured.id);
+      console.log(`
+\u{1F4F8} === CAPTURED #${captured.id} ===`);
+      console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
+      console.log(`   Reason: ${reason || "LLM focus"}`);
+      console.log(`   Crop: ${captureRegion.width}x${captureRegion.height}px`);
+      console.log(`   Source: ${source}${interest ? `: ${interest}` : ""}`);
+      console.log(`==============================
+`);
+      return captured;
+    } catch (error) {
+      console.error("\u{1F4F8} Focused capture failed:", error);
+      return null;
+    }
+  }
+  /**
+   * Get all captured screenshots for batch processing.
+   */
+  getCaptures() {
+    return this.captures;
+  }
+  /**
+   * Get capture count.
+   */
+  getCaptureCount() {
+    return this.captures.length;
+  }
+  /**
+   * Get source breakdown for logging.
+   */
+  getSourceBreakdown() {
+    const breakdown = {
+      feed: 0,
+      story: 0,
+      search: 0,
+      profile: 0,
+      carousel: 0
+    };
+    for (const capture of this.captures) {
+      breakdown[capture.source]++;
+    }
+    return breakdown;
+  }
+  /**
+   * Get approximate memory usage in bytes.
+   */
+  getMemoryUsage() {
+    return this.captures.reduce((total, c2) => total + c2.screenshot.length, 0);
+  }
+  /**
+   * Clear all captures (call after processing to free memory).
+   */
+  clear() {
+    this.captures = [];
+    this.lastScrollPosition = 0;
+    this.capturedPostIds.clear();
+    this.capturedHashes.clear();
+    this.capturedPositions.clear();
+    console.log("\u{1F4F8} Collector cleared");
+  }
+  /**
+   * Capture multiple frames during video playback.
+   * Called when video content is detected. Simulates natural video watching
+   * by capturing frames at intervals during the watch duration.
+   *
+   * @param source - Where this content came from (feed, story, etc.)
+   * @param watchDurationMs - How long to watch (human-like: 8-20 seconds)
+   * @param frameIntervalMs - Interval between frames (2-3 seconds)
+   * @returns Number of unique frames captured
+   */
+  async captureVideoFrames(source, watchDurationMs = 12e3, frameIntervalMs = 2500) {
+    const videoId = this.extractPostId() || `video_${Date.now()}`;
+    const maxFrames = Math.floor(watchDurationMs / frameIntervalMs);
+    let capturedFrames = 0;
+    let lastCapturedTime = -1;
+    const startTime = Date.now();
+    console.log(`\u{1F3AC} Starting video frame capture: up to ${maxFrames} frames over ${(watchDurationMs / 1e3).toFixed(1)}s`);
+    while (Date.now() - startTime < watchDurationMs) {
+      if (this.captures.length >= this.config.maxCaptures) {
+        console.log(`\u{1F4F8} Max captures reached, stopping video frames`);
+        break;
+      }
+      if (capturedFrames >= maxFrames) {
+        break;
+      }
+      const videoState = await this.getVideoState();
+      if (!videoState?.found) {
+        console.log(`\u{1F3AC} No video found, waiting...`);
+        await this.delay(500);
+        continue;
+      }
+      if (videoState.paused) {
+        console.log(`\u{1F3AC} Video paused, waiting...`);
+        await this.delay(500);
+        continue;
+      }
+      if (videoState.buffering) {
+        console.log(`\u{1F3AC} Video buffering, waiting...`);
+        await this.delay(300);
+        continue;
+      }
+      const minTimeAdvance = 2;
+      if (lastCapturedTime >= 0 && videoState.currentTime - lastCapturedTime < minTimeAdvance) {
+        await this.delay(200);
+        continue;
+      }
+      try {
+        const screenshot = await this.page.screenshot({
+          type: "jpeg",
+          quality: this.config.jpegQuality,
+          fullPage: false
+        });
+        const hash = await this.computePerceptualHash(screenshot);
+        if (this.isSimilarToExisting(hash)) {
+          console.log(`\u{1F3AC} Frame at ${videoState.currentTime.toFixed(1)}s: near-duplicate, skipping`);
+          lastCapturedTime = videoState.currentTime;
+          await this.delay(frameIntervalMs);
+          continue;
+        }
+        this.capturedHashes.add(hash);
+        this.captures.push({
+          id: this.captures.length + 1,
+          screenshot,
+          source,
+          postId: this.extractPostId(),
+          timestamp: Date.now(),
+          scrollPosition: 0,
+          isVideoFrame: true,
+          videoId,
+          frameIndex: capturedFrames + 1,
+          totalFrames: maxFrames
+        });
+        this.saveScreenshotToDisk(screenshot, source, this.captures.length);
+        capturedFrames++;
+        lastCapturedTime = videoState.currentTime;
+        console.log(`\u{1F3AC} Frame ${capturedFrames} captured at ${videoState.currentTime.toFixed(1)}s`);
+        await this.delay(frameIntervalMs);
+      } catch (error) {
+        console.error(`\u{1F3AC} Frame capture failed:`, error);
+        await this.delay(500);
+      }
+    }
+    this.captures.filter((c2) => c2.videoId === videoId).forEach((c2) => c2.totalFrames = capturedFrames);
+    console.log(`\u{1F3AC} Video complete: ${capturedFrames} unique frames captured`);
+    return capturedFrames;
+  }
+  /**
+   * Get the current count of captured photos/screenshots.
+   * Used by LLM to track capture progress.
+   */
+  getPhotoCount() {
+    return this.captures.length;
+  }
+  /**
+   * Simple delay helper for video frame timing.
+   */
+  delay(ms) {
+    return new Promise((resolve2) => setTimeout(resolve2, ms));
+  }
+  /**
+   * Extract Instagram post ID from current URL.
+   * Post URLs follow pattern: instagram.com/p/{POST_ID}/
+   * Returns undefined for non-post pages (stories, feed, etc.)
+   */
+  extractPostId() {
+    const url = this.page.url();
+    const match = url.match(/\/p\/([A-Za-z0-9_-]+)\//);
+    return match?.[1];
+  }
+  /**
+   * Compute a perceptual hash (average hash) of a screenshot.
+   * Resilient to minor differences (scroll jitter, compression artifacts).
+   * Returns a 64-bit hex string (16 hex chars).
+   */
+  async computePerceptualHash(screenshot) {
+    try {
+      const image2 = await Jimp.read(screenshot);
+      image2.resize({ w: 8, h: 8 });
+      image2.greyscale();
+      const pixels = [];
+      for (let y2 = 0; y2 < 8; y2++) {
+        for (let x2 = 0; x2 < 8; x2++) {
+          const color = image2.getPixelColor(x2, y2);
+          pixels.push(color >> 24 & 255);
+        }
+      }
+      const mean = pixels.reduce((a, b) => a + b, 0) / pixels.length;
+      let hex = "";
+      for (let i = 0; i < 64; i += 4) {
+        const nibble = [0, 1, 2, 3].map((j) => pixels[i + j] > mean ? "1" : "0").join("");
+        hex += parseInt(nibble, 2).toString(16);
+      }
+      return hex;
+    } catch {
+      return (0, import_crypto.createHash)("md5").update(screenshot).digest("hex");
+    }
+  }
+  /**
+   * Hamming distance between two hex hash strings (count differing bits).
+   */
+  hammingDistance(hash1, hash2) {
+    if (hash1.length !== hash2.length) return 64;
+    let distance3 = 0;
+    for (let i = 0; i < hash1.length; i++) {
+      let xor = parseInt(hash1[i], 16) ^ parseInt(hash2[i], 16);
+      while (xor) {
+        distance3 += xor & 1;
+        xor >>= 1;
+      }
+    }
+    return distance3;
+  }
+  /**
+   * Check if a hash is perceptually similar to any previously captured hash.
+   * Threshold: Hamming distance <= 8 out of 64 bits (~87.5% similar).
+   */
+  isSimilarToExisting(hash) {
+    for (const existing of this.capturedHashes) {
+      if (this.hammingDistance(hash, existing) <= 8) return true;
+    }
+    return false;
+  }
+  /**
+   * Get current scroll Y position via CDP (no page.evaluate needed).
+   */
+  async getScrollPosition() {
+    try {
+      const client = await this.page.context().newCDPSession(this.page);
+      const result = await client.send("Runtime.evaluate", {
+        expression: "window.scrollY",
+        returnByValue: true
+      });
+      await client.detach();
+      return result.result.value;
+    } catch {
+      return await this.page.evaluate(() => window.scrollY);
+    }
+  }
+  /**
+   * Get video element state via CDP for synced frame capture.
+   * Returns null if no video found on page.
+   */
+  async getVideoState() {
+    try {
+      const client = await this.page.context().newCDPSession(this.page);
+      const result = await client.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        const v = document.querySelector('video');
+                        if (!v) return JSON.stringify({ found: false });
+                        return JSON.stringify({
+                            found: true,
+                            paused: v.paused,
+                            currentTime: v.currentTime,
+                            buffering: v.readyState < 3,
+                            duration: v.duration || 0
+                        });
+                    })()
+                `,
+        returnByValue: true
+      });
+      await client.detach();
+      return JSON.parse(result.result.value);
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * Append a line to the session log buffer.
+   * Lines are timestamped relative to session start.
+   */
+  appendLog(line) {
+    const elapsed = ((Date.now() - this.sessionStartTime) / 1e3).toFixed(1);
+    this.logBuffer.push(`[${elapsed}s] ${line}`);
+  }
+  /**
+   * Append a raw line (no timestamp prefix) to the session log buffer.
+   * Used for headers, separators, and pre-formatted content.
+   */
+  appendLogRaw(line) {
+    this.logBuffer.push(line);
+  }
+  /**
+   * Flush the session log buffer to a markdown file alongside screenshots.
+   * Called at session end. Only writes if outputDir is configured.
+   */
+  flushSessionLog() {
+    if (!this.outputDir || this.logBuffer.length === 0) return;
+    const filepath = path3.join(this.outputDir, "session_log.md");
+    const content = this.logBuffer.join("\n") + "\n";
+    fs4.writeFileSync(filepath, content, "utf-8");
+    console.log(`\u{1F4DD} Session log saved: ${filepath}`);
+  }
+  /**
+   * Log summary of captured content.
+   */
+  logSummary() {
+    const breakdown = this.getSourceBreakdown();
+    const memoryMB = (this.getMemoryUsage() / (1024 * 1024)).toFixed(2);
+    console.log(`
+\u{1F4F8} Screenshot Collection Summary:`);
+    console.log(`   Total: ${this.captures.length} captures`);
+    console.log(`   Feed: ${breakdown.feed}, Stories: ${breakdown.story}, Search: ${breakdown.search}`);
+    console.log(`   Memory: ${memoryMB}MB`);
+    console.log("");
+  }
+};
+
+// src/main/services/ContentReadiness.ts
+var DEFAULT_CONFIG2 = {
+  imageLoadTimeoutMs: 3e3,
+  networkIdleTimeoutMs: 2e3,
+  pollIntervalMs: 100
+};
+var ContentReadiness = class {
+  page;
+  config;
+  // CDP session management (following A11yNavigator pattern)
+  managedSession = null;
+  sessionLastUsed = 0;
+  SESSION_TIMEOUT_MS = 5e3;
+  constructor(page, config = {}) {
+    this.page = page;
+    this.config = { ...DEFAULT_CONFIG2, ...config };
+  }
+  // =========================================================================
+  // CDP Session Management
+  // =========================================================================
+  async withSession(operation) {
+    const now = Date.now();
+    if (this.managedSession && now - this.sessionLastUsed > this.SESSION_TIMEOUT_MS) {
+      await this.releaseSession();
+    }
+    if (!this.managedSession) {
+      this.managedSession = await this.page.context().newCDPSession(this.page);
+    }
+    this.sessionLastUsed = now;
+    try {
+      return await operation(this.managedSession);
+    } catch (error) {
+      await this.releaseSession();
+      throw error;
+    }
+  }
+  async releaseSession() {
+    if (this.managedSession) {
+      await this.managedSession.detach().catch(() => {
+      });
+      this.managedSession = null;
+    }
+  }
+  // =========================================================================
+  // Core Readiness Checks
+  // =========================================================================
+  /**
+   * Wait for images in the current viewport to be loaded.
+   * Uses CDP Runtime.evaluate to check img.complete status.
+   *
+   * @param timeoutMs - Maximum wait time (default: 3000ms)
+   * @returns ReadinessResult with status and timing info
+   */
+  async waitForImagesLoaded(timeoutMs) {
+    const timeout = timeoutMs ?? this.config.imageLoadTimeoutMs;
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+      const imagesReady = await this.checkImagesLoaded();
+      if (imagesReady.allLoaded) {
+        return {
+          ready: true,
+          waitedMs: Date.now() - startTime,
+          details: `${imagesReady.loadedCount}/${imagesReady.totalCount} images loaded`
+        };
+      }
+      await new Promise((r) => setTimeout(r, this.config.pollIntervalMs));
+    }
+    const finalState = await this.checkImagesLoaded();
+    return {
+      ready: false,
+      reason: "images_loading",
+      waitedMs: Date.now() - startTime,
+      details: `${finalState.loadedCount}/${finalState.totalCount} images loaded (timeout)`
+    };
+  }
+  /**
+   * Check if all images in viewport are loaded (single check, no wait).
+   */
+  async checkImagesLoaded() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        const viewportHeight = window.innerHeight;
+                        const images = Array.from(document.images);
+
+                        // Only check images in viewport (visible)
+                        const visibleImages = images.filter(img => {
+                            const rect = img.getBoundingClientRect();
+                            return rect.top < viewportHeight && rect.bottom > 0 && rect.width > 0;
+                        });
+
+                        const loadedImages = visibleImages.filter(img =>
+                            img.complete && img.naturalHeight > 0
+                        );
+
+                        return JSON.stringify({
+                            allLoaded: loadedImages.length === visibleImages.length,
+                            totalCount: visibleImages.length,
+                            loadedCount: loadedImages.length
+                        });
+                    })()
+                `,
+        returnByValue: true
+      });
+      try {
+        return JSON.parse(result.value);
+      } catch {
+        return { allLoaded: true, totalCount: 0, loadedCount: 0 };
+      }
+    });
+  }
+  /**
+   * Wait for CSS transitions and animations to complete.
+   * Checks for running animations in the viewport.
+   *
+   * @param timeoutMs - Maximum wait time (default: 1500ms)
+   */
+  async waitForTransitionsComplete(timeoutMs = 1500) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      const animating = await this.hasActiveAnimations();
+      if (!animating) {
+        return {
+          ready: true,
+          waitedMs: Date.now() - startTime
+        };
+      }
+      await new Promise((r) => setTimeout(r, this.config.pollIntervalMs));
+    }
+    return {
+      ready: false,
+      reason: "timeout",
+      waitedMs: Date.now() - startTime,
+      details: "Animations still running"
+    };
+  }
+  /**
+   * Check if there are active CSS animations/transitions.
+   */
+  async hasActiveAnimations() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        // Check for running animations via getAnimations API
+                        const animations = document.getAnimations ? document.getAnimations() : [];
+                        const runningAnimations = animations.filter(a =>
+                            a.playState === 'running' || a.playState === 'pending'
+                        );
+                        return runningAnimations.length > 0;
+                    })()
+                `,
+        returnByValue: true
+      });
+      return result.value === true;
+    });
+  }
+  /**
+   * Combined readiness check: overlays + images + transitions.
+   * This is the main method to call before taking a screenshot.
+   *
+   * @param timeoutMs - Maximum total wait time (default: 3000ms)
+   * @param dismissOverlays - Whether to dismiss blocking overlays (default: true)
+   * @returns ReadinessResult
+   */
+  async waitForContentReady(timeoutMs = 3e3, dismissOverlays = true) {
+    const startTime = Date.now();
+    const remainingTime = () => Math.max(0, timeoutMs - (Date.now() - startTime));
+    if (dismissOverlays) {
+      const viewportClear = await this.ensureViewportClear(2);
+      if (!viewportClear) {
+        return {
+          ready: false,
+          reason: "unknown",
+          waitedMs: Date.now() - startTime,
+          details: "Blocking overlay could not be dismissed"
+        };
+      }
+    }
+    const imageResult = await this.waitForImagesLoaded(Math.min(remainingTime(), 2500));
+    if (!imageResult.ready && remainingTime() <= 0) {
+      return {
+        ready: false,
+        reason: "images_loading",
+        waitedMs: Date.now() - startTime,
+        details: imageResult.details
+      };
+    }
+    if (remainingTime() > 200) {
+      const transitionResult = await this.waitForTransitionsComplete(Math.min(remainingTime(), 1e3));
+      if (!transitionResult.ready) {
+        console.log(`  \u23F3 Transitions still running, proceeding anyway`);
+      }
+    }
+    return {
+      ready: true,
+      waitedMs: Date.now() - startTime,
+      details: imageResult.details
+    };
+  }
+  /**
+   * Get element position by backend node ID.
+   * Used for position re-verification before capture.
+   *
+   * @param backendNodeId - CDP backend node ID
+   * @returns Bounding box or null if element not found
+   */
+  async getElementPosition(backendNodeId) {
+    return this.withSession(async (session2) => {
+      try {
+        const { model } = await session2.send("DOM.getBoxModel", {
+          backendNodeId
+        });
+        if (!model || !model.content) {
+          return null;
+        }
+        const [x1, y1, x2, , , y3] = model.content;
+        const width = x2 - x1;
+        const height = y3 - y1;
+        return {
+          x: x1,
+          y: y1,
+          width,
+          height,
+          centerY: y1 + height / 2
+        };
+      } catch {
+        return null;
+      }
+    });
+  }
+  /**
+   * Get current viewport center Y coordinate.
+   */
+  async getViewportCenterY() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: "window.innerHeight / 2",
+        returnByValue: true
+      });
+      return result.value;
+    });
+  }
+  /**
+   * Check if an element has drifted from expected center position.
+   *
+   * @param backendNodeId - CDP backend node ID
+   * @param tolerance - Acceptable drift in pixels (default: 50)
+   * @returns Drift info or null if element not found
+   */
+  async checkElementDrift(backendNodeId, tolerance = 50) {
+    const position = await this.getElementPosition(backendNodeId);
+    if (!position) return null;
+    const viewportCenterY = await this.getViewportCenterY();
+    const drift = Math.abs(position.centerY - viewportCenterY);
+    return {
+      drifted: drift > tolerance,
+      drift,
+      elementCenterY: position.centerY,
+      viewportCenterY
+    };
+  }
+  /**
+   * Check video element state for synced frame capture.
+   *
+   * @returns Video state or null if no video found
+   */
+  async getVideoState() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        const v = document.querySelector('video');
+                        if (!v) return JSON.stringify({ found: false });
+                        return JSON.stringify({
+                            found: true,
+                            paused: v.paused,
+                            currentTime: v.currentTime,
+                            buffering: v.readyState < 3,
+                            duration: v.duration || 0
+                        });
+                    })()
+                `,
+        returnByValue: true
+      });
+      try {
+        return JSON.parse(result.value);
+      } catch {
+        return null;
+      }
+    });
+  }
+  /**
+   * Detect if any overlay panels are blocking the main content.
+   * Looks for common Instagram overlays: Notifications, Messages, Search, etc.
+   *
+   * @returns Overlay info or null if no overlay detected
+   */
+  async detectBlockingOverlay() {
+    return this.withSession(async (session2) => {
+      const { result } = await session2.send("Runtime.evaluate", {
+        expression: `
+                    (() => {
+                        // Look for common overlay patterns
+                        const overlayPatterns = [
+                            { type: 'notifications', heading: 'Notifications' },
+                            { type: 'messages', heading: 'Messages' },
+                            { type: 'search', heading: 'Search' }
+                        ];
+
+                        // Check for overlay headings
+                        for (const pattern of overlayPatterns) {
+                            // Look for heading elements with exact text
+                            const headings = document.querySelectorAll('h1, h2, [role="heading"]');
+                            for (const h of headings) {
+                                if (h.textContent?.trim() === pattern.heading) {
+                                    // Found overlay - look for close button (X) nearby
+                                    // Close button is typically a sibling or nearby element
+                                    const container = h.closest('div[role="dialog"], div[style*="position"]') || h.parentElement?.parentElement;
+
+                                    if (container) {
+                                        // Look for close button by aria-label or SVG with specific path
+                                        const closeBtn = container.querySelector('[aria-label="Close"], [aria-label*="close"], button svg');
+
+                                        if (closeBtn) {
+                                            const rect = closeBtn.getBoundingClientRect();
+                                            return JSON.stringify({
+                                                found: true,
+                                                type: pattern.type,
+                                                closeButton: {
+                                                    x: rect.x + rect.width / 2,
+                                                    y: rect.y + rect.height / 2,
+                                                    width: rect.width,
+                                                    height: rect.height
+                                                }
+                                            });
+                                        }
+                                    }
+
+                                    // Overlay found but no close button
+                                    return JSON.stringify({ found: true, type: pattern.type });
+                                }
+                            }
+                        }
+
+                        // Check for generic dialog/modal overlays
+                        const dialogs = document.querySelectorAll('[role="dialog"], [aria-modal="true"]');
+                        for (const dialog of dialogs) {
+                            const rect = dialog.getBoundingClientRect();
+                            // Only consider it blocking if it covers significant viewport area
+                            if (rect.width > window.innerWidth * 0.3 || rect.height > window.innerHeight * 0.3) {
+                                const closeBtn = dialog.querySelector('[aria-label="Close"], [aria-label*="close"]');
+                                if (closeBtn) {
+                                    const btnRect = closeBtn.getBoundingClientRect();
+                                    return JSON.stringify({
+                                        found: true,
+                                        type: 'dialog',
+                                        closeButton: {
+                                            x: btnRect.x + btnRect.width / 2,
+                                            y: btnRect.y + btnRect.height / 2,
+                                            width: btnRect.width,
+                                            height: btnRect.height
+                                        }
+                                    });
+                                }
+                                return JSON.stringify({ found: true, type: 'dialog' });
+                            }
+                        }
+
+                        // No blocking overlay found
+                        return JSON.stringify({ found: false, type: 'unknown' });
+                    })()
+                `,
+        returnByValue: true
+      });
+      try {
+        return JSON.parse(result.value);
+      } catch {
+        return null;
+      }
+    });
+  }
+  /**
+   * Dismiss any blocking overlay by clicking its close button.
+   * Uses keyboard shortcut (Escape) as fallback.
+   *
+   * @returns true if overlay was dismissed, false if none found or dismissal failed
+   */
+  async dismissOverlay() {
+    const overlay2 = await this.detectBlockingOverlay();
+    if (!overlay2?.found) {
+      return false;
+    }
+    console.log(`  \u{1F533} Detected blocking overlay: ${overlay2.type}`);
+    if (overlay2.closeButton) {
+      try {
+        await this.withSession(async (session2) => {
+          await session2.send("Input.dispatchMouseEvent", {
+            type: "mousePressed",
+            x: overlay2.closeButton.x,
+            y: overlay2.closeButton.y,
+            button: "left",
+            clickCount: 1
+          });
+          await session2.send("Input.dispatchMouseEvent", {
+            type: "mouseReleased",
+            x: overlay2.closeButton.x,
+            y: overlay2.closeButton.y,
+            button: "left",
+            clickCount: 1
+          });
+        });
+        await new Promise((r) => setTimeout(r, 300));
+        const stillOpen = await this.detectBlockingOverlay();
+        if (!stillOpen?.found) {
+          console.log(`  \u2713 Dismissed ${overlay2.type} overlay via close button`);
+          return true;
+        }
+      } catch (error) {
+        console.log(`  \u26A0\uFE0F Failed to click close button: ${error}`);
+      }
+    }
+    try {
+      await this.withSession(async (session2) => {
+        await session2.send("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: "Escape",
+          code: "Escape",
+          windowsVirtualKeyCode: 27,
+          nativeVirtualKeyCode: 27
+        });
+        await session2.send("Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key: "Escape",
+          code: "Escape",
+          windowsVirtualKeyCode: 27,
+          nativeVirtualKeyCode: 27
+        });
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      const stillOpen = await this.detectBlockingOverlay();
+      if (!stillOpen?.found) {
+        console.log(`  \u2713 Dismissed ${overlay2.type} overlay via Escape key`);
+        return true;
+      }
+    } catch (error) {
+      console.log(`  \u26A0\uFE0F Failed to press Escape: ${error}`);
+    }
+    console.log(`  \u26A0\uFE0F Could not dismiss ${overlay2.type} overlay`);
+    return false;
+  }
+  /**
+   * Ensure viewport is clear for capture by dismissing any blocking overlays.
+   * This should be called before any screenshot capture.
+   *
+   * @param maxAttempts - Maximum dismissal attempts (default: 3)
+   * @returns true if viewport is clear, false if overlays persist
+   */
+  async ensureViewportClear(maxAttempts = 3) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const overlay2 = await this.detectBlockingOverlay();
+      if (!overlay2?.found) {
+        return true;
+      }
+      const dismissed = await this.dismissOverlay();
+      if (!dismissed) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    const finalCheck = await this.detectBlockingOverlay();
+    return !finalCheck?.found;
+  }
+  /**
+   * Release managed CDP session.
+   * Call this when done with the service.
+   */
+  async cleanup() {
+    await this.releaseSession();
+  }
+};
+
+// src/main/services/InstagramScraper.ts
+var path5 = __toESM(require("path"), 1);
+var os = __toESM(require("os"), 1);
+
 // src/main/services/NavigationLLM.ts
 var DEFAULT_CONFIG3 = {
-  model: "gpt-4o-mini",
-  maxTokens: 800,
-  temperature: 0.5
+  model: ModelConfig.navigation,
+  maxTokens: 16384
 };
 var NavigationLLM = class {
   apiKey;
   model;
   maxTokens;
-  temperature;
   debug;
   visionDetail;
   // Track calls for cost logging
@@ -45979,9 +46045,8 @@ var NavigationLLM = class {
   sessionJitter;
   constructor(config) {
     this.apiKey = config.apiKey;
-    this.model = config.model || process.env.KOWALSKI_NAV_MODEL || DEFAULT_CONFIG3.model;
+    this.model = config.model || DEFAULT_CONFIG3.model;
     this.maxTokens = config.maxTokens || DEFAULT_CONFIG3.maxTokens;
-    this.temperature = config.temperature || DEFAULT_CONFIG3.temperature;
     this.debug = config.debug ?? true;
     this.visionDetail = config.visionDetail || process.env.KOWALSKI_VISION_DETAIL || "low";
     this.sessionJitter = 0.85 + Math.random() * 0.3;
@@ -46014,8 +46079,27 @@ HOW TO CAPTURE FEED POSTS:
 Each feed post has a timestamp link (role=link, named "1h", "16h", "2d", "1w", etc.) inside its article. Click it to navigate to the post's detail page where the image is full-size and the caption is complete.
 - Click the timestamp link \u2192 page navigates to post detail \u2192 THEN captureNow: true
 - If carousel: ArrowRight + captureNow for each slide before leaving
-- After capturing, back() to return to the feed, then scroll past the captured post before clicking the next one
-\u26A0\uFE0F After back(), the feed shows the SAME post at the top. Scroll before clicking or you'll reopen it.
+- After capturing, press Escape (if modal) or click the Instagram logo (link "Instagram" in sidebar) to return to the feed
+- Then scroll past the captured post before clicking the next one
+
+ARRIVING AT A POST DETAIL PAGE:
+When the URL contains /p/ or /reel/, you are on a post detail page.
+YOUR VERY FIRST ACTION must be: captureNow (set strategic.captureNow = true).
+Do NOT click any other element first. Do NOT scroll. Capture FIRST, always.
+
+FULL SEQUENCE ON DETAIL PAGE:
+1. Arrive \u2192 captureNow (IMMEDIATELY, no other actions first)
+2. Check tree for carousel indicators (dot indicators, Next button ON the image, "Slide 1 of N")
+   - If carousel: press ArrowRight \u2192 captureNow \u2192 repeat until last slide
+   - If not carousel: skip to step 3
+3. Leave: click Instagram logo (top-left) to return to feed (NOT Escape \u2014 see standalone vs modal below)
+4. Scroll down to bring fresh posts into view
+5. Click next timestamp link
+
+COMMON MISTAKES (avoid these):
+- Clicking "More posts from [account]" links below the comments \u2014 navigates AWAY to a different post
+- Clicking timestamp links on the detail page \u2014 you are already on the detail page
+- Pressing Escape on a standalone page \u2014 does nothing, use Instagram logo instead
 
 CAPTURE MECHANICS:
 - captureNow = ONE-SHOT. Send once, screenshot taken instantly, then MOVE ON.
@@ -46025,6 +46109,16 @@ CAPTURE MECHANICS:
 
 CAPTURE PACE:
 If you have scrolled past 3 or more posts without capturing any, you are being too passive. Capture posts as you encounter them \u2014 the feed is finite and scrolling without capturing wastes session time.
+
+EFFICIENT FEED BROWSING:
+On the feed, follow this rhythm:
+1. SCROLL to bring a fresh post into view
+2. FIND the timestamp link (role=link, named "1h", "3h", "16h", "2d", etc.) in the nearest article
+3. CLICK the timestamp link \u2192 navigates to post detail page
+4. CAPTURE (captureNow) \u2192 then leave (Escape or click Instagram logo)
+5. Repeat
+Do NOT scroll more than 2 times in a row without clicking a timestamp link. Every scroll should be followed by a click.
+If you scroll 3+ times without clicking, you are wasting session time \u2014 STOP scrolling and click the nearest timestamp.
 
 GRID (profiles/explore/hashtags):
 - Click thumbnail link \u2192 modal opens \u2192 captureNow \u2192 navigate carousel slides \u2192 Escape \u2192 next thumbnail
@@ -46061,11 +46155,31 @@ PAGE CONTEXT (infer from tree + screenshot):
 - "dialog" container = modal overlay
 - Use container roles, URL, and screenshot to understand layout
 
+STANDALONE PAGES vs MODALS:
+When you click a timestamp link from the feed, Instagram navigates to a STANDALONE post detail page.
+This is a full page, not a modal overlay. Escape does NOTHING here.
+- MODAL: You see a dialog container in the accessibility tree. Press Escape or click Close/X to dismiss.
+- STANDALONE PAGE: No dialog in the tree. You navigated to a new page (/p/ or /reel/ in URL). Click the Instagram logo (top-left link named "Instagram") to return to the feed.
+CRITICAL: If you press Escape and nothing changes, you are on a standalone page. Do NOT press Escape again \u2014 click the Instagram logo instead.
+
+CAROUSEL vs "MORE POSTS" \u2014 DO NOT CONFUSE THESE:
+CAROUSEL CONTROLS (slides within the SAME post):
+- Small arrow buttons overlaid ON the image (Next/Previous)
+- Dot indicators below the image
+- Use press ArrowRight/ArrowLeft to advance slides
+- Tree shows "Slide 1 of 4" or similar indicators
+
+"MORE POSTS FROM [account]" (navigates to a DIFFERENT post):
+- Grid of thumbnail images BELOW the post and comments section
+- Appears after scrolling down past the comments
+- NEVER click these \u2014 they navigate away from the post you're capturing
+To navigate carousel slides: press ArrowRight, do NOT click links below the post.
+
 STAGNATION RECOVERY:
 - Scroll stuck (scrollY unchanged): Press Escape (overlay?), click content area to restore focus, retry
 - Click fails: Try different link in same article, or scroll to next post
-- Capture loop (wait+captureNow repeated): capture already taken \u2014 back() immediately
-- Reopened same post: forgot to scroll after back() \u2014 scroll(down, medium) first
+- Capture loop (wait+captureNow repeated): capture already taken \u2014 press Escape or click Instagram logo to leave
+- Reopened same post: forgot to scroll after returning \u2014 scroll(down, medium) first
 - General loop (3+ repeated actions): switch strategy entirely (feed\u2192search, search\u2192profile)
 - Content not loading: wait(2) for lazy loading
 
@@ -46085,28 +46199,32 @@ AVAILABLE ACTIONS:
 - type(text): Type into focused input
 - press(key): Escape, Enter, ArrowRight, ArrowLeft, Backspace, Space, Home, End, etc.
 - clear(): Clear focused input
-- back(): Browser back (use from post detail to return to feed, NEVER from feed itself)
 - wait(seconds): Wait 1-5 seconds
 
 OUTPUT FORMAT (JSON only):
 {
   "reasoning": "Brief explanation",
-  "action": "click|hover|scroll|type|press|clear|back|wait",
-  "params": { ... },
-  "expectedOutcome": "What should happen",
-  "confidence": 0.0-1.0,
-  "capture": { "shouldCapture": true, "targetId": 12, "reason": "..." },
-  "strategic": {
-    "switchPhase": null, "terminateSession": false, "captureNow": true,
-    "lingerDuration": "short", "engageDepth": "quick", "closeEngagement": false,
-    "reason": "..."
-  }
+  "action": "click",
+  "params": { "id": 47, "expectedName": "16h" },
+  "expectedOutcome": "Navigate to post detail page",
+  "confidence": 0.9,
+  "capture": { "shouldCapture": false },
+  "strategic": { "captureNow": false, "lingerDuration": "short" }
 }
-\u26A0\uFE0F For click/hover: params MUST include "expectedName" \u2014 the EXACT name from the accessibility tree. Do NOT invent names.
+
+PARAMS BY ACTION TYPE:
+- click: { "id": <element_id>, "expectedName": "<name from tree>" }
+- hover: { "id": <element_id>, "expectedName": "<name from tree>" }
+- scroll: { "direction": "down", "amount": "medium" }
+- type: { "text": "search query" }
+- press: { "key": "Escape" }
+- wait: { "seconds": 2 }
+- clear: {}
+\u26A0\uFE0F "id" in click/hover params is the element ID from the tree (e.g., id:47). This is NOT the same as capture.targetId.
+\u26A0\uFE0F "expectedName" MUST be the EXACT name from the accessibility tree. Do NOT invent names.
 \u26A0\uFE0F User interests are SEARCH TOPICS ONLY \u2014 feed and stories capture EVERYTHING regardless of topic.
-\u26A0\uFE0F back() from the feed navigates AWAY from Instagram. Only use back() from post detail pages.
-\u26A0\uFE0F After back(), ALWAYS scroll before clicking any timestamp \u2014 otherwise you'll reopen the same post.
-\u26A0\uFE0F Carousel posts: check for "Next"/"Go Back" buttons or slide indicators. ArrowRight + captureNow each slide before going back.`;
+\u26A0\uFE0F Carousel posts: check for "Next"/"Go Back" buttons or slide indicators. ArrowRight + captureNow each slide before leaving.
+\u26A0\uFE0F On a post detail page (/p/ or /reel/ in URL)? Your FIRST action must be captureNow. Do not click anything else first.`;
   }
   /**
    * Build a dynamic progress audit from the current context.
@@ -46179,6 +46297,22 @@ OUTPUT FORMAT (JSON only):
       if (scrollCount >= 4 && clickCount === 0) {
         warnings.push(
           `\u26A0\uFE0F SCROLL LOOP: You have scrolled ${scrollCount} times in the last ${last8.length} actions without clicking any post. Scrolling the feed without entering posts produces ZERO captures. Find the nearest timestamp link (e.g., "1h", "16h", "2d") and CLICK IT to navigate to a post detail page, then captureNow.`
+        );
+      }
+    }
+    if (recentActions.length >= 2) {
+      let consecutiveEscapes = 0;
+      for (let i = recentActions.length - 1; i >= 0; i--) {
+        const a = recentActions[i];
+        if (a.action === "press" && a.params?.key === "Escape") {
+          consecutiveEscapes++;
+        } else {
+          break;
+        }
+      }
+      if (consecutiveEscapes >= 2) {
+        warnings.push(
+          `\u26A0\uFE0F ESCAPE NOT WORKING: You pressed Escape ${consecutiveEscapes} times with no effect. You are on a STANDALONE PAGE, not a modal. Escape cannot close it. Click the Instagram logo (link "Instagram" in the sidebar/top-left) to return to the feed.`
         );
       }
     }
@@ -46499,33 +46633,52 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
         { type: "text", text: userPrompt }
       ]
     } : { role: "user", content: userPrompt };
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.apiKey}`
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          { role: "system", content: this.getSystemPrompt() },
-          userMessage
-        ],
-        response_format: { type: "json_object" },
-        max_tokens: this.maxTokens,
-        temperature: this.temperature
-      })
-    });
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`LLM API error: ${response.status} - ${errorText}`);
+    const requestBody = {
+      model: this.model,
+      messages: [
+        { role: "system", content: this.getSystemPrompt() },
+        userMessage
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: this.maxTokens
+    };
+    let content = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`LLM API error: ${response.status} - ${errorText}`);
+      }
+      const data = await response.json();
+      if (data.usage) {
+        console.log(`  \u{1F9E0} LLM tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${sendScreenshot ? ` (vision:${this.visionDetail})` : ""}`);
+      }
+      const choice = data.choices?.[0];
+      console.log("[DEBUG] Full response choice:", JSON.stringify({
+        finish_reason: choice?.finish_reason,
+        refusal: choice?.message?.refusal,
+        content_length: choice?.message?.content?.length,
+        content_preview: typeof choice?.message?.content === "string" ? choice.message.content.slice(0, 100) : "non-string"
+      }));
+      if (choice?.message?.refusal && !choice?.message?.content) {
+        console.warn(`\u26A0\uFE0F LLM refused request (attempt ${attempt + 1}): ${choice.message.refusal}`);
+      }
+      const raw = choice?.message?.content;
+      content = typeof raw === "string" ? raw : Array.isArray(raw) ? raw.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
+      if (content && content.trim().length > 0) break;
+      if (attempt < 2) {
+        console.log(`[DEBUG] Empty response on attempt ${attempt + 1} (finish_reason: ${choice?.finish_reason}), retrying in 500ms...`);
+        await new Promise((r) => setTimeout(r, 500));
+      }
     }
-    const data = await response.json();
-    if (data.usage) {
-      console.log(`  \u{1F9E0} LLM tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${sendScreenshot ? ` (vision:${this.visionDetail})` : ""}`);
-    }
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
+    if (!content || content.trim().length === 0) {
       throw new Error("Empty LLM response");
     }
     const parsed = JSON.parse(content);
@@ -46535,6 +46688,24 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
    * Validate and sanitize the LLM decision.
    */
   validateDecision(decision, elements) {
+    if (decision.action === "captureNow" || decision.action === "capture") {
+      console.log(`  \u{1F504} Rewriting "${decision.action}" action \u2192 wait + captureNow`);
+      decision = {
+        ...decision,
+        action: "wait",
+        params: { seconds: 1 },
+        strategic: { ...decision.strategic, captureNow: true }
+      };
+    }
+    if (decision.action === "back") {
+      console.log(`  \u{1F6E1}\uFE0F Blocking back() action \u2014 converting to scroll`);
+      return {
+        ...decision,
+        action: "scroll",
+        params: { direction: "down", amount: "medium" },
+        reasoning: `back() blocked (unreliable in SPA), scrolling instead. Use Escape to close modals or click Instagram logo to return to feed.`
+      };
+    }
     const validActions = ["click", "scroll", "type", "press", "wait", "hover", "back", "clear"];
     if (!validActions.includes(decision.action)) {
       return {
@@ -46546,8 +46717,19 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
     }
     if (decision.action === "click") {
       const clickParams = decision.params;
-      const targetElement = elements.find((e) => e.id === clickParams.id);
+      let targetElement = elements.find((e) => e.id === clickParams.id);
+      if (!targetElement && clickParams.expectedName) {
+        const name = clickParams.expectedName;
+        targetElement = elements.find(
+          (e) => e.name === name || name.length >= 2 && e.name.startsWith(name)
+        );
+        if (targetElement) {
+          console.log(`  \u{1F527} Click recovery: id=${clickParams.id} not found, matched by expectedName="${name}" \u2192 id:${targetElement.id}`);
+          clickParams.id = targetElement.id;
+        }
+      }
       if (!targetElement) {
+        console.warn(`  \u26A0\uFE0F Click target not found \u2014 params: ${JSON.stringify(decision.params)}`);
         return {
           ...decision,
           action: "scroll",
@@ -46671,10 +46853,10 @@ Key landmarks: ${ts.landmarks.join(", ")}`);
     const recentFailures = recent.filter((a) => !a.success).length;
     if (recentFailures >= 3) {
       return {
-        reasoning: `Fallback: ${reason}. Multiple failures, navigating back.`,
-        action: "back",
-        params: {},
-        expectedOutcome: "Return to previous page",
+        reasoning: `Fallback: ${reason}. Multiple failures, pressing Escape.`,
+        action: "press",
+        params: { key: "Escape" },
+        expectedOutcome: "Close any blocking overlay",
         confidence: 0.2
       };
     }
@@ -47969,6 +48151,7 @@ var InstagramScraper = class {
     this.screenshotCollector.appendLogRaw(`**Started:** ${(/* @__PURE__ */ new Date()).toISOString()}`);
     this.screenshotCollector.appendLogRaw(`**Budget:** ${(config.maxDurationMs / 1e3 / 60).toFixed(1)} minutes`);
     this.screenshotCollector.appendLogRaw(`**Interests:** ${userInterests.join(", ")}`);
+    this.screenshotCollector.appendLogRaw(`**Navigation Model:** ${ModelConfig.navigation}`);
     this.screenshotCollector.appendLogRaw(`
 ---
 `);
@@ -48051,7 +48234,17 @@ var InstagramScraper = class {
       };
       const decision = await this.navigationLLM.decideAction(context, elements, screenshot);
       console.log(`  \u{1F916} Decision: ${decision.action} - ${decision.reasoning}`);
-      this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`${decision.action}\` \u2014 ${decision.reasoning}`);
+      if (decision.action === "click") {
+        const clickParams = decision.params;
+        const targetEl = elements.find((e) => e.id === clickParams.id);
+        const elInfo = targetEl ? ` \u2192 id:${targetEl.id} ${targetEl.role} "${targetEl.name}"` : ` \u2192 id:${clickParams.id} (not found)`;
+        this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`${decision.action}\`${elInfo} \u2014 ${decision.reasoning}`);
+      } else if (decision.action === "press") {
+        const pressParams = decision.params;
+        this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`press ${pressParams.key}\` \u2014 ${decision.reasoning}`);
+      } else {
+        this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`${decision.action}\` \u2014 ${decision.reasoning}`);
+      }
       if (decision.strategic) {
         const strategicParts = [];
         if (decision.strategic.switchPhase) {
@@ -48520,14 +48713,12 @@ var BatchDigestGenerator = class {
         "Authorization": `Bearer ${this.apiKey}`
       },
       body: JSON.stringify({
-        model: "gpt-4o",
+        model: ModelConfig.digest,
         messages: [{
           role: "user",
           content: messageContent
         }],
-        max_tokens: 3e3,
-        temperature: 0.3,
-        // Low for factual accuracy
+        max_completion_tokens: 16384,
         response_format: { type: "json_object" }
       })
     });
@@ -48541,7 +48732,8 @@ var BatchDigestGenerator = class {
       await this.usageService.incrementUsage(data.usage);
       console.log(`\u{1F4B0} Digest cost tracked: ${data.usage.total_tokens} tokens`);
     }
-    const content = data.choices[0]?.message?.content;
+    const rawContent = data.choices[0]?.message?.content;
+    const content = typeof rawContent === "string" ? rawContent : Array.isArray(rawContent) ? rawContent.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
     if (!content) {
       throw new Error("DIGEST_GENERATION_FAILED: No content in response");
     }
@@ -48744,7 +48936,7 @@ var ImageTagger = class {
   }
   /**
    * Batch-tag all captured images in a single API call.
-   * Uses gpt-4o-mini for cost efficiency.
+   * Uses ModelConfig.tagging model.
    *
    * @param captures - Array of captured screenshots to tag
    * @returns TaggingResult with tags for each image and token usage
@@ -48754,7 +48946,7 @@ var ImageTagger = class {
       console.log("\u{1F3F7}\uFE0F No images to tag");
       return { tags: [], tokensUsed: 0 };
     }
-    console.log(`\u{1F3F7}\uFE0F Tagging ${captures.length} images with gpt-4o-mini...`);
+    console.log(`\u{1F3F7}\uFE0F Tagging ${captures.length} images with ${ModelConfig.tagging}...`);
     const imageContents = captures.map((capture) => ({
       type: "image_url",
       image_url: {
@@ -48776,15 +48968,12 @@ var ImageTagger = class {
           "Authorization": `Bearer ${this.apiKey}`
         },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
-          // Cost-efficient for tagging
+          model: ModelConfig.tagging,
           messages: [{
             role: "user",
             content: messageContent
           }],
-          max_tokens: 3e3,
-          temperature: 0.1,
-          // Low for consistent tagging
+          max_completion_tokens: 4096,
           response_format: { type: "json_object" }
         })
       });
@@ -48799,7 +48988,8 @@ var ImageTagger = class {
         await this.usageService.incrementUsage(data.usage);
         console.log(`\u{1F4B0} Tagging cost tracked: ${tokensUsed} tokens`);
       }
-      const content = data.choices[0]?.message?.content;
+      const rawContent = data.choices[0]?.message?.content;
+      const content = typeof rawContent === "string" ? rawContent : Array.isArray(rawContent) ? rawContent.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
       if (!content) {
         throw new Error("TAGGING_FAILED: No content in response");
       }
@@ -48850,7 +49040,7 @@ var ImageTagger = class {
     return selected;
   }
   /**
-   * Build the tagging prompt for gpt-4o-mini.
+   * Build the tagging prompt for the tagging model.
    */
   buildTaggingPrompt(imageCount) {
     const interests = this.userInterests.length > 0 ? this.userInterests.join(", ") : "general news and updates";

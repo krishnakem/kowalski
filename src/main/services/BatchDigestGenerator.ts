@@ -2,7 +2,7 @@
  * BatchDigestGenerator - Screenshot-First Digest Generation
  *
  * Generates a comprehensive digest from all captured screenshots in ONE API call.
- * Uses GPT-4o Vision with multiple images for full visual context.
+ * Uses LLM vision (see ModelConfig.digest) with multiple images for full visual context.
  *
  * Key principles:
  * - Single API call with all screenshots (no fragmented extraction)
@@ -13,6 +13,7 @@
 
 import { CapturedPost, DigestConfig } from '../../types/instagram.js';
 import { AnalysisObject, AnalysisSection, StoryHighlight } from '../../types/analysis.js';
+import { ModelConfig } from '../../shared/modelConfig.js';
 import { UsageService } from './UsageService.js';
 
 /**
@@ -94,13 +95,12 @@ export class BatchDigestGenerator {
                 'Authorization': `Bearer ${this.apiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: ModelConfig.digest,
                 messages: [{
                     role: 'user',
                     content: messageContent
                 }],
-                max_tokens: 3000,
-                temperature: 0.3,  // Low for factual accuracy
+                max_completion_tokens: 16384,
                 response_format: { type: 'json_object' }
             })
         });
@@ -119,7 +119,12 @@ export class BatchDigestGenerator {
             console.log(`💰 Digest cost tracked: ${data.usage.total_tokens} tokens`);
         }
 
-        const content = data.choices[0]?.message?.content;
+        const rawContent = data.choices[0]?.message?.content;
+        const content = typeof rawContent === 'string'
+            ? rawContent
+            : Array.isArray(rawContent)
+                ? rawContent.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
+                : '';
 
         if (!content) {
             throw new Error('DIGEST_GENERATION_FAILED: No content in response');

@@ -28,6 +28,7 @@ import {
     BrowsingSession,
     BoundingBox
 } from '../../types/instagram.js';
+import { ModelConfig } from '../../shared/modelConfig.js';
 import {
     NavigationContext,
     NavigationGoal,
@@ -36,7 +37,8 @@ import {
     ActionRecord,
     EngagementState,
     EngagementLevel,
-    PressParams
+    PressParams,
+    ClickParams,
 } from '../../types/navigation.js';
 import { Jimp } from 'jimp';
 import { NavigationLLM } from './NavigationLLM.js';
@@ -366,6 +368,7 @@ export class InstagramScraper {
         this.screenshotCollector.appendLogRaw(`**Started:** ${new Date().toISOString()}`);
         this.screenshotCollector.appendLogRaw(`**Budget:** ${(config.maxDurationMs / 1000 / 60).toFixed(1)} minutes`);
         this.screenshotCollector.appendLogRaw(`**Interests:** ${userInterests.join(', ')}`);
+        this.screenshotCollector.appendLogRaw(`**Navigation Model:** ${ModelConfig.navigation}`);
         this.screenshotCollector.appendLogRaw(`\n---\n`);
 
         while (true) {
@@ -467,7 +470,18 @@ export class InstagramScraper {
             // Get LLM decision (includes strategic decisions)
             const decision = await this.navigationLLM.decideAction(context, elements, screenshot);
             console.log(`  🤖 Decision: ${decision.action} - ${decision.reasoning}`);
-            this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`${decision.action}\` — ${decision.reasoning}`);
+            // For click actions, include the target element info in the log
+            if (decision.action === 'click') {
+                const clickParams = decision.params as ClickParams;
+                const targetEl = elements.find(e => e.id === clickParams.id);
+                const elInfo = targetEl ? ` → id:${targetEl.id} ${targetEl.role} "${targetEl.name}"` : ` → id:${clickParams.id} (not found)`;
+                this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`${decision.action}\`${elInfo} — ${decision.reasoning}`);
+            } else if (decision.action === 'press') {
+                const pressParams = decision.params as PressParams;
+                this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`press ${pressParams.key}\` — ${decision.reasoning}`);
+            } else {
+                this.screenshotCollector.appendLog(`**Action #${actionCount + 1}** \`${decision.action}\` — ${decision.reasoning}`);
+            }
 
             // Log strategic decisions if present
             if (decision.strategic) {

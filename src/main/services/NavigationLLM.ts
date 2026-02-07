@@ -1,7 +1,7 @@
 /**
  * NavigationLLM - AI-Driven Navigation Decision Service
  *
- * Uses GPT-4o-mini to make navigation decisions based on the accessibility tree.
+ * Uses LLM (see ModelConfig.navigation) to make navigation decisions based on the accessibility tree.
  * Replaces hardcoded navigation logic with intelligent, adaptive decisions.
  *
  * Key features:
@@ -10,7 +10,7 @@
  * - Loop detection via action history
  * - Graceful degradation with fallback strategies
  *
- * Cost: ~$0.001 per decision × ~70 decisions/session = ~$0.07/session
+ * Cost: varies by model (see ModelConfig.navigation)
  */
 
 import {
@@ -26,21 +26,20 @@ import {
     WaitParams,
     SemanticHint
 } from '../../types/navigation.js';
+import { ModelConfig } from '../../shared/modelConfig.js';
 
 /**
  * Default configuration for NavigationLLM.
  */
 const DEFAULT_CONFIG: Partial<NavigationLLMConfig> = {
-    model: 'gpt-4o-mini',
-    maxTokens: 800,
-    temperature: 0.5
+    model: ModelConfig.navigation,
+    maxTokens: 16384,
 };
 
 export class NavigationLLM {
     private apiKey: string;
     private model: string;
     private maxTokens: number;
-    private temperature: number;
     private debug: boolean;
     private visionDetail: 'low' | 'high' | 'off';
 
@@ -52,9 +51,8 @@ export class NavigationLLM {
 
     constructor(config: NavigationLLMConfig) {
         this.apiKey = config.apiKey;
-        this.model = config.model || process.env.KOWALSKI_NAV_MODEL || DEFAULT_CONFIG.model!;
+        this.model = config.model || DEFAULT_CONFIG.model!;
         this.maxTokens = config.maxTokens || DEFAULT_CONFIG.maxTokens!;
-        this.temperature = config.temperature || DEFAULT_CONFIG.temperature!;
         this.debug = config.debug ?? true;  // Default to showing reasoning
         this.visionDetail = config.visionDetail
             || (process.env.KOWALSKI_VISION_DETAIL as 'low' | 'high' | 'off')
@@ -92,8 +90,27 @@ HOW TO CAPTURE FEED POSTS:
 Each feed post has a timestamp link (role=link, named "1h", "16h", "2d", "1w", etc.) inside its article. Click it to navigate to the post's detail page where the image is full-size and the caption is complete.
 - Click the timestamp link → page navigates to post detail → THEN captureNow: true
 - If carousel: ArrowRight + captureNow for each slide before leaving
-- After capturing, back() to return to the feed, then scroll past the captured post before clicking the next one
-⚠️ After back(), the feed shows the SAME post at the top. Scroll before clicking or you'll reopen it.
+- After capturing, press Escape (if modal) or click the Instagram logo (link "Instagram" in sidebar) to return to the feed
+- Then scroll past the captured post before clicking the next one
+
+ARRIVING AT A POST DETAIL PAGE:
+When the URL contains /p/ or /reel/, you are on a post detail page.
+YOUR VERY FIRST ACTION must be: captureNow (set strategic.captureNow = true).
+Do NOT click any other element first. Do NOT scroll. Capture FIRST, always.
+
+FULL SEQUENCE ON DETAIL PAGE:
+1. Arrive → captureNow (IMMEDIATELY, no other actions first)
+2. Check tree for carousel indicators (dot indicators, Next button ON the image, "Slide 1 of N")
+   - If carousel: press ArrowRight → captureNow → repeat until last slide
+   - If not carousel: skip to step 3
+3. Leave: click Instagram logo (top-left) to return to feed (NOT Escape — see standalone vs modal below)
+4. Scroll down to bring fresh posts into view
+5. Click next timestamp link
+
+COMMON MISTAKES (avoid these):
+- Clicking "More posts from [account]" links below the comments — navigates AWAY to a different post
+- Clicking timestamp links on the detail page — you are already on the detail page
+- Pressing Escape on a standalone page — does nothing, use Instagram logo instead
 
 CAPTURE MECHANICS:
 - captureNow = ONE-SHOT. Send once, screenshot taken instantly, then MOVE ON.
@@ -103,6 +120,16 @@ CAPTURE MECHANICS:
 
 CAPTURE PACE:
 If you have scrolled past 3 or more posts without capturing any, you are being too passive. Capture posts as you encounter them — the feed is finite and scrolling without capturing wastes session time.
+
+EFFICIENT FEED BROWSING:
+On the feed, follow this rhythm:
+1. SCROLL to bring a fresh post into view
+2. FIND the timestamp link (role=link, named "1h", "3h", "16h", "2d", etc.) in the nearest article
+3. CLICK the timestamp link → navigates to post detail page
+4. CAPTURE (captureNow) → then leave (Escape or click Instagram logo)
+5. Repeat
+Do NOT scroll more than 2 times in a row without clicking a timestamp link. Every scroll should be followed by a click.
+If you scroll 3+ times without clicking, you are wasting session time — STOP scrolling and click the nearest timestamp.
 
 GRID (profiles/explore/hashtags):
 - Click thumbnail link → modal opens → captureNow → navigate carousel slides → Escape → next thumbnail
@@ -139,11 +166,31 @@ PAGE CONTEXT (infer from tree + screenshot):
 - "dialog" container = modal overlay
 - Use container roles, URL, and screenshot to understand layout
 
+STANDALONE PAGES vs MODALS:
+When you click a timestamp link from the feed, Instagram navigates to a STANDALONE post detail page.
+This is a full page, not a modal overlay. Escape does NOTHING here.
+- MODAL: You see a dialog container in the accessibility tree. Press Escape or click Close/X to dismiss.
+- STANDALONE PAGE: No dialog in the tree. You navigated to a new page (/p/ or /reel/ in URL). Click the Instagram logo (top-left link named "Instagram") to return to the feed.
+CRITICAL: If you press Escape and nothing changes, you are on a standalone page. Do NOT press Escape again — click the Instagram logo instead.
+
+CAROUSEL vs "MORE POSTS" — DO NOT CONFUSE THESE:
+CAROUSEL CONTROLS (slides within the SAME post):
+- Small arrow buttons overlaid ON the image (Next/Previous)
+- Dot indicators below the image
+- Use press ArrowRight/ArrowLeft to advance slides
+- Tree shows "Slide 1 of 4" or similar indicators
+
+"MORE POSTS FROM [account]" (navigates to a DIFFERENT post):
+- Grid of thumbnail images BELOW the post and comments section
+- Appears after scrolling down past the comments
+- NEVER click these — they navigate away from the post you're capturing
+To navigate carousel slides: press ArrowRight, do NOT click links below the post.
+
 STAGNATION RECOVERY:
 - Scroll stuck (scrollY unchanged): Press Escape (overlay?), click content area to restore focus, retry
 - Click fails: Try different link in same article, or scroll to next post
-- Capture loop (wait+captureNow repeated): capture already taken — back() immediately
-- Reopened same post: forgot to scroll after back() — scroll(down, medium) first
+- Capture loop (wait+captureNow repeated): capture already taken — press Escape or click Instagram logo to leave
+- Reopened same post: forgot to scroll after returning — scroll(down, medium) first
 - General loop (3+ repeated actions): switch strategy entirely (feed→search, search→profile)
 - Content not loading: wait(2) for lazy loading
 
@@ -163,28 +210,32 @@ AVAILABLE ACTIONS:
 - type(text): Type into focused input
 - press(key): Escape, Enter, ArrowRight, ArrowLeft, Backspace, Space, Home, End, etc.
 - clear(): Clear focused input
-- back(): Browser back (use from post detail to return to feed, NEVER from feed itself)
 - wait(seconds): Wait 1-5 seconds
 
 OUTPUT FORMAT (JSON only):
 {
   "reasoning": "Brief explanation",
-  "action": "click|hover|scroll|type|press|clear|back|wait",
-  "params": { ... },
-  "expectedOutcome": "What should happen",
-  "confidence": 0.0-1.0,
-  "capture": { "shouldCapture": true, "targetId": 12, "reason": "..." },
-  "strategic": {
-    "switchPhase": null, "terminateSession": false, "captureNow": true,
-    "lingerDuration": "short", "engageDepth": "quick", "closeEngagement": false,
-    "reason": "..."
-  }
+  "action": "click",
+  "params": { "id": 47, "expectedName": "16h" },
+  "expectedOutcome": "Navigate to post detail page",
+  "confidence": 0.9,
+  "capture": { "shouldCapture": false },
+  "strategic": { "captureNow": false, "lingerDuration": "short" }
 }
-⚠️ For click/hover: params MUST include "expectedName" — the EXACT name from the accessibility tree. Do NOT invent names.
+
+PARAMS BY ACTION TYPE:
+- click: { "id": <element_id>, "expectedName": "<name from tree>" }
+- hover: { "id": <element_id>, "expectedName": "<name from tree>" }
+- scroll: { "direction": "down", "amount": "medium" }
+- type: { "text": "search query" }
+- press: { "key": "Escape" }
+- wait: { "seconds": 2 }
+- clear: {}
+⚠️ "id" in click/hover params is the element ID from the tree (e.g., id:47). This is NOT the same as capture.targetId.
+⚠️ "expectedName" MUST be the EXACT name from the accessibility tree. Do NOT invent names.
 ⚠️ User interests are SEARCH TOPICS ONLY — feed and stories capture EVERYTHING regardless of topic.
-⚠️ back() from the feed navigates AWAY from Instagram. Only use back() from post detail pages.
-⚠️ After back(), ALWAYS scroll before clicking any timestamp — otherwise you'll reopen the same post.
-⚠️ Carousel posts: check for "Next"/"Go Back" buttons or slide indicators. ArrowRight + captureNow each slide before going back.`;
+⚠️ Carousel posts: check for "Next"/"Go Back" buttons or slide indicators. ArrowRight + captureNow each slide before leaving.
+⚠️ On a post detail page (/p/ or /reel/ in URL)? Your FIRST action must be captureNow. Do not click anything else first.`;
     }
 
     /**
@@ -281,6 +332,26 @@ OUTPUT FORMAT (JSON only):
                     `⚠️ SCROLL LOOP: You have scrolled ${scrollCount} times in the last ${last8.length} actions without clicking any post. ` +
                     `Scrolling the feed without entering posts produces ZERO captures. ` +
                     `Find the nearest timestamp link (e.g., "1h", "16h", "2d") and CLICK IT to navigate to a post detail page, then captureNow.`
+                );
+            }
+        }
+
+        // 9. Escape spam — pressing Escape on standalone page (no modal to close)
+        if (recentActions.length >= 2) {
+            let consecutiveEscapes = 0;
+            for (let i = recentActions.length - 1; i >= 0; i--) {
+                const a = recentActions[i];
+                if (a.action === 'press' && (a.params as PressParams)?.key === 'Escape') {
+                    consecutiveEscapes++;
+                } else {
+                    break;
+                }
+            }
+            if (consecutiveEscapes >= 2) {
+                warnings.push(
+                    `⚠️ ESCAPE NOT WORKING: You pressed Escape ${consecutiveEscapes} times with no effect. ` +
+                    `You are on a STANDALONE PAGE, not a modal. Escape cannot close it. ` +
+                    `Click the Instagram logo (link "Instagram" in the sidebar/top-left) to return to the feed.`
                 );
             }
         }
@@ -701,39 +772,71 @@ Make your decision. Include strategic decisions to signal captures, activity cha
             }
             : { role: 'user', content: userPrompt };
 
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`
-            },
-            body: JSON.stringify({
-                model: this.model,
-                messages: [
-                    { role: 'system', content: this.getSystemPrompt() },
-                    userMessage
-                ],
-                response_format: { type: 'json_object' },
-                max_tokens: this.maxTokens,
-                temperature: this.temperature
-            })
-        });
+        const requestBody = {
+            model: this.model,
+            messages: [
+                { role: 'system', content: this.getSystemPrompt() },
+                userMessage
+            ],
+            response_format: { type: 'json_object' },
+            max_completion_tokens: this.maxTokens
+        };
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`LLM API error: ${response.status} - ${errorText}`);
+        let content = '';
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.apiKey}`
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`LLM API error: ${response.status} - ${errorText}`);
+            }
+
+            const data = await response.json();
+
+            // Log token usage
+            if (data.usage) {
+                console.log(`  🧠 LLM tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${sendScreenshot ? ` (vision:${this.visionDetail})` : ''}`);
+            }
+
+            // Detailed response diagnostics
+            const choice = data.choices?.[0];
+            console.log('[DEBUG] Full response choice:', JSON.stringify({
+                finish_reason: choice?.finish_reason,
+                refusal: choice?.message?.refusal,
+                content_length: choice?.message?.content?.length,
+                content_preview: typeof choice?.message?.content === 'string'
+                    ? choice.message.content.slice(0, 100)
+                    : 'non-string'
+            }));
+
+            // Check for refusal field (GPT-5 soft-refuse puts response here instead of content)
+            if (choice?.message?.refusal && !choice?.message?.content) {
+                console.warn(`⚠️ LLM refused request (attempt ${attempt + 1}): ${choice.message.refusal}`);
+            }
+
+            const raw = choice?.message?.content;
+            content = typeof raw === 'string'
+                ? raw
+                : Array.isArray(raw)
+                    ? raw.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
+                    : '';
+
+            if (content && content.trim().length > 0) break;
+
+            if (attempt < 2) {
+                console.log(`[DEBUG] Empty response on attempt ${attempt + 1} (finish_reason: ${choice?.finish_reason}), retrying in 500ms...`);
+                await new Promise(r => setTimeout(r, 500));
+            }
         }
 
-        const data = await response.json();
-
-        // Log token usage
-        if (data.usage) {
-            console.log(`  🧠 LLM tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${sendScreenshot ? ` (vision:${this.visionDetail})` : ''}`);
-        }
-
-        const content = data.choices?.[0]?.message?.content;
-
-        if (!content) {
+        if (!content || content.trim().length === 0) {
             throw new Error('Empty LLM response');
         }
 
@@ -748,6 +851,29 @@ Make your decision. Include strategic decisions to signal captures, activity cha
         decision: NavigationDecision,
         elements: NavigationElement[]
     ): NavigationDecision {
+        // Rewrite captureNow/capture action → wait + strategic.captureNow
+        // The LLM sometimes outputs "action": "captureNow" instead of using the strategic flag
+        if ((decision.action as string) === 'captureNow' || (decision.action as string) === 'capture') {
+            console.log(`  🔄 Rewriting "${decision.action}" action → wait + captureNow`);
+            decision = {
+                ...decision,
+                action: 'wait',
+                params: { seconds: 1 } as WaitParams,
+                strategic: { ...decision.strategic, captureNow: true }
+            };
+        }
+
+        // Block back() — unreliable in Instagram SPA, can navigate to about:blank
+        if (decision.action === 'back') {
+            console.log(`  🛡️ Blocking back() action — converting to scroll`);
+            return {
+                ...decision,
+                action: 'scroll',
+                params: { direction: 'down', amount: 'medium' } as ScrollParams,
+                reasoning: `back() blocked (unreliable in SPA), scrolling instead. Use Escape to close modals or click Instagram logo to return to feed.`
+            };
+        }
+
         // Validate action type
         const validActions: NavigationAction[] = ['click', 'scroll', 'type', 'press', 'wait', 'hover', 'back', 'clear'];
         if (!validActions.includes(decision.action)) {
@@ -762,9 +888,24 @@ Make your decision. Include strategic decisions to signal captures, activity cha
         // Validate click targets
         if (decision.action === 'click') {
             const clickParams = decision.params as ClickParams;
-            const targetElement = elements.find(e => e.id === clickParams.id);
+            let targetElement = elements.find(e => e.id === clickParams.id);
+
+            // Recovery: if id is undefined/not found but expectedName exists, find by name match
+            // Guard: only use startsWith for names >= 2 chars (short names like "1" match too broadly)
+            if (!targetElement && clickParams.expectedName) {
+                const name = clickParams.expectedName;
+                targetElement = elements.find(e =>
+                    e.name === name ||
+                    (name.length >= 2 && e.name.startsWith(name))
+                );
+                if (targetElement) {
+                    console.log(`  🔧 Click recovery: id=${clickParams.id} not found, matched by expectedName="${name}" → id:${targetElement.id}`);
+                    clickParams.id = targetElement.id;
+                }
+            }
 
             if (!targetElement) {
+                console.warn(`  ⚠️ Click target not found — params: ${JSON.stringify(decision.params)}`);
                 return {
                     ...decision,
                     action: 'scroll',
@@ -912,14 +1053,14 @@ Make your decision. Include strategic decisions to signal captures, activity cha
             };
         }
 
-        // Tier 2: Multiple failures - go back
+        // Tier 2: Multiple failures - press Escape (might be stuck in overlay)
         const recentFailures = recent.filter(a => !a.success).length;
         if (recentFailures >= 3) {
             return {
-                reasoning: `Fallback: ${reason}. Multiple failures, navigating back.`,
-                action: 'back',
-                params: {} as BackParams,
-                expectedOutcome: 'Return to previous page',
+                reasoning: `Fallback: ${reason}. Multiple failures, pressing Escape.`,
+                action: 'press',
+                params: { key: 'Escape' } as PressParams,
+                expectedOutcome: 'Close any blocking overlay',
                 confidence: 0.2
             };
         }

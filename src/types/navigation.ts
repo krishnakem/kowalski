@@ -426,9 +426,8 @@ export interface ExecutionResult {
  */
 export interface NavigationLLMConfig {
     apiKey: string;
-    model?: string;                          // Default: 'gpt-4o-mini'
-    maxTokens?: number;                      // Default: 300
-    temperature?: number;                    // Default: 0.3
+    model?: string;                          // Default: ModelConfig.navigation
+    maxTokens?: number;                      // Default: 16384
     debug?: boolean;                         // Enable verbose logging of LLM reasoning
     visionDetail?: 'low' | 'high' | 'off';  // Default: 'low'. Screenshot detail level for LLM vision.
 }

@@ -4,7 +4,7 @@
  * Uses OpenAI Vision API ONLY for content extraction (not navigation).
  * Each call is stateless - no conversation history maintained.
  *
- * Cost: ~$0.003-0.005 per viewport (using low detail + gpt-4o)
+ * Cost: varies by model (see ModelConfig.vision)
  *
  * Key principles:
  * - NO DOM fallback (bot-detectable)
@@ -16,6 +16,7 @@
 import { Page } from 'playwright';
 import { ExtractedPost, ExtractionResult } from '../../types/instagram.js';
 import { UsageService } from './UsageService.js';
+import { ModelConfig } from '../../shared/modelConfig.js';
 
 /**
  * Configuration for exponential backoff retry logic.
@@ -191,7 +192,7 @@ export class ContentVision {
                         'Authorization': `Bearer ${this.apiKey}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',  // Best vision model
+                        model: ModelConfig.vision,
                         messages: [{
                             role: 'user',
                             content: [
@@ -228,7 +229,7 @@ If no posts visible, return: {"posts": []}`
                                 }
                             ]
                         }],
-                        max_tokens: 1000,
+                        max_completion_tokens: 16384,
                         response_format: { type: 'json_object' }
                     })
                 }
@@ -265,7 +266,12 @@ If no posts visible, return: {"posts": []}`
                 await this.usageService.incrementUsage(data.usage);
             }
 
-            const content = data.choices[0]?.message?.content;
+            const rawContent = data.choices[0]?.message?.content;
+            const content = typeof rawContent === 'string'
+                ? rawContent
+                : Array.isArray(rawContent)
+                    ? rawContent.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
+                    : '';
 
             // 4. Parse response
             const parsed = JSON.parse(content);
@@ -323,7 +329,7 @@ If no posts visible, return: {"posts": []}`
                         'Authorization': `Bearer ${this.apiKey}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',  // Best vision model
+                        model: ModelConfig.vision,
                         messages: [{
                             role: 'user',
                             content: [
@@ -345,7 +351,7 @@ Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}
                                 }
                             ]
                         }],
-                        max_tokens: 300,
+                        max_completion_tokens: 16384,
                         response_format: { type: 'json_object' }
                     })
                 }
@@ -364,7 +370,13 @@ Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}
             }
 
             // Parse response, stripping any markdown code blocks if present
-            let rawContent = data.choices[0]?.message?.content || '{}';
+            const rawMsg = data.choices[0]?.message?.content;
+            let rawContent = typeof rawMsg === 'string'
+                ? rawMsg
+                : Array.isArray(rawMsg)
+                    ? rawMsg.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
+                    : '{}';
+            if (!rawContent) rawContent = '{}';
             // Strip ```json ... ``` wrapper if present
             rawContent = rawContent.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 

@@ -15,6 +15,7 @@ import { Page } from 'playwright';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Jimp } from 'jimp';
 import { CapturedPost, CaptureSource, BoundingBox } from '../../types/instagram.js';
 
 /**
@@ -145,10 +146,10 @@ export class ScreenshotCollector {
                 fullPage: false  // Viewport only
             });
 
-            // SECONDARY DEDUP: Hash-based for carousel/story (no postId available)
-            const hash = this.computeImageHash(screenshot);
-            if (this.capturedHashes.has(hash)) {
-                console.log(`📸 Skipping duplicate (hash match): ${hash.slice(0, 8)}...`);
+            // SECONDARY DEDUP: Perceptual hash — catches near-duplicates (scroll jitter, compression)
+            const hash = await this.computePerceptualHash(screenshot);
+            if (this.isSimilarToExisting(hash)) {
+                console.log(`📸 Skipping near-duplicate (perceptual hash): ${hash}`);
                 return false;
             }
 
@@ -260,10 +261,10 @@ export class ScreenshotCollector {
                 clip: captureRegion
             });
 
-            // Hash-based deduplication
-            const hash = this.computeImageHash(screenshot);
-            if (this.capturedHashes.has(hash)) {
-                console.log(`  📸 Capture skipped (duplicate hash)`);
+            // Perceptual hash deduplication — catches near-duplicates
+            const hash = await this.computePerceptualHash(screenshot);
+            if (this.isSimilarToExisting(hash)) {
+                console.log(`  📸 Capture skipped (perceptual hash similar): ${hash}`);
                 return null;
             }
             this.capturedHashes.add(hash);
@@ -435,10 +436,10 @@ export class ScreenshotCollector {
                     fullPage: false
                 });
 
-                // Hash-based dedup for identical frames
-                const hash = this.computeImageHash(screenshot);
-                if (this.capturedHashes.has(hash)) {
-                    console.log(`🎬 Frame at ${videoState.currentTime.toFixed(1)}s: duplicate, skipping`);
+                // Perceptual hash dedup for similar frames
+                const hash = await this.computePerceptualHash(screenshot);
+                if (this.isSimilarToExisting(hash)) {
+                    console.log(`🎬 Frame at ${videoState.currentTime.toFixed(1)}s: near-duplicate, skipping`);
                     lastCapturedTime = videoState.currentTime;  // Still advance to avoid re-checking same frame
                     await this.delay(frameIntervalMs);
                     continue;
@@ -511,11 +512,61 @@ export class ScreenshotCollector {
     }
 
     /**
-     * Compute a simple hash of the screenshot for deduplication.
-     * Uses MD5 on the entire buffer - fast enough for our needs.
+     * Compute a perceptual hash (average hash) of a screenshot.
+     * Resilient to minor differences (scroll jitter, compression artifacts).
+     * Returns a 64-bit hex string (16 hex chars).
      */
-    private computeImageHash(screenshot: Buffer): string {
-        return createHash('md5').update(screenshot).digest('hex');
+    private async computePerceptualHash(screenshot: Buffer): Promise<string> {
+        try {
+            const image = await Jimp.read(screenshot);
+            image.resize({ w: 8, h: 8 });
+            image.greyscale();
+
+            const pixels: number[] = [];
+            for (let y = 0; y < 8; y++) {
+                for (let x = 0; x < 8; x++) {
+                    const color = image.getPixelColor(x, y);
+                    // R channel from 0xRRGGBBAA (after greyscale R=G=B)
+                    pixels.push((color >> 24) & 0xFF);
+                }
+            }
+            const mean = pixels.reduce((a, b) => a + b, 0) / pixels.length;
+
+            let hex = '';
+            for (let i = 0; i < 64; i += 4) {
+                const nibble = [0,1,2,3].map(j => pixels[i+j] > mean ? '1' : '0').join('');
+                hex += parseInt(nibble, 2).toString(16);
+            }
+            return hex;
+        } catch {
+            // Fallback to MD5 if perceptual hash fails
+            return createHash('md5').update(screenshot).digest('hex');
+        }
+    }
+
+    /**
+     * Hamming distance between two hex hash strings (count differing bits).
+     */
+    private hammingDistance(hash1: string, hash2: string): number {
+        // Different lengths = different hash types (MD5 fallback vs phash) — treat as unique
+        if (hash1.length !== hash2.length) return 64;
+        let distance = 0;
+        for (let i = 0; i < hash1.length; i++) {
+            let xor = parseInt(hash1[i], 16) ^ parseInt(hash2[i], 16);
+            while (xor) { distance += xor & 1; xor >>= 1; }
+        }
+        return distance;
+    }
+
+    /**
+     * Check if a hash is perceptually similar to any previously captured hash.
+     * Threshold: Hamming distance <= 8 out of 64 bits (~87.5% similar).
+     */
+    private isSimilarToExisting(hash: string): boolean {
+        for (const existing of this.capturedHashes) {
+            if (this.hammingDistance(hash, existing) <= 8) return true;
+        }
+        return false;
     }
 
     /**

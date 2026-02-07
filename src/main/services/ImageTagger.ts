@@ -1,7 +1,7 @@
 /**
  * ImageTagger - Smart Screenshot Selection via Batch Tagging
  *
- * Tags captured screenshots using gpt-4o-mini to:
+ * Tags captured screenshots using LLM (see ModelConfig.tagging) to:
  * - Identify ads and sponsored content
  * - Filter out blank/loading screenshots
  * - Score relevance to user interests
@@ -15,6 +15,7 @@
 
 import { CapturedPost, ImageTag, TaggingResult } from '../../types/instagram.js';
 import { UsageService } from './UsageService.js';
+import { ModelConfig } from '../../shared/modelConfig.js';
 
 /**
  * Internal type for image content in OpenAI API.
@@ -48,7 +49,7 @@ export class ImageTagger {
 
     /**
      * Batch-tag all captured images in a single API call.
-     * Uses gpt-4o-mini for cost efficiency.
+     * Uses ModelConfig.tagging model.
      *
      * @param captures - Array of captured screenshots to tag
      * @returns TaggingResult with tags for each image and token usage
@@ -59,7 +60,7 @@ export class ImageTagger {
             return { tags: [], tokensUsed: 0 };
         }
 
-        console.log(`🏷️ Tagging ${captures.length} images with gpt-4o-mini...`);
+        console.log(`🏷️ Tagging ${captures.length} images with ${ModelConfig.tagging}...`);
 
         // Build image content array
         const imageContents: ImageContent[] = captures.map((capture) => ({
@@ -86,13 +87,12 @@ export class ImageTagger {
                     'Authorization': `Bearer ${this.apiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'gpt-4o-mini',  // Cost-efficient for tagging
+                    model: ModelConfig.tagging,
                     messages: [{
                         role: 'user',
                         content: messageContent
                     }],
-                    max_tokens: 3000,
-                    temperature: 0.1,  // Low for consistent tagging
+                    max_completion_tokens: 4096,
                     response_format: { type: 'json_object' }
                 })
             });
@@ -112,7 +112,12 @@ export class ImageTagger {
                 console.log(`💰 Tagging cost tracked: ${tokensUsed} tokens`);
             }
 
-            const content = data.choices[0]?.message?.content;
+            const rawContent = data.choices[0]?.message?.content;
+            const content = typeof rawContent === 'string'
+                ? rawContent
+                : Array.isArray(rawContent)
+                    ? rawContent.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
+                    : '';
             if (!content) {
                 throw new Error('TAGGING_FAILED: No content in response');
             }
@@ -187,7 +192,7 @@ export class ImageTagger {
     }
 
     /**
-     * Build the tagging prompt for gpt-4o-mini.
+     * Build the tagging prompt for the tagging model.
      */
     private buildTaggingPrompt(imageCount: number): string {
         const interests = this.userInterests.length > 0
