@@ -144,9 +144,12 @@ export class ScreenshotCollector {
             });
 
             // SECONDARY DEDUP: Perceptual hash — catches near-duplicates (scroll jitter, compression)
+            // Stories use tighter threshold (3) because dark background dominates the 8x8 hash,
+            // causing different story frames to appear similar at the default threshold (8)
             const hash = await this.computePerceptualHash(screenshot);
-            if (this.isSimilarToExisting(hash)) {
-                console.log(`[CAPTURE-REJECT] perceptual_hash: ${hash} (source=${source})`);
+            const hashThreshold = source === 'story' ? 3 : 8;
+            if (this.isSimilarToExisting(hash, hashThreshold)) {
+                console.log(`[CAPTURE-REJECT] perceptual_hash: ${hash} (source=${source}, threshold=${hashThreshold})`);
                 return false;
             }
 
@@ -566,9 +569,9 @@ export class ScreenshotCollector {
      * Check if a hash is perceptually similar to any previously captured hash.
      * Threshold: Hamming distance <= 8 out of 64 bits (~87.5% similar).
      */
-    private isSimilarToExisting(hash: string): boolean {
+    private isSimilarToExisting(hash: string, threshold: number = 8): boolean {
         for (const existing of this.capturedHashes) {
-            if (this.hammingDistance(hash, existing) <= 8) return true;
+            if (this.hammingDistance(hash, existing) <= threshold) return true;
         }
         return false;
     }

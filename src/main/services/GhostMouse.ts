@@ -420,6 +420,22 @@ export class GhostMouse {
     }
 
     /**
+     * Click at a specific point with small gaussian jitter.
+     * Used by VisionAgent where coordinates come from LLM vision
+     * (no bounding box available — just an x,y target on the viewport).
+     *
+     * Treats the point as center of an implicit small target area.
+     * Applies gaussian offset to simulate natural pointing imprecision.
+     */
+    async clickPoint(x: number, y: number): Promise<void> {
+        const vw = await this.getViewportWidth();
+        const jitterRadius = Math.max(3, Math.round(vw * 0.009)); // ~10px on 1080vw
+        const offsetX = this.gaussianRandom(0.5) * jitterRadius - jitterRadius / 2;
+        const offsetY = this.gaussianRandom(0.5) * jitterRadius - jitterRadius / 2;
+        await this.click({ x: x + offsetX, y: y + offsetY });
+    }
+
+    /**
      * Get a randomized center bias value (0.2-0.4 range).
      * Avoids using fixed 0.3 which creates detectable patterns.
      */
