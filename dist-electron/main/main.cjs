@@ -3795,7 +3795,7 @@ var require_gifframe = __commonJS({
 var require_gifutil = __commonJS({
   "node_modules/gifwrap/src/gifutil.js"(exports2) {
     "use strict";
-    var fs8 = require("fs");
+    var fs9 = require("fs");
     var ImageQ = require_image_q();
     var BitmapImage2 = require_bitmapimage();
     var { GifFrame: GifFrame2 } = require_gifframe();
@@ -3910,14 +3910,14 @@ var require_gifutil = __commonJS({
       jimpImage.bitmap.data = bitmapImageToShare.bitmap.data;
       return jimpImage;
     };
-    exports2.write = function(path8, frames, spec, encoder) {
+    exports2.write = function(path9, frames, spec, encoder) {
       encoder = encoder || defaultCodec;
-      const matches = path8.match(/\.[a-zA-Z]+$/);
+      const matches = path9.match(/\.[a-zA-Z]+$/);
       if (matches !== null && INVALID_SUFFIXES.includes(matches[0].toLowerCase())) {
-        throw new Error(`GIF '${path8}' has an unexpected suffix`);
+        throw new Error(`GIF '${path9}' has an unexpected suffix`);
       }
       return encoder.encodeGif(frames, spec).then((gif2) => {
-        return _writeBinary(path8, gif2.buffer).then(() => {
+        return _writeBinary(path9, gif2.buffer).then(() => {
           return gif2;
         });
       });
@@ -3989,9 +3989,9 @@ var require_gifutil = __commonJS({
         }
       }
     }
-    function _readBinary(path8) {
+    function _readBinary(path9) {
       return new Promise((resolve2, reject2) => {
-        fs8.readFile(path8, (err, buffer) => {
+        fs9.readFile(path9, (err, buffer) => {
           if (err) {
             return reject2(err);
           }
@@ -3999,9 +3999,9 @@ var require_gifutil = __commonJS({
         });
       });
     }
-    function _writeBinary(path8, buffer) {
+    function _writeBinary(path9, buffer) {
       return new Promise((resolve2, reject2) => {
-        fs8.writeFile(path8, buffer, (err) => {
+        fs9.writeFile(path9, buffer, (err) => {
           if (err) {
             return reject2(err);
           }
@@ -5980,9 +5980,9 @@ var require_decoder = __commonJS({
         return a < 0 ? 0 : a > 255 ? 255 : a;
       }
       constructor.prototype = {
-        load: function load(path8) {
+        load: function load(path9) {
           var xhr = new XMLHttpRequest();
-          xhr.open("GET", path8, true);
+          xhr.open("GET", path9, true);
           xhr.responseType = "arraybuffer";
           xhr.onload = (function() {
             var data = new Uint8Array(xhr.response || xhr.mozResponseArrayBuffer);
@@ -18899,11 +18899,11 @@ var require_Mime = __commonJS({
         }
       }
     };
-    Mime.prototype.getType = function(path8) {
-      path8 = String(path8);
-      let last = path8.replace(/^.*[/\\]/, "").toLowerCase();
+    Mime.prototype.getType = function(path9) {
+      path9 = String(path9);
+      let last = path9.replace(/^.*[/\\]/, "").toLowerCase();
       let ext = last.replace(/^.*\./, "").toLowerCase();
-      let hasPath = last.length < path8.length;
+      let hasPath = last.length < path9.length;
       let hasDot = ext.length < last.length - 1;
       return (hasDot || !hasPath) && this._types[ext] || null;
     };
@@ -26882,9 +26882,9 @@ var require_pixelmatch = __commonJS({
 
 // src/main/main.ts
 var import_electron6 = require("electron");
-var import_path5 = __toESM(require("path"), 1);
+var import_path6 = __toESM(require("path"), 1);
 var import_url = require("url");
-var import_fs7 = __toESM(require("fs"), 1);
+var import_fs8 = __toESM(require("fs"), 1);
 
 // src/main/services/BrowserManager.ts
 var import_electron2 = require("electron");
@@ -27115,8 +27115,17 @@ var BrowserManager = class _BrowserManager {
       } else {
         const windowSize = _BrowserManager.generateWindowSize(config.headless);
         extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
-        scrapingViewport = windowSize;
-        console.log(`\u{1F4D0} BrowserManager: Viewport ${windowSize.width}x${windowSize.height} (headless=${config.headless})`);
+        if (!config.headless) {
+          try {
+            const workArea = import_electron2.screen.getPrimaryDisplay().workAreaSize;
+            const x2 = Math.round((workArea.width - windowSize.width) / 2);
+            const y2 = Math.round((workArea.height - windowSize.height) / 2);
+            extraArgs.push(`--window-position=${Math.max(0, x2)},${Math.max(0, y2)}`);
+          } catch {
+          }
+        }
+        scrapingViewport = { width: 1280, height: 900 };
+        console.log(`\u{1F4D0} BrowserManager: Viewport 1280x900 (headless=${config.headless})`);
       }
       const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
       console.log("\u{1F50D} DEBUG: Custom executable path:", customExecutablePath);
@@ -27681,8 +27690,8 @@ var UsageService = class _UsageService {
 
 // src/main/services/SchedulerService.ts
 var import_electron5 = require("electron");
-var import_fs6 = __toESM(require("fs"), 1);
-var import_path4 = __toESM(require("path"), 1);
+var import_fs7 = __toESM(require("fs"), 1);
+var import_path5 = __toESM(require("path"), 1);
 var import_child_process = require("child_process");
 var import_uuid = require("uuid");
 
@@ -28955,7 +28964,7 @@ var Bezier = class _Bezier {
       }
       return s;
     }).reverse();
-    const fs8 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils2.makeline(bs, fs8), le = utils2.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
+    const fs9 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils2.makeline(bs, fs9), le = utils2.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
     return new PolyBezier(segments);
   }
   outlineshapes(d1, d2, curveIntersectionThreshold) {
@@ -29092,49 +29101,20 @@ var Bezier = class _Bezier {
 var GhostMouse = class {
   page;
   currentPosition = { x: 0, y: 0 };
-  cursorVisible = false;
-  // Session-level entropy (randomized once per GhostMouse instance)
-  // This ensures timing patterns vary across sessions, defeating pattern analysis
-  sessionTimingMultiplier;
-  sessionJitterMultiplier;
-  // Session-level hesitation probability (3-7% per session, not fixed 5%)
-  sessionHesitationProb;
   // Cached viewport width for proportional calculations
   _viewportWidth = 0;
   constructor(page) {
     this.page = page;
-    this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
-    this.sessionJitterMultiplier = 0.6 + Math.random() * 0.8;
-    this.sessionHesitationProb = 0.03 + Math.random() * 0.04;
+  }
+  /** Rebind to a different page (used for tab switching). */
+  setPage(page) {
+    this.page = page;
   }
   /** Get viewport width, cached per session for proportional calculations. */
   async getViewportWidth() {
     if (this._viewportWidth > 0) return this._viewportWidth;
     this._viewportWidth = await this.page.evaluate(() => window.innerWidth).catch(() => 1080);
     return this._viewportWidth;
-  }
-  /**
-   * Enable visible cursor for debugging.
-   * Uses a custom CSS cursor image (data URI) - no DOM injection.
-   * This is safer than injecting elements which could trigger bot detection.
-   */
-  async enableVisibleCursor() {
-    if (this.cursorVisible) return;
-    await this.page.addStyleTag({
-      content: `
-                * {
-                    cursor: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="rgba(255,0,0,0.7)" stroke="white" stroke-width="2"/><circle cx="16" cy="16" r="3" fill="white"/></svg>') 16 16, auto !important;
-                }
-            `
-    });
-    this.cursorVisible = true;
-    console.log("\u{1F441}\uFE0F Visible cursor enabled (CSS mode)");
-  }
-  /**
-   * Update the visible cursor position.
-   * With CSS cursor mode, no update needed - cursor follows mouse automatically.
-   */
-  async updateVisibleCursor(_x, _y) {
   }
   /**
    * Move mouse to target with human-like Bezier curve trajectory.
@@ -29167,17 +29147,10 @@ var GhostMouse = class {
       controlPoints.end.y
     );
     const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
-    const effectiveJitter = jitterAmount * this.sessionJitterMultiplier;
     for (let i = 0; i < points.length; i++) {
-      const jitteredPoint = this.addJitter(points[i], effectiveJitter);
+      const jitteredPoint = this.addJitter(points[i], jitterAmount);
       await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
-      await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
-      const baseMin = 12 * this.sessionTimingMultiplier;
-      const baseMax = 45 * this.sessionTimingMultiplier;
-      await this.microDelay(baseMin, baseMax);
-      if (i > 0 && i < points.length - 1 && Math.random() < this.sessionHesitationProb) {
-        await this.microDelay(80 * this.sessionTimingMultiplier, 200 * this.sessionTimingMultiplier);
-      }
+      await this.microDelay(5, 15);
     }
     if (Math.random() < overshootProbability) {
       await this.overshootAndCorrect(target, movementDistance);
@@ -29284,29 +29257,26 @@ var GhostMouse = class {
       y: target.y + Math.sin(overshootAngle) * overshootAmount
     };
     await this.page.mouse.move(overshoot.x, overshoot.y);
-    await this.updateVisibleCursor(overshoot.x, overshoot.y);
-    await this.microDelay(50, 180);
+    await this.microDelay(20, 60);
     const correctionOffset = vw * 7e-3;
     const midpoint = {
       x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * correctionOffset,
       y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * correctionOffset
     };
     await this.page.mouse.move(midpoint.x, midpoint.y);
-    await this.updateVisibleCursor(midpoint.x, midpoint.y);
-    await this.microDelay(10, 30);
+    await this.microDelay(5, 15);
     await this.page.mouse.move(target.x, target.y);
-    await this.updateVisibleCursor(target.x, target.y);
   }
   /**
    * Human-like click with pre-click hover and post-click pause.
    */
   async click(target) {
     await this.moveTo(target);
-    await this.microDelay(100, 300);
+    await this.microDelay(30, 80);
     await this.page.mouse.down();
-    await this.microDelay(50, 150);
+    await this.microDelay(40, 90);
     await this.page.mouse.up();
-    await this.microDelay(200, 500);
+    await this.microDelay(50, 120);
   }
   /**
    * Hover over a target for a duration without clicking.
@@ -29427,13 +29397,10 @@ var GhostMouse = class {
   }
   /**
    * Small random delay for human-like timing variation.
-   * Applies session-level timing multiplier for cross-session variation,
-   * defeating pattern analysis that looks for consistent timing signatures.
    */
   microDelay(min2, max2) {
-    const baseDelay = min2 + Math.random() * (max2 - min2);
-    const sessionAdjustedDelay = baseDelay * this.sessionTimingMultiplier;
-    return new Promise((resolve2) => setTimeout(resolve2, sessionAdjustedDelay));
+    const delay = min2 + Math.random() * (max2 - min2);
+    return new Promise((resolve2) => setTimeout(resolve2, delay));
   }
   // =========================================================================
   // Gaze-Lag Execution System (Human-like "Look, then Move")
@@ -29478,7 +29445,7 @@ var GhostMouse = class {
       // Quick selection
     };
     const [min2, max2] = ranges[roleLower] || [100, 300];
-    return this.randomInRange(min2, max2) * this.sessionTimingMultiplier;
+    return this.randomInRange(min2, max2);
   }
   /**
    * Human-like click with element-specific timing.
@@ -29492,9 +29459,9 @@ var GhostMouse = class {
     const hoverDuration = this.getHoverDurationForRole(role);
     await new Promise((r) => setTimeout(r, hoverDuration));
     await this.page.mouse.down();
-    await this.microDelay(50, 150);
+    await this.microDelay(40, 90);
     await this.page.mouse.up();
-    await this.microDelay(200, 500);
+    await this.microDelay(50, 120);
   }
   /**
    * Click an element with gaze-aware role-specific timing.
@@ -29528,13 +29495,15 @@ var GhostMouse = class {
 // src/main/services/HumanScroll.ts
 var HumanScroll = class {
   page;
-  // Session-level timing multiplier for cross-session variance
-  sessionTimingMultiplier;
   // Cached viewport height for proportional calculations (avoids repeated CDP calls)
   cachedViewportHeight = 0;
   constructor(page) {
     this.page = page;
-    this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
+  }
+  /** Rebind to a different page (used for tab switching). */
+  setPage(page) {
+    this.page = page;
+    this.cachedViewportHeight = 0;
   }
   /**
    * Get viewport height, using cache to avoid repeated CDP calls.
@@ -29612,8 +29581,7 @@ var HumanScroll = class {
     const {
       baseDistance = Math.round(vh * 0.4),
       variability = 0.3,
-      microAdjustProb = 0.25,
-      readingPauseMs = [400, 800]
+      microAdjustProb = 0.1
     } = config;
     const variation = 1 + (Math.random() - 0.5) * 2 * variability;
     const targetDistance = Math.round(baseDistance * variation);
@@ -29621,8 +29589,6 @@ var HumanScroll = class {
     if (Math.random() < microAdjustProb) {
       await this.microAdjust();
     }
-    const pauseDuration = readingPauseMs[0] + Math.random() * (readingPauseMs[1] - readingPauseMs[0]);
-    await new Promise((resolve2) => setTimeout(resolve2, pauseDuration));
   }
   /**
    * Smooth scroll using wheel events with easing.
@@ -29631,7 +29597,7 @@ var HumanScroll = class {
    * Uses cubic ease-out: fast start, gradual slow down.
    */
   async smoothScrollWithEasing(distance3, axis = "y") {
-    const steps = 15 + Math.floor(Math.random() * 10);
+    const steps = 8 + Math.floor(Math.random() * 4);
     const direction = distance3 > 0 ? 1 : -1;
     const absDistance = Math.abs(distance3);
     let scrolled = 0;
@@ -29646,7 +29612,7 @@ var HumanScroll = class {
         await this.page.mouse.wheel(0, stepDistance);
       }
       scrolled = targetScrolled;
-      const delay = 10 + Math.random() * 30;
+      const delay = 5 + Math.random() * 10;
       await new Promise((resolve2) => setTimeout(resolve2, delay));
     }
   }
@@ -29661,10 +29627,10 @@ var HumanScroll = class {
     const vh = await this.getViewportHeight();
     const overshoot = vh * 0.05 + Math.random() * vh * 0.1;
     await this.page.mouse.wheel(0, overshoot);
-    await new Promise((resolve2) => setTimeout(resolve2, 200 + Math.random() * 300));
+    await new Promise((resolve2) => setTimeout(resolve2, 50 + Math.random() * 50));
     const correction = overshoot * (0.8 + Math.random() * 0.4);
     await this.page.mouse.wheel(0, -correction);
-    await new Promise((resolve2) => setTimeout(resolve2, 100 + Math.random() * 200));
+    await new Promise((resolve2) => setTimeout(resolve2, 30 + Math.random() * 30));
   }
   /**
    * Scroll to bring a specific element into view (human-like).
@@ -29732,8 +29698,7 @@ var HumanScroll = class {
         }
         console.log(`  \u{1F4CD} Centering post (offset: ${Math.round(offset)}px, attempt: ${attempt + 1}/${maxRetries + 1})`);
         await this.preciseScroll(offset);
-        const basePause = 150 + Math.random() * 100;
-        await new Promise((r) => setTimeout(r, basePause * this.sessionTimingMultiplier));
+        await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
       } finally {
         if (cdpSession) {
           await cdpSession.detach().catch(() => {
@@ -29803,8 +29768,8 @@ var HumanScroll = class {
       const stepDistance = (targetScrolled - scrolled) * direction;
       await this.page.mouse.wheel(0, stepDistance);
       scrolled = targetScrolled;
-      const baseDelay = 10 + Math.random() * 30;
-      await new Promise((resolve2) => setTimeout(resolve2, baseDelay * this.sessionTimingMultiplier));
+      const delay = 5 + Math.random() * 10;
+      await new Promise((resolve2) => setTimeout(resolve2, delay));
     }
   }
   /**
@@ -29815,7 +29780,7 @@ var HumanScroll = class {
     const currentScroll = await this.cdpEvaluate("window.scrollY");
     if (currentScroll && currentScroll > 0) {
       await this.quickScroll(-currentScroll);
-      await new Promise((resolve2) => setTimeout(resolve2, 400 + Math.random() * 200));
+      await new Promise((resolve2) => setTimeout(resolve2, 100 + Math.random() * 100));
     }
   }
   /**
@@ -29869,10 +29834,9 @@ var HumanScroll = class {
   async scrollWithIntent(config = {}) {
     const vh = await this.getViewportHeight();
     const {
-      baseDistance = Math.round(vh * 0.4 * this.sessionTimingMultiplier),
+      baseDistance = Math.round(vh * 0.4),
       variability = 0.3,
-      microAdjustProb = 0.25,
-      readingPauseMs = [400 * this.sessionTimingMultiplier, 800 * this.sessionTimingMultiplier]
+      microAdjustProb = 0.1
     } = config;
     const variation = 1 + (Math.random() - 0.5) * 2 * variability;
     const targetDistance = Math.round(baseDistance * variation);
@@ -29889,14 +29853,12 @@ var HumanScroll = class {
     if (Math.random() < microAdjustProb) {
       await this.microAdjust();
     }
-    const pauseDuration = this.randomInRange(readingPauseMs[0], readingPauseMs[1]);
-    await new Promise((resolve2) => setTimeout(resolve2, pauseDuration));
     return {
       contentType: "mixed",
       scrollDistance: targetDistance,
       actualDelta,
       scrollFailed,
-      pauseDurationMs: pauseDuration
+      pauseDurationMs: 0
     };
   }
   /**
@@ -29906,10 +29868,9 @@ var HumanScroll = class {
   async scrollHorizontalWithIntent(config = {}) {
     const vw = await this.cdpEvaluate("window.innerWidth") ?? 1080;
     const {
-      baseDistance = Math.round(vw * 0.4 * this.sessionTimingMultiplier),
+      baseDistance = Math.round(vw * 0.4),
       variability = 0.3,
-      microAdjustProb = 0.25,
-      readingPauseMs = [400 * this.sessionTimingMultiplier, 800 * this.sessionTimingMultiplier]
+      microAdjustProb = 0.1
     } = config;
     const variation = 1 + (Math.random() - 0.5) * 2 * variability;
     const targetDistance = Math.round(baseDistance * variation);
@@ -29927,19 +29888,17 @@ var HumanScroll = class {
       const overshoot = vw * 0.05 + Math.random() * vw * 0.1;
       const dir = targetDistance > 0 ? 1 : -1;
       await this.page.mouse.wheel(overshoot * dir, 0);
-      await new Promise((resolve2) => setTimeout(resolve2, 200 + Math.random() * 300));
+      await new Promise((resolve2) => setTimeout(resolve2, 50 + Math.random() * 50));
       const correction = overshoot * (0.8 + Math.random() * 0.4);
       await this.page.mouse.wheel(-correction * dir, 0);
-      await new Promise((resolve2) => setTimeout(resolve2, 100 + Math.random() * 200));
+      await new Promise((resolve2) => setTimeout(resolve2, 30 + Math.random() * 30));
     }
-    const pauseDuration = this.randomInRange(readingPauseMs[0], readingPauseMs[1]);
-    await new Promise((resolve2) => setTimeout(resolve2, pauseDuration));
     return {
       contentType: "mixed",
       scrollDistance: targetDistance,
       actualDelta,
       scrollFailed,
-      pauseDurationMs: pauseDuration
+      pauseDurationMs: 0
     };
   }
 };
@@ -32331,8 +32290,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path8, errorMaps, issueData } = params;
-  const fullPath = [...path8, ...issueData.path || []];
+  const { data, path: path9, errorMaps, issueData } = params;
+  const fullPath = [...path9, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -32448,11 +32407,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path8, key) {
+  constructor(parent, value, path9, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path8;
+    this._path = path9;
     this._key = key;
   }
   get path() {
@@ -38010,9 +37969,9 @@ function createJimp({ plugins: pluginsArg, formats: formatsArg } = {}) {
      * await image.write("test/output.png");
      * ```
      */
-    async write(path8, options) {
-      const mimeType = import_lite.default.getType(path8);
-      await writeFile(path8, await this.getBuffer(mimeType, options));
+    async write(path9, options) {
+      const mimeType = import_lite.default.getType(path9);
+      await writeFile(path9, await this.getBuffer(mimeType, options));
     }
     /**
      * Clone the image into a new Jimp instance.
@@ -42688,6 +42647,10 @@ var DEFAULT_CONFIG = {
 };
 var ScreenshotCollector = class {
   page;
+  /** Rebind to a different page (used for tab switching). */
+  setPage(page) {
+    this.page = page;
+  }
   captures = [];
   config;
   lastScrollPosition = 0;
@@ -42700,6 +42663,12 @@ var ScreenshotCollector = class {
   capturedPositions = /* @__PURE__ */ new Set();
   // Track by source + scroll position bucket
   lastCaptureSource = "";
+  // File naming: posts get sequential numbers, carousel slides get sub-numbers (001.1, 001.2, ...)
+  postNumber = 0;
+  carouselSlideIndex = 0;
+  // 0 = not in carousel, 1+ = slide count
+  lastPostSource = "feed";
+  lastSingleFilepath = "";
   // Session log buffer (written to .md file alongside screenshots)
   logBuffer = [];
   sessionStartTime = Date.now();
@@ -42725,11 +42694,31 @@ var ScreenshotCollector = class {
    * Save a screenshot to disk for debugging.
    * Only saves if outputDir is configured.
    */
-  saveScreenshotToDisk(screenshot, source, id) {
+  saveScreenshotToDisk(screenshot, source) {
     if (!this.outputDir) return;
-    const filename = `${id.toString().padStart(3, "0")}_${source}.jpg`;
+    let filename;
+    if (source === "carousel") {
+      if (this.carouselSlideIndex === 0) {
+        if (this.lastSingleFilepath && fs4.existsSync(this.lastSingleFilepath)) {
+          const renamedFilename = `${this.postNumber.toString().padStart(3, "0")}.1_${this.lastPostSource}.jpg`;
+          fs4.renameSync(this.lastSingleFilepath, path3.join(this.outputDir, renamedFilename));
+          console.log(`  \u{1F4BE} Renamed: ${path3.basename(this.lastSingleFilepath)} \u2192 ${renamedFilename}`);
+        }
+        this.carouselSlideIndex = 1;
+      }
+      this.carouselSlideIndex++;
+      filename = `${this.postNumber.toString().padStart(3, "0")}.${this.carouselSlideIndex}_${this.lastPostSource}.jpg`;
+    } else {
+      this.postNumber++;
+      this.carouselSlideIndex = 0;
+      this.lastPostSource = source;
+      filename = `${this.postNumber.toString().padStart(3, "0")}_${source}.jpg`;
+    }
     const filepath = path3.join(this.outputDir, filename);
     fs4.writeFileSync(filepath, screenshot);
+    if (source !== "carousel") {
+      this.lastSingleFilepath = filepath;
+    }
     console.log(`  \u{1F4BE} Saved: ${filename}`);
   }
   /**
@@ -42741,7 +42730,7 @@ var ScreenshotCollector = class {
    * @param fingerprint - Tree-based post fingerprint for dedup (null for stories/grids → falls through to hash dedup)
    * @returns true if captured, false if skipped (max reached or duplicate position)
    */
-  async captureCurrentPost(source, interest, fingerprint) {
+  async captureCurrentPost(source, interest, fingerprint, clip) {
     if (this.captures.length >= this.config.maxCaptures) {
       console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached`);
       return false;
@@ -42769,11 +42758,12 @@ var ScreenshotCollector = class {
       const screenshot = await this.page.screenshot({
         type: "jpeg",
         quality: this.config.jpegQuality,
-        fullPage: false
+        fullPage: false,
         // Viewport only
+        ...clip ? { clip } : {}
       });
       const hash = await this.computePerceptualHash(screenshot);
-      const hashThreshold = source === "story" ? 3 : 8;
+      const hashThreshold = source === "story" ? 3 : 5;
       if (this.isSimilarToExisting(hash, hashThreshold)) {
         console.log(`[CAPTURE-REJECT] perceptual_hash: ${hash} (source=${source}, threshold=${hashThreshold})`);
         return false;
@@ -42800,7 +42790,7 @@ var ScreenshotCollector = class {
       if (source === "feed") {
         this.lastScrollPosition = scrollPosition;
       }
-      this.saveScreenshotToDisk(screenshot, source, this.captures.length);
+      this.saveScreenshotToDisk(screenshot, source);
       console.log(`\u{1F4F8} Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ""}${fingerprint ? ` [fp: ${fingerprint.slice(0, 30)}]` : ""})`);
       return true;
     } catch (error) {
@@ -42884,7 +42874,7 @@ var ScreenshotCollector = class {
         // Use element Y as position
       };
       this.captures.push(captured);
-      this.saveScreenshotToDisk(screenshot, source, captured.id);
+      this.saveScreenshotToDisk(screenshot, source);
       console.log(`
 \u{1F4F8} === CAPTURED #${captured.id} ===`);
       console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
@@ -43018,7 +43008,7 @@ var ScreenshotCollector = class {
           frameIndex: capturedFrames + 1,
           totalFrames: maxFrames
         });
-        this.saveScreenshotToDisk(screenshot, source, this.captures.length);
+        this.saveScreenshotToDisk(screenshot, source);
         capturedFrames++;
         lastCapturedTime = videoState.currentTime;
         console.log(`\u{1F3AC} Frame ${capturedFrames} captured at ${videoState.currentTime.toFixed(1)}s`);
@@ -43101,9 +43091,9 @@ var ScreenshotCollector = class {
   }
   /**
    * Check if a hash is perceptually similar to any previously captured hash.
-   * Threshold: Hamming distance <= 8 out of 64 bits (~87.5% similar).
+   * Default threshold 5 (~92% similar). Stories use 3 (dark background dominates hash).
    */
-  isSimilarToExisting(hash, threshold = 8) {
+  isSimilarToExisting(hash, threshold = 5) {
     for (const existing of this.capturedHashes) {
       if (this.hammingDistance(hash, existing) <= threshold) return true;
     }
@@ -43195,6 +43185,10 @@ var ScreenshotCollector = class {
   }
 };
 
+// src/main/services/VisionAgent.ts
+var import_fs5 = __toESM(require("fs"), 1);
+var import_path3 = __toESM(require("path"), 1);
+
 // src/shared/modelConfig.ts
 var ModelConfig = {
   // Navigation decision loop — called every turn (44+ times per session)
@@ -43214,9 +43208,118 @@ var ModelConfig = {
   analysis: process.env.KOWALSKI_ANALYSIS_MODEL || "gpt-5.2"
 };
 
+// src/main/prompts/vision-agent.md
+var vision_agent_default = `You are an autonomous Instagram browsing agent. You see a screenshot of Instagram's desktop website each turn and decide what to do next.
+
+COORDINATE SYSTEM
+- The screenshot is {{SCREENSHOT_WIDTH}}x{{SCREENSHOT_HEIGHT}} pixels.
+- (0,0) is top-left. x increases rightward, y increases downward.
+- For click/hover, give x,y coordinates pointing at the CENTER of your target.
+
+ACTIONS (pick one per turn):
+
+  click(x, y)     Click at position (x,y). Use for opening posts, tapping stories, buttons, navigation.
+  scroll(dir)     Scroll "up" or "down".
+  type(text)      Type text into the focused input. ONLY use for Search. Never for comments or DMs.
+  press(key)      Press a key: Escape, Enter, ArrowRight, ArrowLeft, Backspace, Tab.
+  hover(x, y)     Move mouse to (x,y) without clicking. Use to reveal hover-triggered UI (carousel arrows).
+  capture(x1, y1, x2, y2)  Capture a cropped region for the content digest. (x1,y1) = top-left, (x2,y2) = bottom-right. Always crop to JUST the content \u2014 for post modals: the left side (image + caption), for stories: the center story only. Exclude sidebars, comments, other story previews, and navigation.
+  wait(seconds)   Wait 1-5 seconds for content to load.
+  newtab(x, y)    Open the link at (x,y) in a new tab and switch to it. Use for search results and account links so you can easily return.
+  closetab        Close the current tab and switch back to the previous one. Use when done browsing a search result or account page.
+  done            End the browsing session.
+
+MISSION
+Browse Instagram to build a content digest of the user's social world. Capture interesting content by opening individual posts and stories full-screen. You need to cover three activities: feed browsing, stories, and searching for the user's interests. Balance your time across all three.
+
+STRATEGY
+- Aim for a steady pace of captures. If 30+ seconds pass with no capture, actively seek something to capture.
+- To SEARCH for an interest: click the magnifying glass in the left sidebar, type in the search field, then use newtab() to open results in a new tab. When done with that result, use closetab to return. Do NOT use Messages, DMs, or any other input.
+- After capturing a post, press Escape to close the modal, then scroll or click to find the next one.
+- When opening a post from the feed, click the post IMAGE (center of the photo), not the username or buttons around it.
+- Use newtab(x,y) instead of click(x,y) when opening search results or account pages \u2014 this lets you closetab to return cleanly to the search results without losing your place.
+- When selecting stories, posts, or search results from a list, always start with the FIRST (leftmost/topmost) item, then work forward. Do not skip the first item.
+
+REFERENCE IMAGES
+You may be shown annotated reference screenshots before your current-turn screenshot. These are labeled, color-coded guides for interacting with Instagram. Study them carefully \u2014 they show you EXACTLY where to click and what to do.
+
+Color coding in the reference images:
+- RED box/circle = the primary element to click or the area to capture
+- ORANGE box = supplementary element worth noting \u2014 context varies per image (could be an area to ignore, a UI element to identify, or a button like X/arrow to use after the primary action)
+- PINK box = elements you should NOT click
+
+The images are grouped by task and show step-by-step flows:
+
+GOING HOME: How to navigate back to the home feed \u2014 click the Instagram logo in the top-left corner of the sidebar (highlighted in red).
+
+POSTS (feed interaction flow):
+1. In the feed, click the TIMESTAMP next to a post's username (not the image itself) to open the detailed post modal view.
+2. In the post modal, capture/screenshot the content area (the post image + caption on the left side, highlighted in red). Ignore the comments sidebar (orange). Then go back to the feed.
+3. Some posts are CAROUSELS with multiple images \u2014 you can tell by the right arrow visible on the post image (highlighted in red). After the initial capture, click the right arrow to advance, capture each image, and repeat until the right arrow disappears (meaning you reached the last image). Then return to the feed.
+
+STORIES (story interaction flow):
+1. At the top of the home feed, click the FIRST story avatar that has a colorful ring/border around it (highlighted in red circle). The row of story avatars is the story carousel (orange box).
+2. In the story viewer, capture the current story (the center content, highlighted in red). Then click the right side/arrow (orange box) to advance to the next story. Repeat: capture every story, advance, until you reach the last one. Do NOT click elements in pink boxes. Do not skip stories \u2014 capture every one.
+
+SEARCH (search interaction flow):
+1. Click the magnifying glass icon in the left sidebar (highlighted in red) to open search.
+2. Type your interest in the search field (highlighted in red). Search one interest at a time \u2014 do not type multiple interests at once. Make sure you are in the search pane, NOT messages or any other input.
+3. Search results appear as two types: broad search terms (red boxes) and individual accounts (orange boxes). For accounts, prioritize official/verified accounts with blue checkmarks. Use newtab(x,y) to open the top search result or top account in a new tab \u2014 this preserves your search results so you can return easily.
+4. From search results grid (in the new tab): click on any post thumbnail (highlighted in red) to open its modal. Capture the modal content (red box), then click the X (orange box) to close and return to the grid. Repeat for several posts. When done, use closetab to return to the search panel.
+5. From an account profile (in the new tab): click on any post thumbnail (highlighted in red) to open its modal. Same flow \u2014 capture (red box), close (orange box), repeat. When done, use closetab to return to the search panel.
+
+Use these reference images to calibrate your clicks. The annotations show you exact pixel regions. When you encounter these UI states in your live screenshots, replicate the same click targets.
+
+HOW INSTAGRAM WORKS
+- The HOME FEED shows posts in a vertical scroll. Each post has: a header (profile pic + username + timestamp), the post image/video, and engagement buttons below.
+- Clicking a post's IMAGE opens it as a detail modal (full image + caption + comments). This is what you want to capture.
+- Clicking a USERNAME navigates to that user's profile page (grid of thumbnails). This is NOT a post detail \u2014 don't capture the grid.
+- Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image. Pressing ArrowRight advances to the next slide.
+- STORY CIRCLES appear at the top of the feed. Clicking one enters full-screen story viewing. Press ArrowRight or click the right side to advance.
+- The LEFT SIDEBAR has navigation: Home, Search (magnifying glass), Explore, Reels, Messages, etc.
+- SEARCH: Click the magnifying glass icon in the left sidebar to open search. A search input will appear \u2014 type your query there. Use newtab() to open results in a new tab, browse and capture posts, then closetab to return to search.
+- Pressing ESCAPE closes modals and overlays, returning you to the previous view.
+- The MESSAGES/DMs icon is also in the sidebar \u2014 do NOT click it. You have no reason to go there.
+
+WHAT TO CAPTURE
+- Capture post detail pages (the modal showing a single post full-size). Crop to the LEFT side of the modal only (image + caption). Exclude the comments panel on the right.
+- Capture story frames. Crop to the CENTER story content only. Exclude the small story previews on the left and right sides, and the dark overlay.
+- Always provide crop coordinates (x1, y1, x2, y2) to capture just the content area \u2014 never capture the full viewport.
+- Do NOT capture the feed viewport, profile grids, or search results \u2014 these show multiple items partially, not useful for the digest.
+
+SAFETY \u2014 HARD RULES
+- NEVER click Like, Follow, Share, or Save buttons.
+- NEVER type in comment boxes, reply fields, or direct message inputs.
+- NEVER navigate to Messages, DMs, or Direct Inbox. If you end up there, press Escape or click Home immediately.
+- ONLY type in the Search input.
+- This is READ-ONLY browsing. Do not engage with content.
+
+SELF-CORRECTION
+- Check your RECENT HISTORY before acting. If your last 2+ actions resulted in "no change", you are stuck. Do NOT keep clicking nearby coordinates hoping something works.
+- When stuck: STOP and change strategy entirely. Try: press Escape, scroll down, or navigate to a different section (Home, Search, stories).
+- If the URL contains "/direct/" or "/messages/", you are in DMs \u2014 press Escape or click Home immediately.
+- If you've been on the same page for 3+ actions without a capture, move on. Scroll past or navigate elsewhere.
+- If you find yourself always picking the second item in a list instead of the first, correct this \u2014 start from the first.
+
+MEMORY
+You have a "memory" field in your response. Use it as a scratchpad. Your notes from the previous turn appear as "YOUR NOTES". Use it to track:
+1. What phase you're in (feed / stories / search) and when to switch
+2. What you've captured so far (count and brief descriptions)
+3. What went wrong \u2014 if an action failed, note WHY and what you'll do differently
+4. Your plan for the next 2-3 actions
+
+OUTPUT FORMAT (JSON):
+{
+  "thinking": "Brief reasoning about what you see and what to do",
+  "action": "click",
+  "x": 450,
+  "y": 320,
+  "memory": "Captured: sunset post from @nature. Plan: click next post."
+}
+`;
+
 // src/main/services/VisionAgent.ts
 var SCREENSHOT_WIDTH = 1280;
-var MAX_ACTION_HISTORY = 10;
 var VisionAgent = class {
   page;
   ghost;
@@ -43234,9 +43337,18 @@ var VisionAgent = class {
   lastMemory = "";
   actionHistory = [];
   decisionCount = 0;
+  lastTokenUsage = null;
   // Session state
   captureCount = 0;
   startTime = 0;
+  capturedPosts = [];
+  // Reference example images (loaded once, cached; sent only on first turn)
+  referenceImages = null;
+  referenceImagesSent = false;
+  // Tab management — tracks the original tab so closetab can return to it
+  originalPage = null;
+  // External stop signal (set by Cmd+Shift+K)
+  stopped = false;
   constructor(page, ghost, scroll, collector, config) {
     this.page = page;
     this.ghost = ghost;
@@ -43248,6 +43360,12 @@ var VisionAgent = class {
   // -----------------------------------------------------------------------
   // Main Loop
   // -----------------------------------------------------------------------
+  /** Stop the agent externally (e.g. Cmd+Shift+K). */
+  stop() {
+    this.stopped = true;
+    console.log("\u{1F6D1} VisionAgent: external stop signal received");
+    this.collector.appendLog("\u{1F6D1} External stop signal received");
+  }
   async run() {
     this.startTime = Date.now();
     const vp = this.page.viewportSize();
@@ -43255,11 +43373,18 @@ var VisionAgent = class {
     this.viewportHeight = vp?.height || 1920;
     console.log(`
 \u{1F441}\uFE0F  VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${this.model})`);
+    this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${this.model})`);
     while (true) {
+      if (this.stopped) {
+        console.log("\u{1F6D1} VisionAgent: stopped by user");
+        this.collector.appendLog("\u{1F6D1} Stopped by user (Cmd+Shift+K)");
+        break;
+      }
       const elapsed = Date.now() - this.startTime;
       const remaining = this.config.maxDurationMs - elapsed;
       if (remaining <= 0) {
         console.log("\u23F1\uFE0F  VisionAgent: time limit reached");
+        this.collector.appendLog("\u23F1\uFE0F Time limit reached");
         break;
       }
       const screenshot = await this.captureScreenshot();
@@ -43272,6 +43397,7 @@ var VisionAgent = class {
       console.log(`  \u{1F9E0} [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
       if (decision.action === "done") {
         console.log(`\u2705 VisionAgent: LLM ended session \u2014 ${decision.thinking}`);
+        this.collector.appendLog(`\u2705 LLM ended session \u2014 ${decision.thinking}`);
         break;
       }
       if (decision.memory) {
@@ -43283,15 +43409,18 @@ var VisionAgent = class {
         action: this.formatAction(decision),
         result
       });
-      if (this.actionHistory.length > MAX_ACTION_HISTORY) {
-        this.actionHistory.shift();
+      const tokenStr = this.lastTokenUsage ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens` : "";
+      this.collector.appendLog(`[${this.decisionCount}] ${this.formatAction(decision)}${tokenStr}`);
+      this.collector.appendLog(`  \u{1F4AD} ${decision.thinking}`);
+      this.collector.appendLog(`  \u2192 ${result}`);
+      if (decision.memory) {
+        this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
       }
-      this.collector.appendLog(`[${this.decisionCount}] ${this.formatAction(decision)} \u2192 ${result}`);
-      await this.delay(300 + Math.random() * 700);
     }
     console.log(`
 \u{1F441}\uFE0F  VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions
 `);
+    this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions`);
     return {
       captureCount: this.captureCount,
       decisionCount: this.decisionCount,
@@ -43313,10 +43442,13 @@ var VisionAgent = class {
       this.screenshotWidth = image2.width;
       this.screenshotHeight = image2.height;
       const buffer = await image2.getBuffer("image/jpeg", { quality: 80 });
-      console.log(`  \u{1F4F8} Screenshot: ${origW}x${origH} \u2192 ${this.screenshotWidth}x${this.screenshotHeight} (${Math.round(buffer.length / 1024)}KB)`);
+      const sizeKB = Math.round(buffer.length / 1024);
+      console.log(`  \u{1F4F8} Screenshot: ${origW}x${origH} \u2192 ${this.screenshotWidth}x${this.screenshotHeight} (${sizeKB}KB)`);
+      this.collector.appendLog(`\u{1F4F8} ${origW}x${origH} \u2192 ${this.screenshotWidth}x${this.screenshotHeight} (${sizeKB}KB)`);
       return buffer;
     } catch (err) {
       console.warn("  \u26A0\uFE0F Screenshot failed:", err);
+      this.collector.appendLog(`\u26A0\uFE0F Screenshot failed: ${err}`);
       return null;
     }
   }
@@ -43341,7 +43473,7 @@ var VisionAgent = class {
       case "scroll":
         return this.executeScroll(decision);
       case "capture":
-        return this.executeCapture();
+        return this.executeCapture(decision);
       case "type":
         return this.executeType(decision);
       case "press":
@@ -43350,105 +43482,182 @@ var VisionAgent = class {
         return this.executeHover(decision);
       case "wait":
         return this.executeWait(decision);
+      case "newtab":
+        return this.executeNewtab(decision);
+      case "closetab":
+        return this.executeClosetab();
       default:
         return `unknown action: ${decision.action}`;
     }
   }
   async executeClick(d) {
     if (d.x === void 0 || d.y === void 0) return "missing coordinates";
-    const preUrl = this.page.url();
-    const preHash = await this.quickScreenshotHash();
     const { x: x2, y: y2 } = this.scaleToViewport(d.x, d.y);
+    console.log(`  \u{1F5B1}\uFE0F click: screenshot(${d.x},${d.y}) \u2192 viewport(${Math.round(x2)},${Math.round(y2)}) | url=${this.page.url()}`);
+    this.collector.appendLog(`\u{1F5B1}\uFE0F click: screenshot(${d.x},${d.y}) \u2192 viewport(${Math.round(x2)},${Math.round(y2)}) | url=${this.page.url()}`);
     await this.ghost.clickPoint(x2, y2);
-    for (let i = 0; i < 5; i++) {
-      await this.delay(400);
-      const postUrl = this.page.url();
-      if (postUrl !== preUrl) {
-        await this.page.waitForLoadState("networkidle", { timeout: 3e3 }).catch(() => {
-        });
-        await this.delay(800 + Math.random() * 400);
-        return `url changed to ${postUrl}`;
-      }
-      const postHash = await this.quickScreenshotHash();
-      if (postHash !== preHash) return "page changed";
-    }
-    return "no change";
+    return "clicked";
   }
   async executeScroll(d) {
     const direction = d.direction || "down";
     const baseDistance = direction === "up" ? -Math.round(this.viewportHeight * 0.4) : Math.round(this.viewportHeight * 0.4);
+    console.log(`  \u{1F4DC} scroll: direction=${direction}, baseDistance=${baseDistance}px`);
+    this.collector.appendLog(`\u{1F4DC} scroll: direction=${direction}, baseDistance=${baseDistance}px`);
     const result = await this.scroll.scrollWithIntent({ baseDistance });
-    if (result.scrollFailed) return "scroll failed";
+    if (result.scrollFailed) {
+      console.log(`  \u{1F4DC} scroll failed`);
+      this.collector.appendLog(`\u{1F4DC} scroll failed`);
+      return "scroll failed";
+    }
+    console.log(`  \u{1F4DC} scrolled ${direction} ${Math.abs(result.actualDelta)}px`);
+    this.collector.appendLog(`\u{1F4DC} scrolled ${direction} ${Math.abs(result.actualDelta)}px`);
     return `scrolled ${direction} ${Math.abs(result.actualDelta)}px`;
   }
-  async executeCapture() {
+  async executeCapture(d) {
     const source = this.inferCaptureSource();
     const fingerprint = this.extractUrlFingerprint();
+    const url = this.page.url();
+    let clip;
+    if (d.x !== void 0 && d.y !== void 0 && d.x2 !== void 0 && d.y2 !== void 0) {
+      const topLeft = this.scaleToViewport(d.x, d.y);
+      const bottomRight = this.scaleToViewport(d.x2, d.y2);
+      const width = bottomRight.x - topLeft.x;
+      const height = bottomRight.y - topLeft.y;
+      if (width > 50 && height > 50) {
+        clip = { x: topLeft.x, y: topLeft.y, width, height };
+        console.log(`  \u{1F4F7} capture: crop screenshot(${d.x},${d.y})\u2192(${d.x2},${d.y2}) \u2192 viewport clip(${Math.round(topLeft.x)},${Math.round(topLeft.y)},${Math.round(width)}x${Math.round(height)})`);
+        this.collector.appendLog(`\u{1F4F7} capture: crop screenshot(${d.x},${d.y})\u2192(${d.x2},${d.y2}) \u2192 viewport clip(${Math.round(topLeft.x)},${Math.round(topLeft.y)},${Math.round(width)}x${Math.round(height)})`);
+      } else {
+        console.log(`  \u{1F4F7} capture: crop region too small (${Math.round(width)}x${Math.round(height)}), using full viewport`);
+        this.collector.appendLog(`\u{1F4F7} capture: crop region too small (${Math.round(width)}x${Math.round(height)}), using full viewport`);
+      }
+    } else {
+      console.log(`  \u{1F4F7} capture: no crop coordinates, using full viewport`);
+      this.collector.appendLog(`\u{1F4F7} capture: no crop coordinates, using full viewport`);
+    }
+    console.log(`  \u{1F4F7} capture: source=${source}, fingerprint=${fingerprint || "none"}, url=${url}`);
+    this.collector.appendLog(`\u{1F4F7} capture: source=${source}, fingerprint=${fingerprint || "none"}, url=${url}`);
     const captured = await this.collector.captureCurrentPost(
       source,
       void 0,
-      fingerprint || void 0
+      fingerprint || void 0,
+      clip
     );
     if (captured) {
       this.captureCount++;
-      return `captured #${this.captureCount} (source=${source})`;
+      if (fingerprint) {
+        this.capturedPosts.push({ fingerprint, url, source });
+      }
+      const cropInfo = clip ? ` [cropped ${Math.round(clip.width)}x${Math.round(clip.height)}]` : "";
+      console.log(`  \u{1F4F7} \u2705 captured #${this.captureCount} (source=${source})${cropInfo}`);
+      this.collector.appendLog(`\u{1F4F7} \u2705 captured #${this.captureCount} (source=${source})${cropInfo}`);
+      return `captured #${this.captureCount} (source=${source})${cropInfo}`;
     }
-    return "capture rejected (duplicate)";
+    console.log(`  \u{1F4F7} \u274C capture rejected (duplicate) url=${url}`);
+    this.collector.appendLog(`\u{1F4F7} \u274C capture rejected (duplicate) url=${url}`);
+    return `capture rejected \u2014 already captured this post (${url}). Do NOT re-open it.`;
   }
   async executeType(d) {
     if (!d.text) return "no text provided";
     const context = await this.getFocusedInputContext();
+    console.log(`  \u2328\uFE0F type: text="${d.text.slice(0, 40)}", inputContext=${context}`);
+    this.collector.appendLog(`\u2328\uFE0F type: text="${d.text.slice(0, 40)}", inputContext=${context}`);
     if (context === "comment" || context === "message") {
       console.warn(`  \u{1F6AB} BLOCKED: typing in ${context} context`);
+      this.collector.appendLog(`\u{1F6AB} BLOCKED: typing in ${context} context`);
       return `BLOCKED: cannot type in ${context} field`;
     }
-    for (const char of d.text) {
-      await this.page.keyboard.type(char);
-      await this.delay(50 + Math.random() * 100);
-    }
+    await this.page.keyboard.type(d.text);
+    console.log(`  \u2328\uFE0F typed "${d.text.slice(0, 40)}"`);
+    this.collector.appendLog(`\u2328\uFE0F typed "${d.text.slice(0, 40)}"`);
     return `typed "${d.text.slice(0, 30)}"`;
   }
   async executePress(d) {
     if (!d.key) return "no key provided";
+    console.log(`  \u{1F511} press: key=${d.key}`);
+    this.collector.appendLog(`\u{1F511} press: key=${d.key}`);
     await this.page.keyboard.press(d.key);
-    await this.delay(200 + Math.random() * 300);
     return `pressed ${d.key}`;
   }
   async executeHover(d) {
     if (d.x === void 0 || d.y === void 0) return "missing coordinates";
     const { x: x2, y: y2 } = this.scaleToViewport(d.x, d.y);
+    console.log(`  \u{1F446} hover: screenshot(${d.x},${d.y}) \u2192 viewport(${Math.round(x2)},${Math.round(y2)})`);
+    this.collector.appendLog(`\u{1F446} hover: screenshot(${d.x},${d.y}) \u2192 viewport(${Math.round(x2)},${Math.round(y2)})`);
     await this.ghost.moveTo({ x: x2, y: y2 });
     return `hovered at (${Math.round(x2)}, ${Math.round(y2)})`;
   }
   async executeWait(d) {
     const seconds = Math.max(1, Math.min(5, d.seconds || 2));
+    console.log(`  \u23F3 wait: ${seconds}s`);
+    this.collector.appendLog(`\u23F3 wait: ${seconds}s`);
     await this.delay(seconds * 1e3);
     return `waited ${seconds}s`;
   }
   // -----------------------------------------------------------------------
-  // Click Verification — Perceptual Hash
+  // Tab Management
   // -----------------------------------------------------------------------
-  async quickScreenshotHash() {
+  async executeNewtab(d) {
+    if (d.x === void 0 || d.y === void 0) return "missing coordinates";
+    const context = this.page.context();
+    const { x: x2, y: y2 } = this.scaleToViewport(d.x, d.y);
+    console.log(`  \u{1F517} newtab: screenshot(${d.x},${d.y}) \u2192 viewport(${Math.round(x2)},${Math.round(y2)}) | from=${this.page.url()}`);
+    this.collector.appendLog(`\u{1F517} newtab: screenshot(${d.x},${d.y}) \u2192 viewport(${Math.round(x2)},${Math.round(y2)}) | from=${this.page.url()}`);
+    if (!this.originalPage) {
+      this.originalPage = this.page;
+    }
     try {
-      const raw = await this.page.screenshot({ type: "jpeg", quality: 30, fullPage: false });
-      const image2 = await Jimp.read(raw);
-      image2.resize({ w: 8, h: 8 });
-      image2.greyscale();
-      const pixels = [];
-      for (let py = 0; py < 8; py++) {
-        for (let px = 0; px < 8; px++) {
-          pixels.push(image2.getPixelColor(px, py) >> 24 & 255);
-        }
-      }
-      const mean = pixels.reduce((a, b) => a + b, 0) / 64;
-      let hash = "";
-      for (let i = 0; i < 64; i += 4) {
-        const nibble = [0, 1, 2, 3].map((j) => pixels[i + j] > mean ? "1" : "0").join("");
-        hash += parseInt(nibble, 2).toString(16);
-      }
-      return hash;
+      await this.ghost.moveTo({ x: x2, y: y2 });
+      const newPagePromise = context.waitForEvent("page", { timeout: 5e3 });
+      await this.page.mouse.click(x2, y2, { button: "middle" });
+      const newPage = await newPagePromise;
+      await newPage.waitForLoadState("domcontentloaded", { timeout: 8e3 }).catch(() => {
+      });
+      this.switchToPage(newPage);
+      console.log(`  \u{1F517} newtab opened \u2192 ${newPage.url()}`);
+      this.collector.appendLog(`\u{1F517} newtab opened \u2192 ${newPage.url()}`);
+      return `opened new tab \u2192 ${newPage.url()}`;
     } catch {
-      return "";
+      console.log(`  \u{1F517} newtab failed \u2014 target not a link`);
+      this.collector.appendLog(`\u{1F517} newtab failed \u2014 target not a link`);
+      return "newtab failed \u2014 target may not be a link. Try click() instead.";
+    }
+  }
+  async executeClosetab() {
+    if (!this.originalPage) {
+      console.log(`  \u274E closetab: no tab to close \u2014 already on main tab`);
+      this.collector.appendLog(`\u274E closetab: no tab to close \u2014 already on main tab`);
+      return "no tab to close \u2014 already on the main tab";
+    }
+    if (this.page === this.originalPage) {
+      this.originalPage = null;
+      console.log(`  \u274E closetab: already on main tab`);
+      this.collector.appendLog(`\u274E closetab: already on main tab`);
+      return "already on main tab";
+    }
+    const closingUrl = this.page.url();
+    console.log(`  \u274E closetab: closing ${closingUrl}`);
+    this.collector.appendLog(`\u274E closetab: closing ${closingUrl}`);
+    try {
+      await this.page.close();
+    } catch {
+    }
+    this.switchToPage(this.originalPage);
+    this.originalPage = null;
+    console.log(`  \u274E closetab: back to ${this.page.url()}`);
+    this.collector.appendLog(`\u274E closetab: back to ${this.page.url()}`);
+    return `closed tab (was: ${closingUrl}), back to ${this.page.url()}`;
+  }
+  /** Rebind all services to a different page/tab. */
+  switchToPage(page) {
+    this.page = page;
+    this.ghost.setPage(page);
+    this.scroll.setPage(page);
+    this.collector.setPage(page);
+    const vp = page.viewportSize();
+    if (vp) {
+      this.viewportWidth = vp.width;
+      this.viewportHeight = vp.height;
     }
   }
   // -----------------------------------------------------------------------
@@ -43505,24 +43714,49 @@ var VisionAgent = class {
     const systemPrompt = this.getSystemPrompt();
     const userPrompt = this.buildUserPrompt(remainingMs);
     const visionDetail = process.env.KOWALSKI_VISION_DETAIL || "high";
+    const refImages = this.loadReferenceImages();
+    const messages = [
+      { role: "system", content: systemPrompt }
+    ];
+    if (refImages.length > 0 && !this.referenceImagesSent) {
+      const refContent = [];
+      for (const ref of refImages) {
+        refContent.push({
+          type: "image_url",
+          image_url: { url: ref.base64, detail: "auto" }
+        });
+        refContent.push({
+          type: "text",
+          text: `[Reference: ${ref.label}]`
+        });
+      }
+      refContent.push({
+        type: "text",
+        text: "Above are reference screenshots of Instagram's desktop UI. Study them so you know where key elements are."
+      });
+      messages.push({ role: "user", content: refContent });
+      messages.push({
+        role: "assistant",
+        content: "Understood. I've studied the reference screenshots and will use them to navigate accurately."
+      });
+      this.referenceImagesSent = true;
+    }
+    messages.push({
+      role: "user",
+      content: [
+        {
+          type: "image_url",
+          image_url: {
+            url: `data:image/jpeg;base64,${screenshot.toString("base64")}`,
+            detail: visionDetail
+          }
+        },
+        { type: "text", text: userPrompt }
+      ]
+    });
     const requestBody = {
       model: this.model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${screenshot.toString("base64")}`,
-                detail: visionDetail
-              }
-            },
-            { type: "text", text: userPrompt }
-          ]
-        }
-      ],
+      messages,
       response_format: { type: "json_object" },
       max_completion_tokens: 2048
     };
@@ -43539,17 +43773,24 @@ var VisionAgent = class {
         if (!response.ok) {
           const errText = await response.text();
           console.warn(`  \u26A0\uFE0F LLM API error (${response.status}): ${errText.slice(0, 200)}`);
+          this.collector.appendLog(`  \u26A0\uFE0F LLM API error (${response.status}): ${errText.slice(0, 200)}`);
           break;
         }
         const data = await response.json();
         const usage = data.usage;
         if (usage) {
+          this.lastTokenUsage = {
+            promptTokens: usage.prompt_tokens || 0,
+            completionTokens: usage.completion_tokens || 0
+          };
           console.log(`  \u{1F9E0} Tokens: ${usage.prompt_tokens} in, ${usage.completion_tokens} out (vision:${visionDetail})`);
+          this.collector.appendLog(`  \u{1F9E0} Tokens: ${usage.prompt_tokens} in, ${usage.completion_tokens} out (vision:${visionDetail})`);
         }
         const choices = data.choices;
         const content = choices?.[0]?.message?.content;
         if (!content || typeof content !== "string") {
           console.warn(`  \u26A0\uFE0F Empty LLM response (attempt ${attempt + 1})`);
+          this.collector.appendLog(`  \u26A0\uFE0F Empty LLM response (attempt ${attempt + 1})`);
           if (attempt === 0) {
             await this.delay(500);
             continue;
@@ -43560,6 +43801,7 @@ var VisionAgent = class {
         return parsed;
       } catch (err) {
         console.warn(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}):`, err);
+        this.collector.appendLog(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}): ${err}`);
         if (attempt === 0) {
           await this.delay(500);
           continue;
@@ -43567,105 +43809,74 @@ var VisionAgent = class {
       }
     }
     console.warn("  \u26A0\uFE0F LLM fallback: scrolling down");
+    this.collector.appendLog("  \u26A0\uFE0F LLM fallback: scrolling down");
     return { thinking: "LLM error fallback", action: "scroll", direction: "down" };
   }
   // -----------------------------------------------------------------------
   // System Prompt
   // -----------------------------------------------------------------------
   getSystemPrompt() {
-    return `You are an autonomous Instagram browsing agent. You see a screenshot of the Instagram app each turn and decide what to do next.
-
-COORDINATE SYSTEM
-- The screenshot is ${this.screenshotWidth}x${this.screenshotHeight} pixels.
-- (0,0) is top-left. x increases rightward, y increases downward.
-- For click/hover, give x,y coordinates pointing at the CENTER of your target.
-
-ACTIONS (pick one per turn):
-
-  click(x, y)     Click at position (x,y). Use for opening posts, tapping stories, buttons, navigation.
-  scroll(dir)     Scroll "up" or "down".
-  type(text)      Type text into the focused input. ONLY use for Search. Never for comments or DMs.
-  press(key)      Press a key: Escape, Enter, ArrowRight, ArrowLeft, Backspace, Tab.
-  hover(x, y)     Move mouse to (x,y) without clicking. Use to reveal hover-triggered UI (carousel arrows).
-  capture         Capture the current screen for the content digest.
-  wait(seconds)   Wait 1-5 seconds for content to load.
-  done            End the browsing session.
-
-MISSION
-Browse Instagram to build a content digest of the user's social world.
-You have three activities: browsing the feed, watching stories, and searching for specific topics.
-Capture interesting content from DETAIL PAGES (not the feed viewport).
-
-FEED WORKFLOW
-1. On the feed, find a post worth capturing.
-2. Click its TIMESTAMP (text like "1h", "16h", "2d" \u2014 appears near the top-right of each post). The timestamp is a link that opens the post's detail page.
-3. On the detail page, immediately capture.
-4. If the post has multiple images (carousel \u2014 look for dots or arrows), press ArrowRight to advance slides. Capture each slide.
-5. Return to feed: click the Instagram logo (top-left corner) or press Escape if the post opened as a modal.
-6. Scroll down to see new posts. Repeat.
-
-STORIES WORKFLOW
-1. Click a story circle at the top of the feed.
-2. Capture every story frame.
-3. Advance by clicking the right side of the story viewer or pressing ArrowRight.
-4. When stories end, you'll return to the feed automatically.
-
-SEARCH WORKFLOW
-1. Click "Search" in the left sidebar.
-2. Click the search input, type your search term.
-3. Wait for results, then click a relevant result.
-4. Capture interesting content from the profile or post detail page.
-5. Navigate back and search for the next interest.
-
-TIME BUDGET
-Aim for roughly 40% feed, 30% stories, 30% search over the full session.
-Don't spend the whole session on one activity \u2014 switch it up.
-If you've been on the feed for a while, go watch stories. If you've done stories, search for interests.
-Use the "done" action when you feel you've covered enough content or time is almost up.
-
-CAPTURE RULES
-- GOOD: Post detail page (full image, caption, engagement stats visible).
-- GOOD: Story frame (full-screen content).
-- BAD: Feed viewport with multiple partial posts. NEVER capture from the feed.
-- After capturing a post detail page, return to the feed before capturing another.
-
-SAFETY \u2014 HARD RULES
-- NEVER click Like, Follow, Share, or Save buttons.
-- NEVER type in comment boxes, reply fields, or direct message inputs.
-- ONLY type in the Search input.
-- This is READ-ONLY browsing. Do not engage with content, do not follow anyone.
-
-RECOVERY
-- If your last 3+ clicks had "no change", try a different target or scroll first.
-- If scroll fails, press Escape (an overlay may be blocking).
-- If stuck for 5+ actions, switch activities (feed \u2192 stories \u2192 search).
-- If an overlay or modal is in the way, press Escape to dismiss it.
-
-MEMORY
-You have a "memory" field in your response. Use it to track:
-- Posts captured (brief descriptions)
-- Your current plan
-- Failed attempts to click or capture
-Your notes from the previous turn appear as "YOUR NOTES" \u2014 use them to avoid re-capturing.
-
-OUTPUT FORMAT (JSON):
-{
-  "thinking": "Brief reasoning about what you see and what to do",
-  "action": "click",
-  "x": 450,
-  "y": 320,
-  "memory": "Captured: sunset post from @nature. Plan: click next post."
-}`;
+    return vision_agent_default.replace("{{SCREENSHOT_WIDTH}}", String(this.screenshotWidth)).replace("{{SCREENSHOT_HEIGHT}}", String(this.screenshotHeight));
+  }
+  /**
+   * Load reference example images from src/main/prompts/examples/.
+   * Images are loaded once and cached for the session.
+   *
+   * Naming convention: use descriptive filenames like:
+   *   home-feed.jpg, search-panel.png, post-modal.jpg, story-viewer.jpg
+   * The filename (without extension) becomes the label shown to the LLM.
+   */
+  loadReferenceImages() {
+    if (this.referenceImages !== null) return this.referenceImages;
+    this.referenceImages = [];
+    const examplesDir = import_path3.default.join(__dirname, "../../src/main/prompts/examples");
+    try {
+      if (!import_fs5.default.existsSync(examplesDir)) return this.referenceImages;
+      const imagePattern = /\.(jpg|jpeg|png|webp)$/i;
+      const loaded = [];
+      const addImage = (filePath, label) => {
+        const buffer = import_fs5.default.readFileSync(filePath);
+        const ext = import_path3.default.extname(filePath).toLowerCase().replace(".", "");
+        const mime2 = ext === "jpg" ? "jpeg" : ext;
+        this.referenceImages.push({
+          label,
+          base64: `data:image/${mime2};base64,${buffer.toString("base64")}`
+        });
+        loaded.push(import_path3.default.relative(examplesDir, filePath));
+      };
+      const cleanName = (name) => import_path3.default.basename(name, import_path3.default.extname(name)).replace(/[-_.]/g, " ").trim();
+      const rootFiles = import_fs5.default.readdirSync(examplesDir).filter((f) => imagePattern.test(f) && import_fs5.default.statSync(import_path3.default.join(examplesDir, f)).isFile()).sort();
+      for (const file of rootFiles) {
+        addImage(import_path3.default.join(examplesDir, file), cleanName(file));
+      }
+      const subdirs = import_fs5.default.readdirSync(examplesDir).filter((f) => import_fs5.default.statSync(import_path3.default.join(examplesDir, f)).isDirectory()).sort();
+      for (const dir of subdirs) {
+        const dirPath = import_path3.default.join(examplesDir, dir);
+        const files = import_fs5.default.readdirSync(dirPath).filter((f) => imagePattern.test(f)).sort();
+        for (const file of files) {
+          const label = `${dir} - ${cleanName(file)}`;
+          addImage(import_path3.default.join(dirPath, file), label);
+        }
+      }
+      if (this.referenceImages.length > 0) {
+        console.log(`  \u{1F4CE} Loaded ${this.referenceImages.length} reference image(s): ${loaded.join(", ")}`);
+        this.collector.appendLog(`\u{1F4CE} Loaded ${this.referenceImages.length} reference image(s): ${loaded.join(", ")}`);
+      }
+    } catch (err) {
+      console.warn("  \u26A0\uFE0F Failed to load reference images:", err);
+      this.collector.appendLog(`\u26A0\uFE0F Failed to load reference images: ${err}`);
+    }
+    return this.referenceImages;
   }
   // -----------------------------------------------------------------------
   // Per-Turn User Prompt
   // -----------------------------------------------------------------------
   buildUserPrompt(remainingMs) {
     const elapsedSec = Math.round((Date.now() - this.startTime) / 1e3);
-    const remainingSec = Math.round(remainingMs / 1e3);
-    const totalMin = Math.round(this.config.maxDurationMs / 6e4);
+    const elapsedMin = Math.round(elapsedSec / 60);
+    const remainingMin = Math.round(remainingMs / 6e4);
     const parts = [];
-    parts.push(`SESSION: ${elapsedSec}s elapsed, ${remainingSec}s remaining (${totalMin} min total)`);
+    parts.push(`SESSION: ${elapsedMin} min elapsed, ${remainingMin} min remaining. Use done when you've collected enough content across feed, stories, and searches.`);
     parts.push(`CAPTURES: ${this.captureCount} screenshots taken`);
     if (this.config.userInterests.length > 0) {
       parts.push(`INTERESTS TO SEARCH: ${this.config.userInterests.join(", ")}`);
@@ -43680,6 +43891,13 @@ LAST ACTION: ${last.action} \u2192 ${last.result}`);
       this.actionHistory.forEach((entry, i) => {
         parts.push(`${i + 1}. ${entry.action} \u2192 ${entry.result}`);
       });
+    }
+    if (this.capturedPosts.length > 0) {
+      parts.push("\nCAPTURED POSTS (do not re-open these):");
+      for (const post of this.capturedPosts) {
+        const shortUrl = post.fingerprint || post.url.split("instagram.com")[1]?.slice(0, 40) || post.url;
+        parts.push(`- ${shortUrl} (${post.source})`);
+      }
     }
     if (this.config.sessionMemoryDigest) {
       parts.push(`
@@ -43707,7 +43925,7 @@ ${this.lastMemory}`);
       case "scroll":
         return `scroll(${d.direction || "down"})`;
       case "capture":
-        return "capture";
+        return d.x2 !== void 0 ? `capture(${d.x},${d.y},${d.x2},${d.y2})` : "capture";
       case "type":
         return `type("${(d.text || "").slice(0, 20)}")`;
       case "press":
@@ -43716,6 +43934,10 @@ ${this.lastMemory}`);
         return `hover(${d.x},${d.y})`;
       case "wait":
         return `wait(${d.seconds || 2}s)`;
+      case "newtab":
+        return `newtab(${d.x},${d.y})`;
+      case "closetab":
+        return "closetab";
       case "done":
         return "done";
       default:
@@ -43736,8 +43958,8 @@ ${this.lastMemory}`);
 
 // src/main/services/SessionMemory.ts
 var import_electron4 = require("electron");
-var import_fs5 = __toESM(require("fs"), 1);
-var import_path3 = __toESM(require("path"), 1);
+var import_fs6 = __toESM(require("fs"), 1);
+var import_path4 = __toESM(require("path"), 1);
 var MAX_SUMMARIES = 20;
 var DIGEST_SUMMARIES = 5;
 var SessionMemory = class {
@@ -43745,7 +43967,7 @@ var SessionMemory = class {
   summaries = [];
   constructor() {
     const userDataPath = import_electron4.app.getPath("userData");
-    this.storagePath = import_path3.default.join(userDataPath, "session_memory", "summaries.json");
+    this.storagePath = import_path4.default.join(userDataPath, "session_memory", "summaries.json");
   }
   /**
    * Load session summaries from disk.
@@ -43753,7 +43975,7 @@ var SessionMemory = class {
    */
   async loadMemory() {
     try {
-      const data = await import_fs5.default.promises.readFile(this.storagePath, "utf-8");
+      const data = await import_fs6.default.promises.readFile(this.storagePath, "utf-8");
       this.summaries = JSON.parse(data);
       console.log(`\u{1F9E0} Loaded ${this.summaries.length} session memories`);
     } catch {
@@ -43771,12 +43993,12 @@ var SessionMemory = class {
     if (this.summaries.length > MAX_SUMMARIES) {
       this.summaries = this.summaries.slice(-MAX_SUMMARIES);
     }
-    const dir = import_path3.default.dirname(this.storagePath);
+    const dir = import_path4.default.dirname(this.storagePath);
     const tempPath = this.storagePath + ".tmp";
     try {
-      await import_fs5.default.promises.mkdir(dir, { recursive: true });
-      await import_fs5.default.promises.writeFile(tempPath, JSON.stringify(this.summaries, null, 2));
-      await import_fs5.default.promises.rename(tempPath, this.storagePath);
+      await import_fs6.default.promises.mkdir(dir, { recursive: true });
+      await import_fs6.default.promises.writeFile(tempPath, JSON.stringify(this.summaries, null, 2));
+      await import_fs6.default.promises.rename(tempPath, this.storagePath);
       console.log(`\u{1F9E0} Saved session memory (${this.summaries.length} sessions)`);
     } catch (err) {
       console.error("Failed to save session memory:", err);
@@ -43865,7 +44087,7 @@ var SessionMemory = class {
 };
 
 // src/main/services/InstagramScraper.ts
-var path5 = __toESM(require("path"), 1);
+var path6 = __toESM(require("path"), 1);
 var os = __toESM(require("os"), 1);
 var InstagramScraper = class {
   context;
@@ -43879,12 +44101,19 @@ var InstagramScraper = class {
   screenshotCollector;
   page;
   sessionMemory = new SessionMemory();
+  activeVisionAgent = null;
   constructor(context, apiKey, usageCap, debugMode = false) {
     this.context = context;
     this.apiKey = apiKey;
     this.usageCap = usageCap;
     this.usageService = UsageService.getInstance();
     this.debugMode = debugMode;
+  }
+  /** Stop the active browsing session externally (e.g. Cmd+Shift+K). */
+  stop() {
+    if (this.activeVisionAgent) {
+      this.activeVisionAgent.stop();
+    }
   }
   /**
    * Main entry point — browse Instagram and return captured screenshots.
@@ -43898,8 +44127,9 @@ var InstagramScraper = class {
   async browseWithAINavigation(targetMinutes, userInterests, config) {
     const startTime = Date.now();
     const targetDurationMs = targetMinutes * 60 * 1e3;
-    this.page = await this.context.newPage();
-    await this.page.setViewportSize({ width: 1280, height: 900 });
+    const existingPages = this.context.pages();
+    const instagramPage = existingPages.find((p) => p.url().includes("instagram.com"));
+    this.page = instagramPage || await this.context.newPage();
     this.ghost = new GhostMouse(this.page);
     this.scroll = new HumanScroll(this.page);
     const estimatedMaxCaptures = Math.max(150, Math.ceil(targetMinutes * 4));
@@ -43907,18 +44137,20 @@ var InstagramScraper = class {
       maxCaptures: estimatedMaxCaptures,
       jpegQuality: 85,
       minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.1),
-      saveToDirectory: path5.join(os.homedir(), "Documents", "debug-screenshots")
+      saveToDirectory: path6.join(os.homedir(), "Documents", "debug-screenshots")
     });
-    if (this.debugMode) {
-      await this.ghost.enableVisibleCursor();
-    }
     let visionAgent;
     try {
-      console.log("\u{1F310} Navigating to Instagram...");
-      await this.page.goto("https://www.instagram.com/", {
-        waitUntil: "domcontentloaded"
-      });
-      await this.humanDelay(2e3, 4e3);
+      const currentUrl = this.page.url();
+      if (!currentUrl.includes("instagram.com") || currentUrl.includes("/accounts/login")) {
+        console.log("\u{1F310} Navigating to Instagram...");
+        await this.page.goto("https://www.instagram.com/", {
+          waitUntil: "domcontentloaded"
+        });
+        await this.humanDelay(2e3, 4e3);
+      } else {
+        console.log("\u{1F310} Already on Instagram, reusing existing page");
+      }
       const pageUrl = this.page.url();
       console.log("\u{1F4CA} Page URL:", pageUrl);
       if (pageUrl.includes("/accounts/login")) {
@@ -43951,6 +44183,7 @@ var InstagramScraper = class {
           sessionMemoryDigest
         }
       );
+      this.activeVisionAgent = visionAgent;
       const result = await visionAgent.run();
       this.screenshotCollector.appendLogRaw(`
 ---
@@ -43988,6 +44221,7 @@ var InstagramScraper = class {
         throw error;
       }
     } finally {
+      this.activeVisionAgent = null;
       console.log(`
 \u{1F4CA} Session Summary:`);
       if (visionAgent) {
@@ -44496,6 +44730,8 @@ var SchedulerService = class _SchedulerService {
   lastWakeTime = /* @__PURE__ */ new Date();
   // Track when app started/woke
   suspensionBlockerId = null;
+  // Active debug run scraper (for Cmd+Shift+K stop)
+  activeDebugScraper = null;
   constructor() {
   }
   static getInstance() {
@@ -44727,7 +44963,6 @@ var SchedulerService = class _SchedulerService {
     const todayStr = this.formatLocalDate(now);
     const deliveryTime = this.parseTimeString(deliveryTimeStr, now);
     const offset = this.getDeterministicBakeOffset(todayStr);
-    console.log(`\u{1F3B2} Deterministic offset for ${todayStr}: ${offset / 6e4} minutes`);
     const bakeTime = new Date(deliveryTime.getTime() - BAKER_LEAD_TIME_MS + offset);
     if (now < bakeTime || now >= deliveryTime) return false;
     if (lastBakeIso) {
@@ -44914,6 +45149,15 @@ var SchedulerService = class _SchedulerService {
   async triggerDebugRun() {
     await this.triggerDebugRunScreenshotFirst();
   }
+  /** Stop the active debug run (Cmd+Shift+K). */
+  stopDebugRun() {
+    if (this.activeDebugScraper) {
+      console.log("\u{1F6D1} Stopping debug run (Cmd+Shift+K)...");
+      this.activeDebugScraper.stop();
+    } else {
+      console.log("\u{1F6D1} No active debug run to stop");
+    }
+  }
   /**
    * DEBUG RUN (Screenshot-First): Uses the new screenshot-based architecture.
    */
@@ -44923,12 +45167,12 @@ var SchedulerService = class _SchedulerService {
     const settings = store.get("settings") || {};
     const now = /* @__PURE__ */ new Date();
     const scheduledTime = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    const BROWSE_DURATION_MS = 5 * 60 * 1e3;
+    const MAX_DURATION_MS = 90 * 60 * 1e3;
     const browserManager = BrowserManager.getInstance();
     let context = null;
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send("debug-run-started", {
-        durationMs: BROWSE_DURATION_MS,
+        durationMs: MAX_DURATION_MS,
         startTime: Date.now()
       });
     }
@@ -44947,13 +45191,15 @@ var SchedulerService = class _SchedulerService {
       if (!sessionCheck.valid) {
         throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
       }
-      console.log("\u{1F9EA} Browsing Instagram (Screenshot-First mode)...");
+      console.log("\u{1F9EA} Browsing Instagram (90 min max, stop with Cmd+Shift+K)...");
       const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);
+      this.activeDebugScraper = scraper;
       const session2 = await scraper.browseAndCapture(
-        5,
-        // Debug mode: 5 minutes
+        MAX_DURATION_MS / 6e4,
+        // Convert to minutes (24h safety net)
         settings.interests || []
       );
+      this.activeDebugScraper = null;
       console.log(`\u{1F9EA} Browsing complete: ${session2.captureCount} screenshots captured`);
       await browserManager.close();
       context = null;
@@ -44975,15 +45221,15 @@ var SchedulerService = class _SchedulerService {
       });
       const recordId = (0, import_uuid.v4)();
       const userDataPath = import_electron5.app.getPath("userData");
-      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
-      const imagesDir = import_path4.default.join(recordDir, recordId, "images");
-      await import_fs6.default.promises.mkdir(imagesDir, { recursive: true });
+      const recordDir = import_path5.default.join(userDataPath, "analysis_records");
+      const imagesDir = import_path5.default.join(recordDir, recordId, "images");
+      await import_fs7.default.promises.mkdir(imagesDir, { recursive: true });
       const selectedIds = new Set(bestCaptures.map((c2) => c2.id));
       const imageMetadata = [];
       for (const capture of bestCaptures) {
         const filename = `${capture.id}.jpg`;
-        const imagePath = import_path4.default.join(imagesDir, filename);
-        await import_fs6.default.promises.writeFile(imagePath, capture.screenshot);
+        const imagePath = import_path5.default.join(imagesDir, filename);
+        await import_fs7.default.promises.writeFile(imagePath, capture.screenshot);
         const captureTag = tags.find((t2) => t2.imageId === capture.id);
         imageMetadata.push({
           id: capture.id,
@@ -45009,10 +45255,10 @@ var SchedulerService = class _SchedulerService {
         data: analysisWithImages,
         leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
       };
-      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs6.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs6.default.promises.rename(tempPath, recordPath);
+      const recordPath = import_path5.default.join(recordDir, `${recordId}.json`);
+      const tempPath = import_path5.default.join(recordDir, `${recordId}.tmp`);
+      await import_fs7.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs7.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F9EA} Saved digest to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
@@ -45039,6 +45285,7 @@ var SchedulerService = class _SchedulerService {
       console.log(`\u{1F9EA} Debug Run (Screenshot-First) Complete! Captures: ${session2.captureCount}`);
     } catch (error) {
       console.error("\u{1F9EA} Debug Run Failed:", error.message);
+      this.activeDebugScraper = null;
       if (context) {
         await browserManager.close();
       }
@@ -45106,14 +45353,14 @@ var SchedulerService = class _SchedulerService {
       });
       const recordId = (0, import_uuid.v4)();
       const userDataPath = import_electron5.app.getPath("userData");
-      const recordDir = import_path4.default.join(userDataPath, "analysis_records");
-      const imagesDir = import_path4.default.join(recordDir, recordId, "images");
-      await import_fs6.default.promises.mkdir(imagesDir, { recursive: true });
+      const recordDir = import_path5.default.join(userDataPath, "analysis_records");
+      const imagesDir = import_path5.default.join(recordDir, recordId, "images");
+      await import_fs7.default.promises.mkdir(imagesDir, { recursive: true });
       const imageMetadata = [];
       for (const capture of bestCaptures) {
         const filename = `${capture.id}.jpg`;
-        const imagePath = import_path4.default.join(imagesDir, filename);
-        await import_fs6.default.promises.writeFile(imagePath, capture.screenshot);
+        const imagePath = import_path5.default.join(imagesDir, filename);
+        await import_fs7.default.promises.writeFile(imagePath, capture.screenshot);
         const captureTag = tags.find((t2) => t2.imageId === capture.id);
         imageMetadata.push({
           id: capture.id,
@@ -45139,10 +45386,10 @@ var SchedulerService = class _SchedulerService {
         data: analysisWithImages,
         leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
       };
-      const recordPath = import_path4.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path4.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs6.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs6.default.promises.rename(tempPath, recordPath);
+      const recordPath = import_path5.default.join(recordDir, `${recordId}.json`);
+      const tempPath = import_path5.default.join(recordDir, `${recordId}.tmp`);
+      await import_fs7.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
+      await import_fs7.default.promises.rename(tempPath, recordPath);
       console.log(`\u{1F4BE} Baker saved digest to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
@@ -45181,7 +45428,7 @@ import_electron6.app.commandLine.appendSwitch("disable-software-rasterizer");
 import_electron6.app.commandLine.appendSwitch("disable-dev-shm-usage");
 import_electron6.app.commandLine.appendSwitch("disable-renderer-backgrounding");
 var __filename = (0, import_url.fileURLToPath)(__importMetaUrl);
-var __dirname = import_path5.default.dirname(__filename);
+var __dirname2 = import_path6.default.dirname(__filename);
 var require2 = (0, import_module.createRequire)(__importMetaUrl);
 if (!import_electron6.app.getLoginItemSettings().openAtLogin) {
   import_electron6.app.setLoginItemSettings({
@@ -45219,17 +45466,17 @@ var createWindow = () => {
     frame: true,
     // titleBarStyle property removed to use system default
     webPreferences: {
-      preload: import_path5.default.join(__dirname, "../preload/preload.cjs"),
+      preload: import_path6.default.join(__dirname2, "../preload/preload.cjs"),
       webviewTag: true,
       partition: SHARED_PARTITION
       // Force main window to check this (though webview usually isolates)
     },
     // Set icon for Windows/Linux (and Mac if packaged)
     // Use the processed, standardized icon
-    icon: import_path5.default.join(__dirname, "../../build/icon-standard.png")
+    icon: import_path6.default.join(__dirname2, "../../build/icon-standard.png")
   });
   if (process.platform === "darwin" && process.env.VITE_DEV_SERVER_URL) {
-    const iconPath = import_path5.default.join(__dirname, "../../build/icon-standard.png");
+    const iconPath = import_path6.default.join(__dirname2, "../../build/icon-standard.png");
     import_electron6.app.dock?.setIcon(iconPath);
   }
   SchedulerService.getInstance().setMainWindow(mainWindow);
@@ -45241,7 +45488,7 @@ var createWindow = () => {
     console.log("Creating window with URL:", url);
     mainWindow.loadURL(url);
   } else {
-    const filePath = import_path5.default.join(__dirname, "../../dist/index.html");
+    const filePath = import_path6.default.join(__dirname2, "../../dist/index.html");
     console.log("Loading file path:", filePath);
     mainWindow.loadFile(filePath);
   }
@@ -45272,24 +45519,24 @@ import_electron6.app.on("ready", () => {
     const recordId = url.hostname;
     const filePath = url.pathname.startsWith("/") ? url.pathname.slice(1) : url.pathname;
     const userDataPath2 = import_electron6.app.getPath("userData");
-    const fullPath = import_path5.default.join(userDataPath2, "analysis_records", recordId, filePath);
+    const fullPath = import_path6.default.join(userDataPath2, "analysis_records", recordId, filePath);
     console.log(`\u{1F4F7} Protocol request: ${request.url}`);
     console.log(`\u{1F4F7} Resolved path: ${fullPath}`);
-    if (import_fs7.default.existsSync(fullPath)) {
+    if (import_fs8.default.existsSync(fullPath)) {
       console.log(`\u{1F4F7} File exists, serving: ${fullPath}`);
       callback({ path: fullPath });
     } else {
       console.error(`\u274C Protocol error: File not found: ${fullPath}`);
       console.error(`\u274C RecordId: ${recordId}, FilePath: ${filePath}`);
-      const recordsDir = import_path5.default.join(userDataPath2, "analysis_records");
-      if (import_fs7.default.existsSync(recordsDir)) {
-        console.log(`\u{1F4C2} Contents of analysis_records: ${import_fs7.default.readdirSync(recordsDir).join(", ")}`);
-        const recordDir = import_path5.default.join(recordsDir, recordId);
-        if (import_fs7.default.existsSync(recordDir)) {
-          console.log(`\u{1F4C2} Contents of ${recordId}: ${import_fs7.default.readdirSync(recordDir).join(", ")}`);
-          const imagesDir = import_path5.default.join(recordDir, "images");
-          if (import_fs7.default.existsSync(imagesDir)) {
-            console.log(`\u{1F4C2} Contents of images: ${import_fs7.default.readdirSync(imagesDir).join(", ")}`);
+      const recordsDir = import_path6.default.join(userDataPath2, "analysis_records");
+      if (import_fs8.default.existsSync(recordsDir)) {
+        console.log(`\u{1F4C2} Contents of analysis_records: ${import_fs8.default.readdirSync(recordsDir).join(", ")}`);
+        const recordDir = import_path6.default.join(recordsDir, recordId);
+        if (import_fs8.default.existsSync(recordDir)) {
+          console.log(`\u{1F4C2} Contents of ${recordId}: ${import_fs8.default.readdirSync(recordDir).join(", ")}`);
+          const imagesDir = import_path6.default.join(recordDir, "images");
+          if (import_fs8.default.existsSync(imagesDir)) {
+            console.log(`\u{1F4C2} Contents of images: ${import_fs8.default.readdirSync(imagesDir).join(", ")}`);
           }
         }
       }
@@ -45305,13 +45552,17 @@ import_electron6.app.on("ready", () => {
   UsageService.getInstance().initialize();
   SchedulerService.getInstance().initialize();
   import_electron6.globalShortcut.register("CommandOrControl+Shift+H", () => {
-    console.log("\u{1F9EA} Testing Shortcut Triggered (Cmd+Shift+H)");
+    console.log("\u{1F9EA} Debug Run Triggered (Cmd+Shift+H)");
     SchedulerService.getInstance().triggerDebugRun();
   });
+  import_electron6.globalShortcut.register("CommandOrControl+Shift+K", () => {
+    console.log("\u{1F6D1} Stop Shortcut Triggered (Cmd+Shift+K)");
+    SchedulerService.getInstance().stopDebugRun();
+  });
   const userDataPath = import_electron6.app.getPath("userData");
-  const recordsPath = import_path5.default.join(userDataPath, "analysis_records");
-  if (!import_fs7.default.existsSync(recordsPath)) {
-    import_fs7.default.mkdirSync(recordsPath, { recursive: true });
+  const recordsPath = import_path6.default.join(userDataPath, "analysis_records");
+  if (!import_fs8.default.existsSync(recordsPath)) {
+    import_fs8.default.mkdirSync(recordsPath, { recursive: true });
     console.log("\u{1F4C2} Created analysis_records directory");
   }
   setupIPCHandlers();
@@ -45326,9 +45577,9 @@ function setupIPCHandlers() {
     console.log("\u{1F9F9} Starting session reset...");
     try {
       const userDataPath = import_electron6.app.getPath("userData");
-      const sessionPath = import_path5.default.join(userDataPath, "session.json");
-      if (import_fs7.default.existsSync(sessionPath)) {
-        import_fs7.default.unlinkSync(sessionPath);
+      const sessionPath = import_path6.default.join(userDataPath, "session.json");
+      if (import_fs8.default.existsSync(sessionPath)) {
+        import_fs8.default.unlinkSync(sessionPath);
         console.log("\u2705 Deleted legacy session.json");
       }
       await BrowserManager.getInstance().clearData();
@@ -45361,9 +45612,9 @@ function setupIPCHandlers() {
     }
     try {
       const userDataPath = import_electron6.app.getPath("userData");
-      const recordsPath = import_path5.default.join(userDataPath, "analysis_records");
-      if (import_fs7.default.existsSync(recordsPath)) {
-        import_fs7.default.rmSync(recordsPath, { recursive: true, force: true });
+      const recordsPath = import_path6.default.join(userDataPath, "analysis_records");
+      if (import_fs8.default.existsSync(recordsPath)) {
+        import_fs8.default.rmSync(recordsPath, { recursive: true, force: true });
         console.log("\u2705 Deleted analysis_records folder");
       }
     } catch (e) {
@@ -45442,9 +45693,9 @@ function setupIPCHandlers() {
   import_electron6.ipcMain.handle("analyses:get-content", async (_event, id) => {
     try {
       const userDataPath = import_electron6.app.getPath("userData");
-      const filePath = import_path5.default.join(userDataPath, "analysis_records", `${id}.json`);
-      if (import_fs7.default.existsSync(filePath)) {
-        const raw = import_fs7.default.readFileSync(filePath, "utf-8");
+      const filePath = import_path6.default.join(userDataPath, "analysis_records", `${id}.json`);
+      if (import_fs8.default.existsSync(filePath)) {
+        const raw = import_fs8.default.readFileSync(filePath, "utf-8");
         return JSON.parse(raw);
       }
       return null;
@@ -45499,9 +45750,9 @@ function setupIPCHandlers() {
     console.log("\u{1F9F9} Clearing Instagram Session only...");
     try {
       const userDataPath = import_electron6.app.getPath("userData");
-      const sessionPath = import_path5.default.join(userDataPath, "session.json");
-      if (import_fs7.default.existsSync(sessionPath)) {
-        import_fs7.default.unlinkSync(sessionPath);
+      const sessionPath = import_path6.default.join(userDataPath, "session.json");
+      if (import_fs8.default.existsSync(sessionPath)) {
+        import_fs8.default.unlinkSync(sessionPath);
       }
       await import_electron6.session.fromPartition(SHARED_PARTITION).clearStorageData();
       await BrowserManager.getInstance().clearData();
@@ -45514,18 +45765,18 @@ function setupIPCHandlers() {
   import_electron6.ipcMain.handle("check-instagram-session", async () => {
     try {
       const userDataPath = import_electron6.app.getPath("userData");
-      const persistentContextPath = import_path5.default.join(userDataPath, "kowalski_browser");
-      if (!import_fs7.default.existsSync(persistentContextPath)) {
+      const persistentContextPath = import_path6.default.join(userDataPath, "kowalski_browser");
+      if (!import_fs8.default.existsSync(persistentContextPath)) {
         return { isActive: false, reason: "no_profile" };
       }
-      const cookiesDbPath = import_path5.default.join(persistentContextPath, "Default", "Cookies");
-      if (!import_fs7.default.existsSync(cookiesDbPath)) {
+      const cookiesDbPath = import_path6.default.join(persistentContextPath, "Default", "Cookies");
+      if (!import_fs8.default.existsSync(cookiesDbPath)) {
         return { isActive: false, reason: "no_cookies_db" };
       }
       try {
-        const tempDbPath = import_path5.default.join(userDataPath, "cookies_check_temp.db");
+        const tempDbPath = import_path6.default.join(userDataPath, "cookies_check_temp.db");
         console.log("\u{1F50D} Session check: Copying cookies from", cookiesDbPath, "to", tempDbPath);
-        import_fs7.default.copyFileSync(cookiesDbPath, tempDbPath);
+        import_fs8.default.copyFileSync(cookiesDbPath, tempDbPath);
         const Database = require2("better-sqlite3");
         const db = new Database(tempDbPath, { readonly: true });
         const stmt = db.prepare(`
@@ -45543,7 +45794,7 @@ function setupIPCHandlers() {
         }
         db.close();
         try {
-          import_fs7.default.unlinkSync(tempDbPath);
+          import_fs8.default.unlinkSync(tempDbPath);
         } catch {
         }
         if (rows.length > 0) {

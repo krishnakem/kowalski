@@ -46,6 +46,9 @@ export class SchedulerService {
     private lastWakeTime: Date = new Date(); // Track when app started/woke
     private suspensionBlockerId: number | null = null;
 
+    // Active debug run scraper (for Cmd+Shift+K stop)
+    private activeDebugScraper: InstagramScraper | null = null;
+
     private constructor() { }
 
     public static getInstance(): SchedulerService {
@@ -377,7 +380,6 @@ export class SchedulerService {
 
         // Deterministic random offset: 0-30 minutes (varies by day, fixed within day)
         const offset = this.getDeterministicBakeOffset(todayStr);
-        console.log(`🎲 Deterministic offset for ${todayStr}: ${offset / 60000} minutes`);
 
         // Bake time: BAKER_LEAD_TIME before delivery + offset (so 2.5-3h before in production)
         const bakeTime = new Date(deliveryTime.getTime() - BAKER_LEAD_TIME_MS + offset);
@@ -633,6 +635,16 @@ export class SchedulerService {
         await this.triggerDebugRunScreenshotFirst();
     }
 
+    /** Stop the active debug run (Cmd+Shift+K). */
+    public stopDebugRun(): void {
+        if (this.activeDebugScraper) {
+            console.log('🛑 Stopping debug run (Cmd+Shift+K)...');
+            this.activeDebugScraper.stop();
+        } else {
+            console.log('🛑 No active debug run to stop');
+        }
+    }
+
     /**
      * DEBUG RUN (Screenshot-First): Uses the new screenshot-based architecture.
      */
@@ -644,14 +656,15 @@ export class SchedulerService {
         const now = new Date();
         const scheduledTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-        const BROWSE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+        // 90-minute max (matches normal baker run), or stop early with Cmd+Shift+K
+        const MAX_DURATION_MS = 90 * 60 * 1000;
         const browserManager = BrowserManager.getInstance();
         let context = null;
 
-        // Notify UI that debug run started (for 5-minute timer)
+        // Notify UI that debug run started
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
             this.mainWindow.webContents.send('debug-run-started', {
-                durationMs: BROWSE_DURATION_MS,
+                durationMs: MAX_DURATION_MS,
                 startTime: Date.now()
             });
         }
@@ -677,14 +690,16 @@ export class SchedulerService {
                 throw new Error(sessionCheck.reason || 'SESSION_EXPIRED');
             }
 
-            // 4. Browse Instagram and capture screenshots
-            console.log('🧪 Browsing Instagram (Screenshot-First mode)...');
+            // 4. Browse Instagram and capture screenshots (90 min max, or stop with Cmd+Shift+K)
+            console.log('🧪 Browsing Instagram (90 min max, stop with Cmd+Shift+K)...');
             const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);  // debugMode = true
+            this.activeDebugScraper = scraper;
             const session = await scraper.browseAndCapture(
-                5,  // Debug mode: 5 minutes
+                MAX_DURATION_MS / 60000,  // Convert to minutes (24h safety net)
                 settings.interests || []
             );
 
+            this.activeDebugScraper = null;
             console.log(`🧪 Browsing complete: ${session.captureCount} screenshots captured`);
 
             // 5. Close browser before generation
@@ -807,6 +822,7 @@ export class SchedulerService {
 
         } catch (error: any) {
             console.error('🧪 Debug Run Failed:', error.message);
+            this.activeDebugScraper = null;
 
             if (context) {
                 await browserManager.close();

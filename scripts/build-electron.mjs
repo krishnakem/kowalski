@@ -24,6 +24,7 @@ await esbuild.build({
     ],
     format: 'cjs',
     sourcemap: true,
+    loader: { '.md': 'text' },
     // Inject CJS shims at the top of the bundle
     banner: {
         js: `

@@ -208,10 +208,17 @@ app.on('ready', () => {
   // Initialize Scheduler
   SchedulerService.getInstance().initialize();
 
-  // === TESTING SHORTCUT: Cmd+Shift+H ===
+  // === DEBUG SHORTCUTS ===
+  // Cmd+Shift+H: Start debug run (runs until LLM done or manually stopped)
   globalShortcut.register('CommandOrControl+Shift+H', () => {
-    console.log('🧪 Testing Shortcut Triggered (Cmd+Shift+H)');
+    console.log('🧪 Debug Run Triggered (Cmd+Shift+H)');
     SchedulerService.getInstance().triggerDebugRun();
+  });
+
+  // Cmd+Shift+K: Stop active debug run
+  globalShortcut.register('CommandOrControl+Shift+K', () => {
+    console.log('🛑 Stop Shortcut Triggered (Cmd+Shift+K)');
+    SchedulerService.getInstance().stopDebugRun();
   });
 
   // MIGRATION: Ensure storage directory exists

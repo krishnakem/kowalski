@@ -36,6 +36,11 @@ const DEFAULT_CONFIG: CollectorConfig = {
 
 export class ScreenshotCollector {
     private page: Page;
+
+    /** Rebind to a different page (used for tab switching). */
+    setPage(page: Page): void {
+        this.page = page;
+    }
     private captures: CapturedPost[] = [];
     private config: CollectorConfig;
     private lastScrollPosition: number = 0;
@@ -46,6 +51,12 @@ export class ScreenshotCollector {
     private capturedHashes = new Set<string>();       // Track by image hash (for carousel/story)
     private capturedPositions = new Set<string>();    // Track by source + scroll position bucket
     private lastCaptureSource: string = '';
+
+    // File naming: posts get sequential numbers, carousel slides get sub-numbers (001.1, 001.2, ...)
+    private postNumber: number = 0;
+    private carouselSlideIndex: number = 0;   // 0 = not in carousel, 1+ = slide count
+    private lastPostSource: CaptureSource = 'feed';
+    private lastSingleFilepath: string = '';
 
     // Session log buffer (written to .md file alongside screenshots)
     private logBuffer: string[] = [];
@@ -78,14 +89,37 @@ export class ScreenshotCollector {
      * Save a screenshot to disk for debugging.
      * Only saves if outputDir is configured.
      */
-    private saveScreenshotToDisk(screenshot: Buffer, source: CaptureSource, id: number): void {
+    private saveScreenshotToDisk(screenshot: Buffer, source: CaptureSource): void {
         if (!this.outputDir) return;
 
-        // Simpler filename since session folder already has timestamp
-        const filename = `${id.toString().padStart(3, '0')}_${source}.jpg`;
-        const filepath = path.join(this.outputDir, filename);
+        let filename: string;
 
+        if (source === 'carousel') {
+            if (this.carouselSlideIndex === 0) {
+                // First carousel slide — rename the parent capture to .1
+                if (this.lastSingleFilepath && fs.existsSync(this.lastSingleFilepath)) {
+                    const renamedFilename = `${this.postNumber.toString().padStart(3, '0')}.1_${this.lastPostSource}.jpg`;
+                    fs.renameSync(this.lastSingleFilepath, path.join(this.outputDir, renamedFilename));
+                    console.log(`  💾 Renamed: ${path.basename(this.lastSingleFilepath)} → ${renamedFilename}`);
+                }
+                this.carouselSlideIndex = 1;
+            }
+            this.carouselSlideIndex++;
+            filename = `${this.postNumber.toString().padStart(3, '0')}.${this.carouselSlideIndex}_${this.lastPostSource}.jpg`;
+        } else {
+            this.postNumber++;
+            this.carouselSlideIndex = 0;
+            this.lastPostSource = source;
+            filename = `${this.postNumber.toString().padStart(3, '0')}_${source}.jpg`;
+        }
+
+        const filepath = path.join(this.outputDir, filename);
         fs.writeFileSync(filepath, screenshot);
+
+        if (source !== 'carousel') {
+            this.lastSingleFilepath = filepath;
+        }
+
         console.log(`  💾 Saved: ${filename}`);
     }
 
@@ -98,7 +132,7 @@ export class ScreenshotCollector {
      * @param fingerprint - Tree-based post fingerprint for dedup (null for stories/grids → falls through to hash dedup)
      * @returns true if captured, false if skipped (max reached or duplicate position)
      */
-    async captureCurrentPost(source: CaptureSource, interest?: string, fingerprint?: string): Promise<boolean> {
+    async captureCurrentPost(source: CaptureSource, interest?: string, fingerprint?: string, clip?: { x: number; y: number; width: number; height: number }): Promise<boolean> {
         // Check memory limit
         if (this.captures.length >= this.config.maxCaptures) {
             console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached`);
@@ -136,18 +170,19 @@ export class ScreenshotCollector {
         }
 
         try {
-            // Full viewport screenshot for all content types (feed, story, search, profile)
+            // Cropped screenshot if clip region provided, otherwise full viewport
             const screenshot = await this.page.screenshot({
                 type: 'jpeg',
                 quality: this.config.jpegQuality,
-                fullPage: false  // Viewport only
+                fullPage: false,  // Viewport only
+                ...(clip ? { clip } : {})
             });
 
             // SECONDARY DEDUP: Perceptual hash — catches near-duplicates (scroll jitter, compression)
             // Stories use tighter threshold (3) because dark background dominates the 8x8 hash,
             // causing different story frames to appear similar at the default threshold (8)
             const hash = await this.computePerceptualHash(screenshot);
-            const hashThreshold = source === 'story' ? 3 : 8;
+            const hashThreshold = source === 'story' ? 3 : 5;
             if (this.isSimilarToExisting(hash, hashThreshold)) {
                 console.log(`[CAPTURE-REJECT] perceptual_hash: ${hash} (source=${source}, threshold=${hashThreshold})`);
                 return false;
@@ -182,7 +217,7 @@ export class ScreenshotCollector {
             }
 
             // Save to disk for debugging if configured
-            this.saveScreenshotToDisk(screenshot, source, this.captures.length);
+            this.saveScreenshotToDisk(screenshot, source);
 
             console.log(`📸 Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ''}${fingerprint ? ` [fp: ${fingerprint.slice(0, 30)}]` : ''})`);
             return true;
@@ -297,7 +332,7 @@ export class ScreenshotCollector {
             this.captures.push(captured);
 
             // Save to disk for debugging if configured
-            this.saveScreenshotToDisk(screenshot, source, captured.id);
+            this.saveScreenshotToDisk(screenshot, source);
 
             // Log ONLY after capture is actually stored
             console.log(`\n📸 === CAPTURED #${captured.id} ===`);
@@ -467,7 +502,7 @@ export class ScreenshotCollector {
                 });
 
                 // Save to disk for debugging if configured
-                this.saveScreenshotToDisk(screenshot, source, this.captures.length);
+                this.saveScreenshotToDisk(screenshot, source);
 
                 capturedFrames++;
                 lastCapturedTime = videoState.currentTime;
@@ -567,9 +602,9 @@ export class ScreenshotCollector {
 
     /**
      * Check if a hash is perceptually similar to any previously captured hash.
-     * Threshold: Hamming distance <= 8 out of 64 bits (~87.5% similar).
+     * Default threshold 5 (~92% similar). Stories use 3 (dark background dominates hash).
      */
-    private isSimilarToExisting(hash: string, threshold: number = 8): boolean {
+    private isSimilarToExisting(hash: string, threshold: number = 5): boolean {
         for (const existing of this.capturedHashes) {
             if (this.hammingDistance(hash, existing) <= threshold) return true;
         }

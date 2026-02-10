@@ -12,12 +12,15 @@
 
 import { Page } from 'playwright';
 import { Jimp } from 'jimp';
+import fs from 'fs';
+import path from 'path';
 import { GhostMouse } from './GhostMouse.js';
 import { HumanScroll } from './HumanScroll.js';
 import { ScreenshotCollector } from './ScreenshotCollector.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
 import type { BrowsingPhase } from '../../types/navigation.js';
 import type { CaptureSource } from '../../types/instagram.js';
+import visionAgentPrompt from '../prompts/vision-agent.md';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,9 +29,11 @@ import type { CaptureSource } from '../../types/instagram.js';
 /** LLM response schema — the complete output format. */
 interface VisionAction {
     thinking: string;
-    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'capture' | 'wait' | 'done';
+    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'capture' | 'wait' | 'done' | 'newtab' | 'closetab';
     x?: number;
     y?: number;
+    x2?: number;   // Bottom-right x for capture crop region
+    y2?: number;   // Bottom-right y for capture crop region
     direction?: 'up' | 'down';
     text?: string;
     key?: string;
@@ -60,7 +65,7 @@ export interface VisionAgentResult {
 // ---------------------------------------------------------------------------
 
 const SCREENSHOT_WIDTH = 1280;
-const MAX_ACTION_HISTORY = 10;
+// No cap — LLM sees full history for the run
 
 // ---------------------------------------------------------------------------
 // VisionAgent
@@ -86,10 +91,22 @@ export class VisionAgent {
     private lastMemory: string = '';
     private actionHistory: ActionHistoryEntry[] = [];
     private decisionCount: number = 0;
+    private lastTokenUsage: { promptTokens: number; completionTokens: number } | null = null;
 
     // Session state
     private captureCount: number = 0;
     private startTime: number = 0;
+    private capturedPosts: Array<{ fingerprint: string; url: string; source: string }> = [];
+
+    // Reference example images (loaded once, cached; sent only on first turn)
+    private referenceImages: Array<{ label: string; base64: string }> | null = null;
+    private referenceImagesSent: boolean = false;
+
+    // Tab management — tracks the original tab so closetab can return to it
+    private originalPage: Page | null = null;
+
+    // External stop signal (set by Cmd+Shift+K)
+    private stopped: boolean = false;
 
     constructor(
         page: Page,
@@ -110,6 +127,13 @@ export class VisionAgent {
     // Main Loop
     // -----------------------------------------------------------------------
 
+    /** Stop the agent externally (e.g. Cmd+Shift+K). */
+    stop(): void {
+        this.stopped = true;
+        console.log('🛑 VisionAgent: external stop signal received');
+        this.collector.appendLog('🛑 External stop signal received');
+    }
+
     async run(): Promise<VisionAgentResult> {
         this.startTime = Date.now();
         const vp = this.page.viewportSize();
@@ -117,12 +141,21 @@ export class VisionAgent {
         this.viewportHeight = vp?.height || 1920;
 
         console.log(`\n👁️  VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${this.model})`);
+        this.collector.appendLog(`👁️ VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${this.model})`);
 
         while (true) {
+            // Check external stop signal (Cmd+Shift+K)
+            if (this.stopped) {
+                console.log('🛑 VisionAgent: stopped by user');
+                this.collector.appendLog('🛑 Stopped by user (Cmd+Shift+K)');
+                break;
+            }
+
             const elapsed = Date.now() - this.startTime;
             const remaining = this.config.maxDurationMs - elapsed;
             if (remaining <= 0) {
                 console.log('⏱️  VisionAgent: time limit reached');
+                this.collector.appendLog('⏱️ Time limit reached');
                 break;
             }
 
@@ -142,6 +175,7 @@ export class VisionAgent {
             // 3. Handle "done" — LLM terminates session
             if (decision.action === 'done') {
                 console.log(`✅ VisionAgent: LLM ended session — ${decision.thinking}`);
+                this.collector.appendLog(`✅ LLM ended session — ${decision.thinking}`);
                 break;
             }
 
@@ -159,18 +193,22 @@ export class VisionAgent {
                 action: this.formatAction(decision),
                 result
             });
-            if (this.actionHistory.length > MAX_ACTION_HISTORY) {
-                this.actionHistory.shift();
-            }
 
             // 7. Log to session file
-            this.collector.appendLog(`[${this.decisionCount}] ${this.formatAction(decision)} → ${result}`);
+            const tokenStr = this.lastTokenUsage
+                ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens`
+                : '';
+            this.collector.appendLog(`[${this.decisionCount}] ${this.formatAction(decision)}${tokenStr}`);
+            this.collector.appendLog(`  💭 ${decision.thinking}`);
+            this.collector.appendLog(`  → ${result}`);
+            if (decision.memory) {
+                this.collector.appendLog(`  📝 Memory: ${decision.memory}`);
+            }
 
-            // 8. Inter-action delay (300-1000ms, human-like variation)
-            await this.delay(300 + Math.random() * 700);
         }
 
         console.log(`\n👁️  VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions\n`);
+        this.collector.appendLog(`👁️ VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions`);
 
         return {
             captureCount: this.captureCount,
@@ -195,10 +233,13 @@ export class VisionAgent {
             this.screenshotWidth = image.width;
             this.screenshotHeight = image.height;
             const buffer = await image.getBuffer('image/jpeg', { quality: 80 });
-            console.log(`  📸 Screenshot: ${origW}x${origH} → ${this.screenshotWidth}x${this.screenshotHeight} (${Math.round(buffer.length / 1024)}KB)`);
+            const sizeKB = Math.round(buffer.length / 1024);
+            console.log(`  📸 Screenshot: ${origW}x${origH} → ${this.screenshotWidth}x${this.screenshotHeight} (${sizeKB}KB)`);
+            this.collector.appendLog(`📸 ${origW}x${origH} → ${this.screenshotWidth}x${this.screenshotHeight} (${sizeKB}KB)`);
             return buffer;
         } catch (err) {
             console.warn('  ⚠️ Screenshot failed:', err);
+            this.collector.appendLog(`⚠️ Screenshot failed: ${err}`);
             return null;
         }
     }
@@ -224,38 +265,24 @@ export class VisionAgent {
         switch (decision.action) {
             case 'click': return this.executeClick(decision);
             case 'scroll': return this.executeScroll(decision);
-            case 'capture': return this.executeCapture();
+            case 'capture': return this.executeCapture(decision);
             case 'type': return this.executeType(decision);
             case 'press': return this.executePress(decision);
             case 'hover': return this.executeHover(decision);
             case 'wait': return this.executeWait(decision);
+            case 'newtab': return this.executeNewtab(decision);
+            case 'closetab': return this.executeClosetab();
             default: return `unknown action: ${decision.action}`;
         }
     }
 
     private async executeClick(d: VisionAction): Promise<string> {
         if (d.x === undefined || d.y === undefined) return 'missing coordinates';
-
-        const preUrl = this.page.url();
-        const preHash = await this.quickScreenshotHash();
-
         const { x, y } = this.scaleToViewport(d.x, d.y);
+        console.log(`  🖱️ click: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)}) | url=${this.page.url()}`);
+        this.collector.appendLog(`🖱️ click: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)}) | url=${this.page.url()}`);
         await this.ghost.clickPoint(x, y);
-
-        // Poll for state change (5 x 400ms = 2s max)
-        for (let i = 0; i < 5; i++) {
-            await this.delay(400);
-            const postUrl = this.page.url();
-            if (postUrl !== preUrl) {
-                // Wait for SPA hydration after URL change
-                await this.page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
-                await this.delay(800 + Math.random() * 400);
-                return `url changed to ${postUrl}`;
-            }
-            const postHash = await this.quickScreenshotHash();
-            if (postHash !== preHash) return 'page changed';
-        }
-        return 'no change';
+        return 'clicked';
     }
 
     private async executeScroll(d: VisionAction): Promise<string> {
@@ -264,26 +291,66 @@ export class VisionAgent {
             ? -Math.round(this.viewportHeight * 0.4)
             : Math.round(this.viewportHeight * 0.4);
 
+        console.log(`  📜 scroll: direction=${direction}, baseDistance=${baseDistance}px`);
+        this.collector.appendLog(`📜 scroll: direction=${direction}, baseDistance=${baseDistance}px`);
         const result = await this.scroll.scrollWithIntent({ baseDistance });
-        if (result.scrollFailed) return 'scroll failed';
+        if (result.scrollFailed) {
+            console.log(`  📜 scroll failed`);
+            this.collector.appendLog(`📜 scroll failed`);
+            return 'scroll failed';
+        }
+        console.log(`  📜 scrolled ${direction} ${Math.abs(result.actualDelta)}px`);
+        this.collector.appendLog(`📜 scrolled ${direction} ${Math.abs(result.actualDelta)}px`);
         return `scrolled ${direction} ${Math.abs(result.actualDelta)}px`;
     }
 
-    private async executeCapture(): Promise<string> {
+    private async executeCapture(d: VisionAction): Promise<string> {
         const source = this.inferCaptureSource();
         const fingerprint = this.extractUrlFingerprint();
+        const url = this.page.url();
+
+        // Build optional clip region from LLM-provided crop coordinates
+        let clip: { x: number; y: number; width: number; height: number } | undefined;
+        if (d.x !== undefined && d.y !== undefined && d.x2 !== undefined && d.y2 !== undefined) {
+            const topLeft = this.scaleToViewport(d.x, d.y);
+            const bottomRight = this.scaleToViewport(d.x2, d.y2);
+            const width = bottomRight.x - topLeft.x;
+            const height = bottomRight.y - topLeft.y;
+            if (width > 50 && height > 50) {
+                clip = { x: topLeft.x, y: topLeft.y, width, height };
+                console.log(`  📷 capture: crop screenshot(${d.x},${d.y})→(${d.x2},${d.y2}) → viewport clip(${Math.round(topLeft.x)},${Math.round(topLeft.y)},${Math.round(width)}x${Math.round(height)})`);
+                this.collector.appendLog(`📷 capture: crop screenshot(${d.x},${d.y})→(${d.x2},${d.y2}) → viewport clip(${Math.round(topLeft.x)},${Math.round(topLeft.y)},${Math.round(width)}x${Math.round(height)})`);
+            } else {
+                console.log(`  📷 capture: crop region too small (${Math.round(width)}x${Math.round(height)}), using full viewport`);
+                this.collector.appendLog(`📷 capture: crop region too small (${Math.round(width)}x${Math.round(height)}), using full viewport`);
+            }
+        } else {
+            console.log(`  📷 capture: no crop coordinates, using full viewport`);
+            this.collector.appendLog(`📷 capture: no crop coordinates, using full viewport`);
+        }
+        console.log(`  📷 capture: source=${source}, fingerprint=${fingerprint || 'none'}, url=${url}`);
+        this.collector.appendLog(`📷 capture: source=${source}, fingerprint=${fingerprint || 'none'}, url=${url}`);
 
         const captured = await this.collector.captureCurrentPost(
             source,
             undefined,
-            fingerprint || undefined
+            fingerprint || undefined,
+            clip
         );
 
         if (captured) {
             this.captureCount++;
-            return `captured #${this.captureCount} (source=${source})`;
+            if (fingerprint) {
+                this.capturedPosts.push({ fingerprint, url, source });
+            }
+            const cropInfo = clip ? ` [cropped ${Math.round(clip.width)}x${Math.round(clip.height)}]` : '';
+            console.log(`  📷 ✅ captured #${this.captureCount} (source=${source})${cropInfo}`);
+            this.collector.appendLog(`📷 ✅ captured #${this.captureCount} (source=${source})${cropInfo}`);
+            return `captured #${this.captureCount} (source=${source})${cropInfo}`;
         }
-        return 'capture rejected (duplicate)';
+        console.log(`  📷 ❌ capture rejected (duplicate) url=${url}`);
+        this.collector.appendLog(`📷 ❌ capture rejected (duplicate) url=${url}`);
+        return `capture rejected — already captured this post (${url}). Do NOT re-open it.`;
     }
 
     private async executeType(d: VisionAction): Promise<string> {
@@ -291,68 +358,130 @@ export class VisionAgent {
 
         // SAFETY GUARDRAIL: check focused input context
         const context = await this.getFocusedInputContext();
+        console.log(`  ⌨️ type: text="${d.text.slice(0, 40)}", inputContext=${context}`);
+        this.collector.appendLog(`⌨️ type: text="${d.text.slice(0, 40)}", inputContext=${context}`);
         if (context === 'comment' || context === 'message') {
             console.warn(`  🚫 BLOCKED: typing in ${context} context`);
+            this.collector.appendLog(`🚫 BLOCKED: typing in ${context} context`);
             return `BLOCKED: cannot type in ${context} field`;
         }
 
-        // Type character by character with human-like delays
-        for (const char of d.text) {
-            await this.page.keyboard.type(char);
-            await this.delay(50 + Math.random() * 100);
-        }
+        await this.page.keyboard.type(d.text);
+        console.log(`  ⌨️ typed "${d.text.slice(0, 40)}"`);
+        this.collector.appendLog(`⌨️ typed "${d.text.slice(0, 40)}"`);
         return `typed "${d.text.slice(0, 30)}"`;
     }
 
     private async executePress(d: VisionAction): Promise<string> {
         if (!d.key) return 'no key provided';
+        console.log(`  🔑 press: key=${d.key}`);
+        this.collector.appendLog(`🔑 press: key=${d.key}`);
         await this.page.keyboard.press(d.key);
-        await this.delay(200 + Math.random() * 300);
         return `pressed ${d.key}`;
     }
 
     private async executeHover(d: VisionAction): Promise<string> {
         if (d.x === undefined || d.y === undefined) return 'missing coordinates';
         const { x, y } = this.scaleToViewport(d.x, d.y);
+        console.log(`  👆 hover: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)})`);
+        this.collector.appendLog(`👆 hover: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)})`);
         await this.ghost.moveTo({ x, y });
         return `hovered at (${Math.round(x)}, ${Math.round(y)})`;
     }
 
     private async executeWait(d: VisionAction): Promise<string> {
         const seconds = Math.max(1, Math.min(5, d.seconds || 2));
+        console.log(`  ⏳ wait: ${seconds}s`);
+        this.collector.appendLog(`⏳ wait: ${seconds}s`);
         await this.delay(seconds * 1000);
         return `waited ${seconds}s`;
     }
 
     // -----------------------------------------------------------------------
-    // Click Verification — Perceptual Hash
+    // Tab Management
     // -----------------------------------------------------------------------
 
-    private async quickScreenshotHash(): Promise<string> {
-        try {
-            const raw = await this.page.screenshot({ type: 'jpeg', quality: 30, fullPage: false });
-            const image = await Jimp.read(raw);
-            image.resize({ w: 8, h: 8 });
-            image.greyscale();
+    private async executeNewtab(d: VisionAction): Promise<string> {
+        if (d.x === undefined || d.y === undefined) return 'missing coordinates';
 
-            // Compute average hash (same algorithm as ScreenshotCollector)
-            const pixels: number[] = [];
-            for (let py = 0; py < 8; py++) {
-                for (let px = 0; px < 8; px++) {
-                    pixels.push((image.getPixelColor(px, py) >> 24) & 0xFF);
-                }
-            }
-            const mean = pixels.reduce((a, b) => a + b, 0) / 64;
-            let hash = '';
-            for (let i = 0; i < 64; i += 4) {
-                const nibble = [0, 1, 2, 3]
-                    .map(j => pixels[i + j] > mean ? '1' : '0')
-                    .join('');
-                hash += parseInt(nibble, 2).toString(16);
-            }
-            return hash;
+        const context = this.page.context();
+        const { x, y } = this.scaleToViewport(d.x, d.y);
+
+        console.log(`  🔗 newtab: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)}) | from=${this.page.url()}`);
+        this.collector.appendLog(`🔗 newtab: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)}) | from=${this.page.url()}`);
+
+        // Save the current page as the original if this is the first newtab
+        if (!this.originalPage) {
+            this.originalPage = this.page;
+        }
+
+        try {
+            // Move mouse naturally to the target, then middle-click to open in new tab
+            await this.ghost.moveTo({ x, y });
+
+            // Listen for the new page event BEFORE clicking
+            const newPagePromise = context.waitForEvent('page', { timeout: 5000 });
+            await this.page.mouse.click(x, y, { button: 'middle' });
+
+            const newPage = await newPagePromise;
+            await newPage.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
+
+            this.switchToPage(newPage);
+            console.log(`  🔗 newtab opened → ${newPage.url()}`);
+            this.collector.appendLog(`🔗 newtab opened → ${newPage.url()}`);
+            return `opened new tab → ${newPage.url()}`;
         } catch {
-            return '';
+            console.log(`  🔗 newtab failed — target not a link`);
+            this.collector.appendLog(`🔗 newtab failed — target not a link`);
+            return 'newtab failed — target may not be a link. Try click() instead.';
+        }
+    }
+
+    private async executeClosetab(): Promise<string> {
+        if (!this.originalPage) {
+            console.log(`  ❎ closetab: no tab to close — already on main tab`);
+            this.collector.appendLog(`❎ closetab: no tab to close — already on main tab`);
+            return 'no tab to close — already on the main tab';
+        }
+
+        // If we're on the original page, nothing to close
+        if (this.page === this.originalPage) {
+            this.originalPage = null;
+            console.log(`  ❎ closetab: already on main tab`);
+            this.collector.appendLog(`❎ closetab: already on main tab`);
+            return 'already on main tab';
+        }
+
+        const closingUrl = this.page.url();
+        console.log(`  ❎ closetab: closing ${closingUrl}`);
+        this.collector.appendLog(`❎ closetab: closing ${closingUrl}`);
+        try {
+            await this.page.close();
+        } catch {
+            // Page may already be closed
+        }
+
+        // Switch back to the original page
+        this.switchToPage(this.originalPage);
+        this.originalPage = null;
+
+        console.log(`  ❎ closetab: back to ${this.page.url()}`);
+        this.collector.appendLog(`❎ closetab: back to ${this.page.url()}`);
+        return `closed tab (was: ${closingUrl}), back to ${this.page.url()}`;
+    }
+
+    /** Rebind all services to a different page/tab. */
+    private switchToPage(page: Page): void {
+        this.page = page;
+        this.ghost.setPage(page);
+        this.scroll.setPage(page);
+        this.collector.setPage(page);
+
+        // Update viewport dimensions for the new page
+        const vp = page.viewportSize();
+        if (vp) {
+            this.viewportWidth = vp.width;
+            this.viewportHeight = vp.height;
         }
     }
 
@@ -426,25 +555,56 @@ export class VisionAgent {
         const systemPrompt = this.getSystemPrompt();
         const userPrompt = this.buildUserPrompt(remainingMs);
         const visionDetail = process.env.KOWALSKI_VISION_DETAIL || 'high';
+        const refImages = this.loadReferenceImages();
+
+        // Build messages array: system → (optional) reference images → current turn
+        const messages: Array<Record<string, unknown>> = [
+            { role: 'system', content: systemPrompt }
+        ];
+
+        // Inject reference images as a few-shot user→assistant exchange (first turn only)
+        if (refImages.length > 0 && !this.referenceImagesSent) {
+            const refContent: Array<Record<string, unknown>> = [];
+            for (const ref of refImages) {
+                refContent.push({
+                    type: 'image_url',
+                    image_url: { url: ref.base64, detail: 'auto' }
+                });
+                refContent.push({
+                    type: 'text',
+                    text: `[Reference: ${ref.label}]`
+                });
+            }
+            refContent.push({
+                type: 'text',
+                text: 'Above are reference screenshots of Instagram\'s desktop UI. Study them so you know where key elements are.'
+            });
+            messages.push({ role: 'user', content: refContent });
+            messages.push({
+                role: 'assistant',
+                content: 'Understood. I\'ve studied the reference screenshots and will use them to navigate accurately.'
+            });
+            this.referenceImagesSent = true;
+        }
+
+        // Current turn: live screenshot + context
+        messages.push({
+            role: 'user',
+            content: [
+                {
+                    type: 'image_url',
+                    image_url: {
+                        url: `data:image/jpeg;base64,${screenshot.toString('base64')}`,
+                        detail: visionDetail
+                    }
+                },
+                { type: 'text', text: userPrompt }
+            ]
+        });
 
         const requestBody = {
             model: this.model,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                {
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'image_url',
-                            image_url: {
-                                url: `data:image/jpeg;base64,${screenshot.toString('base64')}`,
-                                detail: visionDetail
-                            }
-                        },
-                        { type: 'text', text: userPrompt }
-                    ]
-                }
-            ],
+            messages,
             response_format: { type: 'json_object' },
             max_completion_tokens: 2048
         };
@@ -464,6 +624,7 @@ export class VisionAgent {
                 if (!response.ok) {
                     const errText = await response.text();
                     console.warn(`  ⚠️ LLM API error (${response.status}): ${errText.slice(0, 200)}`);
+                    this.collector.appendLog(`  ⚠️ LLM API error (${response.status}): ${errText.slice(0, 200)}`);
                     break; // Don't retry API errors
                 }
 
@@ -472,13 +633,19 @@ export class VisionAgent {
                 // Log token usage
                 const usage = data.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
                 if (usage) {
+                    this.lastTokenUsage = {
+                        promptTokens: usage.prompt_tokens || 0,
+                        completionTokens: usage.completion_tokens || 0
+                    };
                     console.log(`  🧠 Tokens: ${usage.prompt_tokens} in, ${usage.completion_tokens} out (vision:${visionDetail})`);
+                    this.collector.appendLog(`  🧠 Tokens: ${usage.prompt_tokens} in, ${usage.completion_tokens} out (vision:${visionDetail})`);
                 }
 
                 const choices = data.choices as Array<{ message?: { content?: string } }> | undefined;
                 const content = choices?.[0]?.message?.content;
                 if (!content || typeof content !== 'string') {
                     console.warn(`  ⚠️ Empty LLM response (attempt ${attempt + 1})`);
+                    this.collector.appendLog(`  ⚠️ Empty LLM response (attempt ${attempt + 1})`);
                     if (attempt === 0) { await this.delay(500); continue; }
                     break;
                 }
@@ -488,12 +655,14 @@ export class VisionAgent {
 
             } catch (err) {
                 console.warn(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}):`, err);
+                this.collector.appendLog(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}): ${err}`);
                 if (attempt === 0) { await this.delay(500); continue; }
             }
         }
 
         // Fallback: scroll down and continue
         console.warn('  ⚠️ LLM fallback: scrolling down');
+        this.collector.appendLog('  ⚠️ LLM fallback: scrolling down');
         return { thinking: 'LLM error fallback', action: 'scroll', direction: 'down' };
     }
 
@@ -502,89 +671,81 @@ export class VisionAgent {
     // -----------------------------------------------------------------------
 
     private getSystemPrompt(): string {
-        return `You are an autonomous Instagram browsing agent. You see a screenshot of the Instagram app each turn and decide what to do next.
+        return visionAgentPrompt
+            .replace('{{SCREENSHOT_WIDTH}}', String(this.screenshotWidth))
+            .replace('{{SCREENSHOT_HEIGHT}}', String(this.screenshotHeight));
+    }
 
-COORDINATE SYSTEM
-- The screenshot is ${this.screenshotWidth}x${this.screenshotHeight} pixels.
-- (0,0) is top-left. x increases rightward, y increases downward.
-- For click/hover, give x,y coordinates pointing at the CENTER of your target.
+    /**
+     * Load reference example images from src/main/prompts/examples/.
+     * Images are loaded once and cached for the session.
+     *
+     * Naming convention: use descriptive filenames like:
+     *   home-feed.jpg, search-panel.png, post-modal.jpg, story-viewer.jpg
+     * The filename (without extension) becomes the label shown to the LLM.
+     */
+    private loadReferenceImages(): Array<{ label: string; base64: string }> {
+        if (this.referenceImages !== null) return this.referenceImages;
 
-ACTIONS (pick one per turn):
+        this.referenceImages = [];
+        // __dirname at runtime is dist-electron/main/, project root is ../..
+        const examplesDir = path.join(__dirname, '../../src/main/prompts/examples');
 
-  click(x, y)     Click at position (x,y). Use for opening posts, tapping stories, buttons, navigation.
-  scroll(dir)     Scroll "up" or "down".
-  type(text)      Type text into the focused input. ONLY use for Search. Never for comments or DMs.
-  press(key)      Press a key: Escape, Enter, ArrowRight, ArrowLeft, Backspace, Tab.
-  hover(x, y)     Move mouse to (x,y) without clicking. Use to reveal hover-triggered UI (carousel arrows).
-  capture         Capture the current screen for the content digest.
-  wait(seconds)   Wait 1-5 seconds for content to load.
-  done            End the browsing session.
+        try {
+            if (!fs.existsSync(examplesDir)) return this.referenceImages;
 
-MISSION
-Browse Instagram to build a content digest of the user's social world.
-You have three activities: browsing the feed, watching stories, and searching for specific topics.
-Capture interesting content from DETAIL PAGES (not the feed viewport).
+            const imagePattern = /\.(jpg|jpeg|png|webp)$/i;
+            const loaded: string[] = [];
 
-FEED WORKFLOW
-1. On the feed, find a post worth capturing.
-2. Click its TIMESTAMP (text like "1h", "16h", "2d" — appears near the top-right of each post). The timestamp is a link that opens the post's detail page.
-3. On the detail page, immediately capture.
-4. If the post has multiple images (carousel — look for dots or arrows), press ArrowRight to advance slides. Capture each slide.
-5. Return to feed: click the Instagram logo (top-left corner) or press Escape if the post opened as a modal.
-6. Scroll down to see new posts. Repeat.
+            // Helper: read an image file and push to referenceImages
+            const addImage = (filePath: string, label: string) => {
+                const buffer = fs.readFileSync(filePath);
+                const ext = path.extname(filePath).toLowerCase().replace('.', '');
+                const mime = ext === 'jpg' ? 'jpeg' : ext;
+                this.referenceImages!.push({
+                    label,
+                    base64: `data:image/${mime};base64,${buffer.toString('base64')}`
+                });
+                loaded.push(path.relative(examplesDir, filePath));
+            };
 
-STORIES WORKFLOW
-1. Click a story circle at the top of the feed.
-2. Capture every story frame.
-3. Advance by clicking the right side of the story viewer or pressing ArrowRight.
-4. When stories end, you'll return to the feed automatically.
+            // Helper: clean filename into readable label
+            const cleanName = (name: string) =>
+                path.basename(name, path.extname(name)).replace(/[-_.]/g, ' ').trim();
 
-SEARCH WORKFLOW
-1. Click "Search" in the left sidebar.
-2. Click the search input, type your search term.
-3. Wait for results, then click a relevant result.
-4. Capture interesting content from the profile or post detail page.
-5. Navigate back and search for the next interest.
+            // 1. Root-level images first (e.g. goinghome.png)
+            const rootFiles = fs.readdirSync(examplesDir)
+                .filter(f => imagePattern.test(f) && fs.statSync(path.join(examplesDir, f)).isFile())
+                .sort();
+            for (const file of rootFiles) {
+                addImage(path.join(examplesDir, file), cleanName(file));
+            }
 
-TIME BUDGET
-Aim for roughly 40% feed, 30% stories, 30% search over the full session.
-Don't spend the whole session on one activity — switch it up.
-If you've been on the feed for a while, go watch stories. If you've done stories, search for interests.
-Use the "done" action when you feel you've covered enough content or time is almost up.
+            // 2. Subdirectories in sorted order (Posts/, Search/, Stories/)
+            const subdirs = fs.readdirSync(examplesDir)
+                .filter(f => fs.statSync(path.join(examplesDir, f)).isDirectory())
+                .sort();
+            for (const dir of subdirs) {
+                const dirPath = path.join(examplesDir, dir);
+                const files = fs.readdirSync(dirPath)
+                    .filter(f => imagePattern.test(f))
+                    .sort();
+                for (const file of files) {
+                    const label = `${dir} - ${cleanName(file)}`;
+                    addImage(path.join(dirPath, file), label);
+                }
+            }
 
-CAPTURE RULES
-- GOOD: Post detail page (full image, caption, engagement stats visible).
-- GOOD: Story frame (full-screen content).
-- BAD: Feed viewport with multiple partial posts. NEVER capture from the feed.
-- After capturing a post detail page, return to the feed before capturing another.
+            if (this.referenceImages.length > 0) {
+                console.log(`  📎 Loaded ${this.referenceImages.length} reference image(s): ${loaded.join(', ')}`);
+                this.collector.appendLog(`📎 Loaded ${this.referenceImages.length} reference image(s): ${loaded.join(', ')}`);
+            }
+        } catch (err) {
+            console.warn('  ⚠️ Failed to load reference images:', err);
+            this.collector.appendLog(`⚠️ Failed to load reference images: ${err}`);
+        }
 
-SAFETY — HARD RULES
-- NEVER click Like, Follow, Share, or Save buttons.
-- NEVER type in comment boxes, reply fields, or direct message inputs.
-- ONLY type in the Search input.
-- This is READ-ONLY browsing. Do not engage with content, do not follow anyone.
-
-RECOVERY
-- If your last 3+ clicks had "no change", try a different target or scroll first.
-- If scroll fails, press Escape (an overlay may be blocking).
-- If stuck for 5+ actions, switch activities (feed → stories → search).
-- If an overlay or modal is in the way, press Escape to dismiss it.
-
-MEMORY
-You have a "memory" field in your response. Use it to track:
-- Posts captured (brief descriptions)
-- Your current plan
-- Failed attempts to click or capture
-Your notes from the previous turn appear as "YOUR NOTES" — use them to avoid re-capturing.
-
-OUTPUT FORMAT (JSON):
-{
-  "thinking": "Brief reasoning about what you see and what to do",
-  "action": "click",
-  "x": 450,
-  "y": 320,
-  "memory": "Captured: sunset post from @nature. Plan: click next post."
-}`;
+        return this.referenceImages;
     }
 
     // -----------------------------------------------------------------------
@@ -593,12 +754,12 @@ OUTPUT FORMAT (JSON):
 
     private buildUserPrompt(remainingMs: number): string {
         const elapsedSec = Math.round((Date.now() - this.startTime) / 1000);
-        const remainingSec = Math.round(remainingMs / 1000);
-        const totalMin = Math.round(this.config.maxDurationMs / 60000);
+        const elapsedMin = Math.round(elapsedSec / 60);
+        const remainingMin = Math.round(remainingMs / 60000);
 
         const parts: string[] = [];
 
-        parts.push(`SESSION: ${elapsedSec}s elapsed, ${remainingSec}s remaining (${totalMin} min total)`);
+        parts.push(`SESSION: ${elapsedMin} min elapsed, ${remainingMin} min remaining. Use done when you've collected enough content across feed, stories, and searches.`);
         parts.push(`CAPTURES: ${this.captureCount} screenshots taken`);
 
         if (this.config.userInterests.length > 0) {
@@ -617,6 +778,15 @@ OUTPUT FORMAT (JSON):
             this.actionHistory.forEach((entry, i) => {
                 parts.push(`${i + 1}. ${entry.action} → ${entry.result}`);
             });
+        }
+
+        // Captured posts — persistent list so LLM knows what to skip
+        if (this.capturedPosts.length > 0) {
+            parts.push('\nCAPTURED POSTS (do not re-open these):');
+            for (const post of this.capturedPosts) {
+                const shortUrl = post.fingerprint || post.url.split('instagram.com')[1]?.slice(0, 40) || post.url;
+                parts.push(`- ${shortUrl} (${post.source})`);
+            }
         }
 
         // Session memory digest (cross-session)
@@ -646,11 +816,13 @@ OUTPUT FORMAT (JSON):
         switch (d.action) {
             case 'click': return `click(${d.x},${d.y})`;
             case 'scroll': return `scroll(${d.direction || 'down'})`;
-            case 'capture': return 'capture';
+            case 'capture': return d.x2 !== undefined ? `capture(${d.x},${d.y},${d.x2},${d.y2})` : 'capture';
             case 'type': return `type("${(d.text || '').slice(0, 20)}")`;
             case 'press': return `press(${d.key})`;
             case 'hover': return `hover(${d.x},${d.y})`;
             case 'wait': return `wait(${d.seconds || 2}s)`;
+            case 'newtab': return `newtab(${d.x},${d.y})`;
+            case 'closetab': return 'closetab';
             case 'done': return 'done';
             default: return d.action;
         }

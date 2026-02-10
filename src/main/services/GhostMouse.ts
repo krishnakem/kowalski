@@ -27,25 +27,16 @@ interface BezierControlPoints {
 export class GhostMouse {
     private page: Page;
     private currentPosition: Point = { x: 0, y: 0 };
-    private cursorVisible: boolean = false;
-
-    // Session-level entropy (randomized once per GhostMouse instance)
-    // This ensures timing patterns vary across sessions, defeating pattern analysis
-    private sessionTimingMultiplier: number;
-    private sessionJitterMultiplier: number;
-    // Session-level hesitation probability (3-7% per session, not fixed 5%)
-    private sessionHesitationProb: number;
     // Cached viewport width for proportional calculations
     private _viewportWidth: number = 0;
 
     constructor(page: Page) {
         this.page = page;
-        // Vary timing by ±30% per session (0.7 to 1.3)
-        this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
-        // Vary jitter by ±40% per session (0.6 to 1.4)
-        this.sessionJitterMultiplier = 0.6 + Math.random() * 0.8;
-        // Vary hesitation probability per session (3-7% range)
-        this.sessionHesitationProb = 0.03 + Math.random() * 0.04;
+    }
+
+    /** Rebind to a different page (used for tab switching). */
+    setPage(page: Page): void {
+        this.page = page;
     }
 
     /** Get viewport width, cached per session for proportional calculations. */
@@ -53,36 +44,6 @@ export class GhostMouse {
         if (this._viewportWidth > 0) return this._viewportWidth;
         this._viewportWidth = await this.page.evaluate(() => window.innerWidth).catch(() => 1080);
         return this._viewportWidth;
-    }
-
-    /**
-     * Enable visible cursor for debugging.
-     * Uses a custom CSS cursor image (data URI) - no DOM injection.
-     * This is safer than injecting elements which could trigger bot detection.
-     */
-    async enableVisibleCursor(): Promise<void> {
-        if (this.cursorVisible) return;
-
-        // Use CSS cursor with a data URI for a large, visible cursor
-        // This doesn't inject any detectable DOM elements
-        await this.page.addStyleTag({
-            content: `
-                * {
-                    cursor: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="rgba(255,0,0,0.7)" stroke="white" stroke-width="2"/><circle cx="16" cy="16" r="3" fill="white"/></svg>') 16 16, auto !important;
-                }
-            `
-        });
-
-        this.cursorVisible = true;
-        console.log('👁️ Visible cursor enabled (CSS mode)');
-    }
-
-    /**
-     * Update the visible cursor position.
-     * With CSS cursor mode, no update needed - cursor follows mouse automatically.
-     */
-    private async updateVisibleCursor(_x: number, _y: number): Promise<void> {
-        // No-op: CSS cursor follows mouse automatically
     }
 
     /**
@@ -121,24 +82,14 @@ export class GhostMouse {
         // 3. Calculate points along curve with variable velocity
         const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
 
-        // 4. Execute movement with micro-jitter and session-adjusted timing
-        // Apply session jitter multiplier for cross-session variation
-        const effectiveJitter = jitterAmount * this.sessionJitterMultiplier;
+        // 4. Execute movement with micro-jitter
 
         for (let i = 0; i < points.length; i++) {
-            const jitteredPoint = this.addJitter(points[i], effectiveJitter);
+            const jitteredPoint = this.addJitter(points[i], jitterAmount);
             await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
-            await this.updateVisibleCursor(jitteredPoint.x, jitteredPoint.y);
-            // Human-realistic timing with session variance (base 12-45ms scaled by session multiplier)
-            const baseMin = 12 * this.sessionTimingMultiplier;
-            const baseMax = 45 * this.sessionTimingMultiplier;
-            await this.microDelay(baseMin, baseMax);
 
-            // Hesitation point: session-varied probability (3-7%) of longer pause during movement
-            // Humans don't move smoothly for long distances - they pause to "think"
-            if (i > 0 && i < points.length - 1 && Math.random() < this.sessionHesitationProb) {
-                await this.microDelay(80 * this.sessionTimingMultiplier, 200 * this.sessionTimingMultiplier);
-            }
+            // Fast timing — LLM response time (2-5s) is the natural pacing
+            await this.microDelay(5, 15);
         }
 
         // 5. Optional overshoot and correction (with distance-based physics)
@@ -282,8 +233,8 @@ export class GhostMouse {
         };
 
         await this.page.mouse.move(overshoot.x, overshoot.y);
-        await this.updateVisibleCursor(overshoot.x, overshoot.y);
-        await this.microDelay(50, 180);  // Pause to "realize" overshoot (widened range)
+
+        await this.microDelay(20, 60);  // Brief overshoot pause
 
         // Use micro-curve for correction instead of straight line
         // Humans don't move in perfect straight lines, even for small corrections
@@ -295,10 +246,10 @@ export class GhostMouse {
 
         // Move through midpoint with slight curve
         await this.page.mouse.move(midpoint.x, midpoint.y);
-        await this.updateVisibleCursor(midpoint.x, midpoint.y);
-        await this.microDelay(10, 30);  // Brief pause (widened from 8-20)
+
+        await this.microDelay(5, 15);  // Brief correction pause
         await this.page.mouse.move(target.x, target.y);
-        await this.updateVisibleCursor(target.x, target.y);
+
     }
 
     /**
@@ -306,11 +257,11 @@ export class GhostMouse {
      */
     async click(target: Point): Promise<void> {
         await this.moveTo(target);
-        await this.microDelay(100, 300);  // Pre-click hesitation
+        await this.microDelay(30, 80);   // Pre-click hover
         await this.page.mouse.down();
-        await this.microDelay(50, 150);   // Hold duration varies
+        await this.microDelay(40, 90);   // Hold duration
         await this.page.mouse.up();
-        await this.microDelay(200, 500);  // Post-click pause
+        await this.microDelay(50, 120);  // Post-click pause
     }
 
     /**
@@ -470,14 +421,10 @@ export class GhostMouse {
 
     /**
      * Small random delay for human-like timing variation.
-     * Applies session-level timing multiplier for cross-session variation,
-     * defeating pattern analysis that looks for consistent timing signatures.
      */
     private microDelay(min: number, max: number): Promise<void> {
-        const baseDelay = min + Math.random() * (max - min);
-        // Apply session-level timing variation (set once per GhostMouse instance)
-        const sessionAdjustedDelay = baseDelay * this.sessionTimingMultiplier;
-        return new Promise(resolve => setTimeout(resolve, sessionAdjustedDelay));
+        const delay = min + Math.random() * (max - min);
+        return new Promise(resolve => setTimeout(resolve, delay));
     }
 
     // =========================================================================
@@ -516,7 +463,7 @@ export class GhostMouse {
         };
 
         const [min, max] = ranges[roleLower] || [100, 300];  // Default range
-        return this.randomInRange(min, max) * this.sessionTimingMultiplier;
+        return this.randomInRange(min, max);
     }
 
     /**
@@ -534,12 +481,9 @@ export class GhostMouse {
         await new Promise(r => setTimeout(r, hoverDuration));
 
         await this.page.mouse.down();
-        // Hold duration varies: 50-150ms (randomized)
-        await this.microDelay(50, 150);
+        await this.microDelay(40, 90);
         await this.page.mouse.up();
-
-        // Post-click pause: 200-500ms (randomized)
-        await this.microDelay(200, 500);
+        await this.microDelay(50, 120);
     }
 
     /**

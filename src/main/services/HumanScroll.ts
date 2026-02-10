@@ -21,16 +21,17 @@ import { ScrollConfig, BoundingBox, ContentType } from '../../types/instagram.js
 export class HumanScroll {
     private page: Page;
 
-    // Session-level timing multiplier for cross-session variance
-    private sessionTimingMultiplier: number;
-
     // Cached viewport height for proportional calculations (avoids repeated CDP calls)
     private cachedViewportHeight: number = 0;
 
     constructor(page: Page) {
         this.page = page;
-        // Vary timing by ±30% per session (0.7 to 1.3)
-        this.sessionTimingMultiplier = 0.7 + Math.random() * 0.6;
+    }
+
+    /** Rebind to a different page (used for tab switching). */
+    setPage(page: Page): void {
+        this.page = page;
+        this.cachedViewportHeight = 0; // Reset cache for new page
     }
 
     /**
@@ -120,8 +121,7 @@ export class HumanScroll {
         const {
             baseDistance = Math.round(vh * 0.4),
             variability = 0.3,
-            microAdjustProb = 0.25,
-            readingPauseMs = [400, 800]
+            microAdjustProb = 0.10
         } = config;
 
         // 1. Calculate actual scroll distance with variation
@@ -131,15 +131,10 @@ export class HumanScroll {
         // 2. Execute scroll in phases (acceleration -> cruise -> deceleration)
         await this.smoothScrollWithEasing(targetDistance);
 
-        // 3. Micro-adjustment: scroll past and slightly back (humans do this)
+        // 3. Micro-adjustment: scroll past and slightly back (10% chance)
         if (Math.random() < microAdjustProb) {
             await this.microAdjust();
         }
-
-        // 4. Reading pause (human looks at content)
-        const pauseDuration = readingPauseMs[0] +
-            Math.random() * (readingPauseMs[1] - readingPauseMs[0]);
-        await new Promise(resolve => setTimeout(resolve, pauseDuration));
     }
 
     /**
@@ -149,7 +144,7 @@ export class HumanScroll {
      * Uses cubic ease-out: fast start, gradual slow down.
      */
     private async smoothScrollWithEasing(distance: number, axis: 'y' | 'x' = 'y'): Promise<void> {
-        const steps = 15 + Math.floor(Math.random() * 10);  // 15-25 steps
+        const steps = 8 + Math.floor(Math.random() * 4);  // 8-12 steps
         const direction = distance > 0 ? 1 : -1;
         const absDistance = Math.abs(distance);
 
@@ -171,8 +166,8 @@ export class HumanScroll {
             }
             scrolled = targetScrolled;
 
-            // Variable delay between wheel events (human inconsistency)
-            const delay = 10 + Math.random() * 30;
+            // Variable delay between wheel events
+            const delay = 5 + Math.random() * 10;
             await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
@@ -189,12 +184,12 @@ export class HumanScroll {
         const vh = await this.getViewportHeight();
         const overshoot = vh * 0.05 + Math.random() * vh * 0.1;
         await this.page.mouse.wheel(0, overshoot);
-        await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 300));
+        await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 50));
 
         // Scroll back up (correct)
         const correction = overshoot * (0.8 + Math.random() * 0.4);
         await this.page.mouse.wheel(0, -correction);
-        await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
+        await new Promise(resolve => setTimeout(resolve, 30 + Math.random() * 30));
     }
 
     /**
@@ -294,9 +289,8 @@ export class HumanScroll {
                 console.log(`  📍 Centering post (offset: ${Math.round(offset)}px, attempt: ${attempt + 1}/${maxRetries + 1})`);
                 await this.preciseScroll(offset);
 
-                // STEALTH: Variable pause with session multiplier for scroll to settle
-                const basePause = 150 + Math.random() * 100;
-                await new Promise(r => setTimeout(r, basePause * this.sessionTimingMultiplier));
+                // Brief pause for scroll to settle
+                await new Promise(r => setTimeout(r, 50 + Math.random() * 50));
 
             } finally {
                 if (cdpSession) {
@@ -381,9 +375,8 @@ export class HumanScroll {
             await this.page.mouse.wheel(0, stepDistance);
             scrolled = targetScrolled;
 
-            // STEALTH: Variable delay with session multiplier (same range as regular scroll)
-            const baseDelay = 10 + Math.random() * 30;  // 10-40ms base
-            await new Promise(resolve => setTimeout(resolve, baseDelay * this.sessionTimingMultiplier));
+            const delay = 5 + Math.random() * 10;
+            await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
 
@@ -395,7 +388,7 @@ export class HumanScroll {
         const currentScroll = await this.cdpEvaluate<number>('window.scrollY');
         if (currentScroll && currentScroll > 0) {
             await this.quickScroll(-currentScroll);
-            await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 200));
+            await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 100));
         }
     }
 
@@ -460,10 +453,9 @@ export class HumanScroll {
 
         // Default distance: ~40% viewport, LLM controls via config.baseDistance
         const {
-            baseDistance = Math.round(vh * 0.4 * this.sessionTimingMultiplier),
+            baseDistance = Math.round(vh * 0.4),
             variability = 0.3,
-            microAdjustProb = 0.25,
-            readingPauseMs = [400 * this.sessionTimingMultiplier, 800 * this.sessionTimingMultiplier]
+            microAdjustProb = 0.10
         } = config;
 
         // 1. Calculate actual scroll distance with variation
@@ -489,21 +481,17 @@ export class HumanScroll {
             scrollFailed = true;
         }
 
-        // 3. Micro-adjustment (humans scroll past then slightly back)
+        // 3. Micro-adjustment (10% chance)
         if (Math.random() < microAdjustProb) {
             await this.microAdjust();
         }
-
-        // 4. Reading pause
-        const pauseDuration = this.randomInRange(readingPauseMs[0], readingPauseMs[1]);
-        await new Promise(resolve => setTimeout(resolve, pauseDuration));
 
         return {
             contentType: 'mixed',
             scrollDistance: targetDistance,
             actualDelta,
             scrollFailed,
-            pauseDurationMs: pauseDuration
+            pauseDurationMs: 0
         };
     }
 
@@ -517,10 +505,9 @@ export class HumanScroll {
         const vw = await this.cdpEvaluate<number>('window.innerWidth') ?? 1080;
 
         const {
-            baseDistance = Math.round(vw * 0.4 * this.sessionTimingMultiplier),
+            baseDistance = Math.round(vw * 0.4),
             variability = 0.3,
-            microAdjustProb = 0.25,
-            readingPauseMs = [400 * this.sessionTimingMultiplier, 800 * this.sessionTimingMultiplier]
+            microAdjustProb = 0.10
         } = config;
 
         const variation = 1 + (Math.random() - 0.5) * 2 * variability;
@@ -541,26 +528,23 @@ export class HumanScroll {
             scrollFailed = true;
         }
 
-        // Micro-adjust on horizontal too (25% chance)
+        // Micro-adjust on horizontal too (10% chance)
         if (Math.random() < microAdjustProb) {
             const overshoot = vw * 0.05 + Math.random() * vw * 0.1;
             const dir = targetDistance > 0 ? 1 : -1;
             await this.page.mouse.wheel(overshoot * dir, 0);
-            await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 300));
+            await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 50));
             const correction = overshoot * (0.8 + Math.random() * 0.4);
             await this.page.mouse.wheel(-correction * dir, 0);
-            await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
+            await new Promise(resolve => setTimeout(resolve, 30 + Math.random() * 30));
         }
-
-        const pauseDuration = this.randomInRange(readingPauseMs[0], readingPauseMs[1]);
-        await new Promise(resolve => setTimeout(resolve, pauseDuration));
 
         return {
             contentType: 'mixed',
             scrollDistance: targetDistance,
             actualDelta,
             scrollFailed,
-            pauseDurationMs: pauseDuration
+            pauseDurationMs: 0
         };
     }
 

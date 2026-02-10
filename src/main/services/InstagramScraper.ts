@@ -39,6 +39,7 @@ export class InstagramScraper {
     private page!: Page;
 
     private sessionMemory: SessionMemory = new SessionMemory();
+    private activeVisionAgent: VisionAgent | null = null;
 
     constructor(context: BrowserContext, apiKey: string, usageCap: number, debugMode: boolean = false) {
         this.context = context;
@@ -46,6 +47,13 @@ export class InstagramScraper {
         this.usageCap = usageCap;
         this.usageService = UsageService.getInstance();
         this.debugMode = debugMode;
+    }
+
+    /** Stop the active browsing session externally (e.g. Cmd+Shift+K). */
+    stop(): void {
+        if (this.activeVisionAgent) {
+            this.activeVisionAgent.stop();
+        }
     }
 
     /**
@@ -69,8 +77,11 @@ export class InstagramScraper {
         const startTime = Date.now();
         const targetDurationMs = targetMinutes * 60 * 1000;
 
-        this.page = await this.context.newPage();
-        await this.page.setViewportSize({ width: 1280, height: 900 });
+        // Reuse the existing page if it's already on Instagram (e.g. from validateSession),
+        // otherwise create a new one. This avoids opening a duplicate tab.
+        const existingPages = this.context.pages();
+        const instagramPage = existingPages.find(p => p.url().includes('instagram.com'));
+        this.page = instagramPage || await this.context.newPage();
 
         // Initialize physics layer
         this.ghost = new GhostMouse(this.page);
@@ -85,20 +96,20 @@ export class InstagramScraper {
             saveToDirectory: path.join(os.homedir(), 'Documents', 'debug-screenshots')
         });
 
-        // Enable visible cursor in debug mode
-        if (this.debugMode) {
-            await this.ghost.enableVisibleCursor();
-        }
-
         let visionAgent: VisionAgent | undefined;
 
         try {
-            // 1. Navigate to Instagram
-            console.log('🌐 Navigating to Instagram...');
-            await this.page.goto('https://www.instagram.com/', {
-                waitUntil: 'domcontentloaded'
-            });
-            await this.humanDelay(2000, 4000);
+            // 1. Navigate to Instagram (skip if already there from validateSession)
+            const currentUrl = this.page.url();
+            if (!currentUrl.includes('instagram.com') || currentUrl.includes('/accounts/login')) {
+                console.log('🌐 Navigating to Instagram...');
+                await this.page.goto('https://www.instagram.com/', {
+                    waitUntil: 'domcontentloaded'
+                });
+                await this.humanDelay(2000, 4000);
+            } else {
+                console.log('🌐 Already on Instagram, reusing existing page');
+            }
 
             // 2. Check for login redirect
             const pageUrl = this.page.url();
@@ -136,6 +147,7 @@ export class InstagramScraper {
                     sessionMemoryDigest
                 }
             );
+            this.activeVisionAgent = visionAgent;
 
             const result = await visionAgent.run();
 
@@ -178,6 +190,8 @@ export class InstagramScraper {
                 throw error;
             }
         } finally {
+            this.activeVisionAgent = null;
+
             // Log summary
             console.log(`\n📊 Session Summary:`);
             if (visionAgent) {

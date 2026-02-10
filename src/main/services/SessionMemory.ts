@@ -195,4 +195,5 @@ export class SessionMemory {
 
         return `Stagnation: avg at ${Math.round(avgStagnationY)}px scrollY, recovery: ${bestRecovery}`;
     }
+
 }

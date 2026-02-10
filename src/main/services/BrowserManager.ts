@@ -99,11 +99,24 @@ export class BrowserManager {
                 // Randomized window size per session for fingerprint diversity
                 const windowSize = BrowserManager.generateWindowSize(config.headless);
                 extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
+
+                // Center the window on screen so it doesn't open at a random position
+                if (!config.headless) {
+                    try {
+                        const workArea = screen.getPrimaryDisplay().workAreaSize;
+                        const x = Math.round((workArea.width - windowSize.width) / 2);
+                        const y = Math.round((workArea.height - windowSize.height) / 2);
+                        extraArgs.push(`--window-position=${Math.max(0, x)},${Math.max(0, y)}`);
+                    } catch {
+                        // screen API may not be available, skip positioning
+                    }
+                }
+
                 // Explicit viewport ensures page content area matches exactly,
                 // regardless of window chrome. Also guarantees page.viewportSize()
                 // always returns correct values (no null fallback needed).
-                scrapingViewport = windowSize;
-                console.log(`📐 BrowserManager: Viewport ${windowSize.width}x${windowSize.height} (headless=${config.headless})`);
+                scrapingViewport = { width: 1280, height: 900 };
+                console.log(`📐 BrowserManager: Viewport 1280x900 (headless=${config.headless})`);
             }
 
             // 2. Launch Persistent Context
