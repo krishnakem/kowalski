@@ -740,7 +740,7 @@ export class SchedulerService {
             const selectedIds = new Set(bestCaptures.map(c => c.id));
 
             // Build image metadata and save SELECTED files only
-            const imageMetadata: { id: number; filename: string; source: string; interest?: string; postId?: string; permalink?: string; tag?: { relevance: number; quality: number; description: string } }[] = [];
+            const imageMetadata: { id: number; filename: string; source: string; interest?: string; tag?: { relevance: number; quality: number; description: string } }[] = [];
             for (const capture of bestCaptures) {
                 const filename = `${capture.id}.jpg`;
                 const imagePath = path.join(imagesDir, filename);
@@ -754,10 +754,6 @@ export class SchedulerService {
                     filename,
                     source: capture.source,
                     interest: capture.interest,
-                    postId: capture.postId,
-                    permalink: capture.postId
-                        ? `https://www.instagram.com/p/${capture.postId}/`
-                        : undefined,
                     tag: captureTag ? {
                         relevance: captureTag.relevance,
                         quality: captureTag.quality,
@@ -922,7 +918,7 @@ export class SchedulerService {
             await fs.promises.mkdir(imagesDir, { recursive: true });
 
             // Build image metadata and save SELECTED files only
-            const imageMetadata: { id: number; filename: string; source: string; interest?: string; postId?: string; permalink?: string; tag?: { relevance: number; quality: number; description: string } }[] = [];
+            const imageMetadata: { id: number; filename: string; source: string; interest?: string; tag?: { relevance: number; quality: number; description: string } }[] = [];
             for (const capture of bestCaptures) {
                 const filename = `${capture.id}.jpg`;
                 const imagePath = path.join(imagesDir, filename);
@@ -936,10 +932,6 @@ export class SchedulerService {
                     filename,
                     source: capture.source,
                     interest: capture.interest,
-                    postId: capture.postId,
-                    permalink: capture.postId
-                        ? `https://www.instagram.com/p/${capture.postId}/`
-                        : undefined,
                     tag: captureTag ? {
                         relevance: captureTag.relevance,
                         quality: captureTag.quality,

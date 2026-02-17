@@ -119,6 +119,21 @@ export class InstagramScraper {
                 throw new Error('SESSION_EXPIRED');
             }
 
+            // Natural mouse settle — move cursor away from sidebar with human-like motion
+            const vp = this.page.viewportSize();
+            if (vp) {
+                // First move: somewhere in the upper-center area
+                await this.ghost.hover(
+                    { x: vp.width * (0.35 + Math.random() * 0.3), y: vp.height * (0.2 + Math.random() * 0.3) },
+                    300 + Math.random() * 400
+                );
+                // Second move: settle into the feed area
+                await this.ghost.hover(
+                    { x: vp.width * (0.4 + Math.random() * 0.2), y: vp.height * (0.4 + Math.random() * 0.3) },
+                    200 + Math.random() * 300
+                );
+            }
+
             console.log('\n👁️  ═══════════════════════════════════════');
             console.log('👁️  VISION AGENT MODE ACTIVE');
             console.log('👁️  ═══════════════════════════════════════\n');
@@ -155,6 +170,7 @@ export class InstagramScraper {
             this.screenshotCollector.appendLogRaw(`\n---\n\n## Summary`);
             this.screenshotCollector.appendLogRaw(`- **Decisions:** ${result.decisionCount}`);
             this.screenshotCollector.appendLogRaw(`- **Captures:** ${result.captureCount}`);
+            // this.screenshotCollector.appendLogRaw(`- **Video recordings:** ${result.recordCount}`);  // VIDEO RECORDING DISABLED
             this.screenshotCollector.appendLogRaw(`- **Duration:** ${((Date.now() - startTime) / 1000 / 60).toFixed(1)} minutes`);
             this.screenshotCollector.flushSessionLog();
 
@@ -198,6 +214,7 @@ export class InstagramScraper {
                 console.log(`   - Decisions: ${visionAgent.getDecisionCount()}`);
             }
             console.log(`   - Captures: ${this.screenshotCollector.getCaptureCount()}`);
+            // console.log(`   - Video recordings: ${this.screenshotCollector.getVideoCount()}`);  // VIDEO RECORDING DISABLED
 
             this.screenshotCollector.logSummary();
             await this.page.close();
@@ -205,8 +222,10 @@ export class InstagramScraper {
 
         return {
             captures: this.screenshotCollector.getCaptures(),
+            videos: [],  // VIDEO RECORDING DISABLED
             sessionDuration: Date.now() - startTime,
             captureCount: this.screenshotCollector.getCaptureCount(),
+            videoCount: 0,  // VIDEO RECORDING DISABLED
             scrapedAt: new Date().toISOString()
         };
     }

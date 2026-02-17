@@ -16,7 +16,7 @@ import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Jimp } from 'jimp';
-import { CapturedPost, CaptureSource, BoundingBox } from '../../types/instagram.js';
+import { CapturedPost, /* CapturedVideo, */ CaptureSource } from '../../types/instagram.js';
 
 /**
  * Configuration for screenshot collection.
@@ -42,13 +42,13 @@ export class ScreenshotCollector {
         this.page = page;
     }
     private captures: CapturedPost[] = [];
+    // private capturedVideos: CapturedVideo[] = [];  // VIDEO RECORDING DISABLED
     private config: CollectorConfig;
     private lastScrollPosition: number = 0;
     private outputDir: string | null = null;
 
     // Deduplication tracking
-    private capturedFingerprints = new Set<string>(); // Track by tree-based fingerprint
-    private capturedHashes = new Set<string>();       // Track by image hash (for carousel/story)
+    private capturedHashes = new Set<string>();       // Track by perceptual image hash (primary dedup)
     private capturedPositions = new Set<string>();    // Track by source + scroll position bucket
     private lastCaptureSource: string = '';
 
@@ -76,6 +76,27 @@ export class ScreenshotCollector {
         }
     }
 
+    /** Get the session root directory (used for session log). */
+    getOutputDir(): string | null {
+        return this.outputDir;
+    }
+
+    /** Get the nav/ subdirectory for debug screenshots (used by VisionAgent). */
+    getNavDir(): string | null {
+        if (!this.outputDir) return null;
+        const navDir = path.join(this.outputDir, 'nav');
+        if (!fs.existsSync(navDir)) fs.mkdirSync(navDir, { recursive: true });
+        return navDir;
+    }
+
+    /** Get the digest/ subdirectory for content captures. */
+    private getDigestDir(): string | null {
+        if (!this.outputDir) return null;
+        const digestDir = path.join(this.outputDir, 'digest');
+        if (!fs.existsSync(digestDir)) fs.mkdirSync(digestDir, { recursive: true });
+        return digestDir;
+    }
+
     /**
      * Ensure the output directory exists for saving screenshots.
      */
@@ -90,7 +111,8 @@ export class ScreenshotCollector {
      * Only saves if outputDir is configured.
      */
     private saveScreenshotToDisk(screenshot: Buffer, source: CaptureSource): void {
-        if (!this.outputDir) return;
+        const digestDir = this.getDigestDir();
+        if (!digestDir) return;
 
         let filename: string;
 
@@ -99,7 +121,7 @@ export class ScreenshotCollector {
                 // First carousel slide — rename the parent capture to .1
                 if (this.lastSingleFilepath && fs.existsSync(this.lastSingleFilepath)) {
                     const renamedFilename = `${this.postNumber.toString().padStart(3, '0')}.1_${this.lastPostSource}.jpg`;
-                    fs.renameSync(this.lastSingleFilepath, path.join(this.outputDir, renamedFilename));
+                    fs.renameSync(this.lastSingleFilepath, path.join(digestDir, renamedFilename));
                     console.log(`  💾 Renamed: ${path.basename(this.lastSingleFilepath)} → ${renamedFilename}`);
                 }
                 this.carouselSlideIndex = 1;
@@ -113,26 +135,31 @@ export class ScreenshotCollector {
             filename = `${this.postNumber.toString().padStart(3, '0')}_${source}.jpg`;
         }
 
-        const filepath = path.join(this.outputDir, filename);
+        const filepath = path.join(digestDir, filename);
         fs.writeFileSync(filepath, screenshot);
 
         if (source !== 'carousel') {
             this.lastSingleFilepath = filepath;
         }
 
-        console.log(`  💾 Saved: ${filename}`);
+        console.log(`  💾 Saved: digest/${filename}`);
     }
 
     /**
      * Capture the current viewport as a post screenshot.
      * Called after each scroll/story view when content is visible.
      *
-     * @param source - Where this content came from (feed, story, search, etc.)
+     * Dedup pipeline (vision-pure — no URL or DOM queries):
+     *   1. Position bucket: scroll position scoped by source type
+     *   2. Scroll delta: feed-only, minimum 100px since last capture
+     *   3. Perceptual hash: 8x8 greyscale image similarity (primary dedup)
+     *
+     * @param source - Where this content came from (LLM-declared: feed, story, search, carousel)
      * @param interest - For search results, which interest triggered this capture
-     * @param fingerprint - Tree-based post fingerprint for dedup (null for stories/grids → falls through to hash dedup)
-     * @returns true if captured, false if skipped (max reached or duplicate position)
+     * @param clip - Optional viewport crop region from LLM coordinates
+     * @returns true if captured, false if skipped (max reached or duplicate)
      */
-    async captureCurrentPost(source: CaptureSource, interest?: string, fingerprint?: string, clip?: { x: number; y: number; width: number; height: number }): Promise<boolean> {
+    async captureCurrentPost(source: CaptureSource, interest?: string, clip?: { x: number; y: number; width: number; height: number }): Promise<boolean> {
         // Check memory limit
         if (this.captures.length >= this.config.maxCaptures) {
             console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached`);
@@ -142,21 +169,11 @@ export class ScreenshotCollector {
         // Get current scroll position for deduplication
         const scrollPosition = await this.getScrollPosition();
 
-        // PRIMARY DEDUP: Skip if we've already captured this exact post (by tree fingerprint)
-        // Carousel slides may share the same fingerprint — rely on hash dedup instead
-        if (fingerprint && source !== 'carousel' && this.capturedFingerprints.has(fingerprint)) {
-            console.log(`[CAPTURE-REJECT] fingerprint_dedup: ${fingerprint} (source=${source})`);
-            return false;
-        }
-
-        // POSITION-BASED DEDUP: Track by page identity + scroll position bucket
-        // Uses fingerprint (from tree) or URL postId to distinguish different post detail pages
-        // Falls back to source for feed/story/search viewport captures
+        // POSITION-BASED DEDUP: Track by source type + scroll position bucket
         const vpSize = this.page.viewportSize();
         const bucketSize = vpSize ? Math.round(vpSize.height * 0.078) : 75;
         const positionBucket = Math.round(scrollPosition / bucketSize);
-        const pageScope = fingerprint || this.extractPostIdForEmbed() || source;
-        const positionKey = `${pageScope}:${positionBucket}`;
+        const positionKey = `${source}:${positionBucket}`;
         if (source !== 'carousel' && source !== 'story' && this.capturedPositions.has(positionKey)) {
             console.log(`[CAPTURE-REJECT] position_dedup: bucket ${positionBucket} key=${positionKey}`);
             return false;
@@ -178,7 +195,7 @@ export class ScreenshotCollector {
                 ...(clip ? { clip } : {})
             });
 
-            // SECONDARY DEDUP: Perceptual hash — catches near-duplicates (scroll jitter, compression)
+            // PRIMARY DEDUP: Perceptual hash — catches near-duplicates (scroll jitter, compression)
             // Stories use tighter threshold (3) because dark background dominates the 8x8 hash,
             // causing different story frames to appear similar at the default threshold (8)
             const hash = await this.computePerceptualHash(screenshot);
@@ -188,24 +205,18 @@ export class ScreenshotCollector {
                 return false;
             }
 
-            // Store capture (postId from URL kept for embed rendering only)
-            const postId = this.extractPostIdForEmbed();
+            // Store capture
             this.captures.push({
                 id: this.captures.length + 1,
                 screenshot,
                 source,
                 interest,
-                postId,  // For Instagram embed rendering (display-only, not dedup)
                 timestamp: Date.now(),
                 scrollPosition
             });
 
             // Track for deduplication
-            if (fingerprint) {
-                this.capturedFingerprints.add(fingerprint);
-            }
             this.capturedHashes.add(hash);
-            // Only track position for sources that check it (not carousel/story)
             if (source !== 'carousel' && source !== 'story') {
                 this.capturedPositions.add(positionKey);
             }
@@ -219,134 +230,12 @@ export class ScreenshotCollector {
             // Save to disk for debugging if configured
             this.saveScreenshotToDisk(screenshot, source);
 
-            console.log(`📸 Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ''}${fingerprint ? ` [fp: ${fingerprint.slice(0, 30)}]` : ''})`);
+            console.log(`📸 Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ''})`);
             return true;
 
         } catch (error) {
             console.error('📸 Screenshot capture failed:', error);
             return false;
-        }
-    }
-
-    /**
-     * Capture a specific element that the LLM focused on.
-     * Takes a cropped screenshot centered on the element for high-quality captures.
-     *
-     * @param elementBox - Bounding box of the focused element
-     * @param source - Where this content came from (feed, story, search, etc.)
-     * @param interest - For search results, which interest triggered this capture
-     * @param reason - Why the LLM decided to capture this (for logging)
-     * @param fingerprint - Tree-based post fingerprint for dedup (null → falls through to hash dedup)
-     * @returns The captured post, or null if capture failed/skipped
-     */
-    async captureFocusedElement(
-        elementBox: BoundingBox,
-        source: CaptureSource,
-        interest?: string,
-        reason?: string,
-        fingerprint?: string
-    ): Promise<CapturedPost | null> {
-        // Check memory limit
-        if (this.captures.length >= this.config.maxCaptures) {
-            console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached (focused)`);
-            return null;
-        }
-
-        // Get viewport with retry logic (can be null briefly during page transitions)
-        let viewport = this.page.viewportSize();
-        if (!viewport) {
-            // Brief wait and retry
-            await new Promise(r => setTimeout(r, 100));
-            viewport = this.page.viewportSize();
-        }
-
-        if (!viewport) {
-            // Fallback: query actual window dimensions via page.evaluate
-            const dims = await this.page.evaluate(() => ({
-                width: window.innerWidth, height: window.innerHeight
-            })).catch(() => ({ width: 1080, height: 1920 }));
-            console.log(`📸 Viewport unavailable from viewportSize(), using evaluate: ${dims.width}x${dims.height}`);
-            viewport = dims;
-        }
-
-        try {
-            // Calculate capture region with proportional padding for context
-            const padding = Math.round(viewport.width * 0.046);
-            const captureRegion = {
-                x: Math.max(0, elementBox.x - padding),
-                y: Math.max(0, elementBox.y - padding),
-                width: Math.min(elementBox.width + padding * 2, viewport.width),
-                height: Math.min(elementBox.height + padding * 2, viewport.height)
-            };
-
-            // Ensure region doesn't exceed viewport
-            if (captureRegion.x + captureRegion.width > viewport.width) {
-                captureRegion.width = viewport.width - captureRegion.x;
-            }
-            if (captureRegion.y + captureRegion.height > viewport.height) {
-                captureRegion.height = viewport.height - captureRegion.y;
-            }
-
-            // Ensure minimum dimensions — captures should be at least 30% of viewport
-            // to produce useful content (not tiny button/icon crops)
-            captureRegion.width = Math.max(captureRegion.width, Math.round(viewport.width * 0.30));
-            captureRegion.height = Math.max(captureRegion.height, Math.round(viewport.height * 0.20));
-
-            // Take cropped screenshot focused on the element
-            const screenshot = await this.page.screenshot({
-                type: 'jpeg',
-                quality: this.config.jpegQuality,
-                clip: captureRegion
-            });
-
-            // Perceptual hash deduplication — catches near-duplicates
-            const hash = await this.computePerceptualHash(screenshot);
-            if (this.isSimilarToExisting(hash)) {
-                console.log(`[CAPTURE-REJECT] perceptual_hash: ${hash} (focused, source=${source})`);
-                return null;
-            }
-            this.capturedHashes.add(hash);
-
-            // Fingerprint-based dedup: skip if we've already captured this post
-            if (fingerprint && source !== 'carousel' && this.capturedFingerprints.has(fingerprint)) {
-                console.log(`[CAPTURE-REJECT] fingerprint_dedup: ${fingerprint.slice(0, 30)} (focused, source=${source})`);
-                return null;
-            }
-            if (fingerprint) {
-                this.capturedFingerprints.add(fingerprint);
-            }
-
-            // Create captured post (postId from URL kept for embed rendering only)
-            const postId = this.extractPostIdForEmbed();
-            const captured: CapturedPost = {
-                id: this.captures.length + 1,
-                screenshot,
-                source,
-                interest,
-                postId,  // For Instagram embed rendering (display-only, not dedup)
-                timestamp: Date.now(),
-                scrollPosition: elementBox.y  // Use element Y as position
-            };
-
-            // Store capture
-            this.captures.push(captured);
-
-            // Save to disk for debugging if configured
-            this.saveScreenshotToDisk(screenshot, source);
-
-            // Log ONLY after capture is actually stored
-            console.log(`\n📸 === CAPTURED #${captured.id} ===`);
-            console.log(`   Target: (${elementBox.x}, ${elementBox.y}, ${elementBox.width}x${elementBox.height})`);
-            console.log(`   Reason: ${reason || 'LLM focus'}`);
-            console.log(`   Crop: ${captureRegion.width}x${captureRegion.height}px`);
-            console.log(`   Source: ${source}${interest ? `: ${interest}` : ''}`);
-            console.log(`==============================\n`);
-
-            return captured;
-
-        } catch (error) {
-            console.error('📸 Focused capture failed:', error);
-            return null;
         }
     }
 
@@ -387,144 +276,29 @@ export class ScreenshotCollector {
      * Get approximate memory usage in bytes.
      */
     getMemoryUsage(): number {
-        return this.captures.reduce((total, c) => total + c.screenshot.length, 0);
+        const captureBytes = this.captures.reduce((total, c) => total + c.screenshot.length, 0);
+        // VIDEO RECORDING DISABLED
+        // const videoBytes = this.capturedVideos.reduce((total, v) => v.frames.reduce((t, f) => t + f.length, 0) + total, 0);
+        return captureBytes;
     }
 
     /**
-     * Clear all captures (call after processing to free memory).
+     * Clear all captures and videos (call after processing to free memory).
      */
     clear(): void {
         this.captures = [];
+        // this.capturedVideos = [];  // VIDEO RECORDING DISABLED
         this.lastScrollPosition = 0;
-        this.capturedFingerprints.clear();
         this.capturedHashes.clear();
         this.capturedPositions.clear();
         this.lastCaptureSource = '';
         console.log('📸 Collector cleared');
     }
 
-    /**
-     * Capture multiple frames during video playback.
-     * Called when video content is detected. Simulates natural video watching
-     * by capturing frames at intervals during the watch duration.
-     *
-     * @param source - Where this content came from (feed, story, etc.)
-     * @param watchDurationMs - How long to watch (human-like: 8-20 seconds)
-     * @param frameIntervalMs - Interval between frames (2-3 seconds)
-     * @param fingerprint - Tree-based post fingerprint for video grouping
-     * @returns Number of unique frames captured
-     */
-    async captureVideoFrames(
-        source: CaptureSource,
-        watchDurationMs: number = 12000,  // 12 second default watch time
-        frameIntervalMs: number = 2500,    // Capture every 2.5 seconds
-        fingerprint?: string
-    ): Promise<number> {
-        const videoId = fingerprint || this.extractPostIdForEmbed() || `video_${Date.now()}`;
-        const maxFrames = Math.floor(watchDurationMs / frameIntervalMs);
-        let capturedFrames = 0;
-        let lastCapturedTime = -1;  // Track video playback time of last capture
-        const startTime = Date.now();
-
-        console.log(`🎬 Starting video frame capture: up to ${maxFrames} frames over ${(watchDurationMs / 1000).toFixed(1)}s`);
-
-        while (Date.now() - startTime < watchDurationMs) {
-            // Check memory limit
-            if (this.captures.length >= this.config.maxCaptures) {
-                console.log(`📸 Max captures reached, stopping video frames`);
-                break;
-            }
-
-            // Check if we've captured enough frames
-            if (capturedFrames >= maxFrames) {
-                break;
-            }
-
-            // STATE-BASED: Check video state before capture
-            const videoState = await this.getVideoState();
-
-            // Skip if video not found or not playing
-            if (!videoState?.found) {
-                console.log(`🎬 No video found, waiting...`);
-                await this.delay(500);
-                continue;
-            }
-
-            // Skip if video is paused or buffering
-            if (videoState.paused) {
-                console.log(`🎬 Video paused, waiting...`);
-                await this.delay(500);
-                continue;
-            }
-
-            if (videoState.buffering) {
-                console.log(`🎬 Video buffering, waiting...`);
-                await this.delay(300);
-                continue;
-            }
-
-            // Skip if playback time hasn't advanced enough (at least 2s since last capture)
-            const minTimeAdvance = 2.0;  // seconds
-            if (lastCapturedTime >= 0 && videoState.currentTime - lastCapturedTime < minTimeAdvance) {
-                await this.delay(200);
-                continue;
-            }
-
-            try {
-                const screenshot = await this.page.screenshot({
-                    type: 'jpeg',
-                    quality: this.config.jpegQuality,
-                    fullPage: false
-                });
-
-                // Perceptual hash dedup for similar frames
-                const hash = await this.computePerceptualHash(screenshot);
-                if (this.isSimilarToExisting(hash)) {
-                    console.log(`🎬 Frame at ${videoState.currentTime.toFixed(1)}s: near-duplicate, skipping`);
-                    lastCapturedTime = videoState.currentTime;  // Still advance to avoid re-checking same frame
-                    await this.delay(frameIntervalMs);
-                    continue;
-                }
-                this.capturedHashes.add(hash);
-
-                // Store frame with video metadata
-                this.captures.push({
-                    id: this.captures.length + 1,
-                    screenshot,
-                    source,
-                    postId: this.extractPostIdForEmbed(),
-                    timestamp: Date.now(),
-                    scrollPosition: 0,
-                    isVideoFrame: true,
-                    videoId,
-                    frameIndex: capturedFrames + 1,
-                    totalFrames: maxFrames
-                });
-
-                // Save to disk for debugging if configured
-                this.saveScreenshotToDisk(screenshot, source);
-
-                capturedFrames++;
-                lastCapturedTime = videoState.currentTime;
-                console.log(`🎬 Frame ${capturedFrames} captured at ${videoState.currentTime.toFixed(1)}s`);
-
-                // Wait before next capture attempt
-                await this.delay(frameIntervalMs);
-
-            } catch (error) {
-                console.error(`🎬 Frame capture failed:`, error);
-                await this.delay(500);
-            }
-        }
-
-        // Update totalFrames for all frames of this video
-        this.captures
-            .filter(c => c.videoId === videoId)
-            .forEach(c => c.totalFrames = capturedFrames);
-
-        console.log(`🎬 Video complete: ${capturedFrames} unique frames captured`);
-        return capturedFrames;
-    }
+    // VIDEO RECORDING DISABLED — storeVideoRecording(), getVideos(), getVideoCount() commented out
+    // storeVideoRecording(...): number { ... }
+    getVideos(): any[] { return []; }
+    getVideoCount(): number { return 0; }
 
     /**
      * Get the current count of captured photos/screenshots.
@@ -535,30 +309,11 @@ export class ScreenshotCollector {
     }
 
     /**
-     * Simple delay helper for video frame timing.
-     */
-    private delay(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    /**
-     * Extract Instagram post ID from current URL for embed rendering.
-     * Post URLs follow pattern: instagram.com/p/{POST_ID}/
-     * Returns undefined for non-post pages (stories, feed, etc.)
-     * NOTE: This is display-only (for Instagram embeds), NOT used for dedup.
-     */
-    private extractPostIdForEmbed(): string | undefined {
-        const url = this.page.url();
-        const match = url.match(/\/p\/([A-Za-z0-9_-]+)\//);
-        return match?.[1];
-    }
-
-    /**
      * Compute a perceptual hash (average hash) of a screenshot.
      * Resilient to minor differences (scroll jitter, compression artifacts).
      * Returns a 64-bit hex string (16 hex chars).
      */
-    private async computePerceptualHash(screenshot: Buffer): Promise<string> {
+    async computePerceptualHash(screenshot: Buffer): Promise<string> {
         try {
             const image = await Jimp.read(screenshot);
             image.resize({ w: 8, h: 8 });
@@ -614,7 +369,7 @@ export class ScreenshotCollector {
     /**
      * Get current scroll Y position via CDP (no page.evaluate needed).
      */
-    private async getScrollPosition(): Promise<number> {
+    async getScrollPosition(): Promise<number> {
         try {
             // Use CDP to get scroll position (more bot-proof than page.evaluate)
             const client = await this.page.context().newCDPSession(this.page);
@@ -627,42 +382,6 @@ export class ScreenshotCollector {
         } catch {
             // Fallback to page.evaluate if CDP fails
             return await this.page.evaluate(() => window.scrollY);
-        }
-    }
-
-    /**
-     * Get video element state via CDP for synced frame capture.
-     * Returns null if no video found on page.
-     */
-    private async getVideoState(): Promise<{
-        found: boolean;
-        paused: boolean;
-        currentTime: number;
-        buffering: boolean;
-        duration: number;
-    } | null> {
-        try {
-            const client = await this.page.context().newCDPSession(this.page);
-            const result = await client.send('Runtime.evaluate', {
-                expression: `
-                    (() => {
-                        const v = document.querySelector('video');
-                        if (!v) return JSON.stringify({ found: false });
-                        return JSON.stringify({
-                            found: true,
-                            paused: v.paused,
-                            currentTime: v.currentTime,
-                            buffering: v.readyState < 3,
-                            duration: v.duration || 0
-                        });
-                    })()
-                `,
-                returnByValue: true
-            });
-            await client.detach();
-            return JSON.parse(result.result.value as string);
-        } catch {
-            return null;
         }
     }
 

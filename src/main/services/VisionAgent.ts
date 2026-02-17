@@ -1,13 +1,15 @@
 /**
- * VisionAgent - Pure Vision-Based Instagram Browsing Agent
+ * VisionAgent - Set-of-Mark (SoM) Instagram Browsing Agent
  *
- * Replaces the accessibility tree + LLM dual-input system with a single
- * vision-only loop. The LLM sees a screenshot and outputs raw x,y coordinates
- * for clicks, just like a human looking at a screen and tapping.
+ * Vision-based loop with numbered element labels. Interactive elements are
+ * detected via page.evaluate(), labeled on the screenshot server-side (Jimp),
+ * and the LLM outputs an element number for click/hover/newtab actions.
+ * Capture/record still uses x,y crop coordinates.
  *
- * Core loop: screenshot → LLM → action (click/scroll/type/press/capture) → repeat
+ * Core loop: screenshot → label elements → LLM → action → repeat
  *
- * No element IDs, no tree parsing, no DOM signatures, no semantic hints.
+ * Stealth: all labeling is server-side on the screenshot buffer. No DOM
+ * modifications, no injected scripts. GhostMouse handles all clicks.
  */
 
 import { Page } from 'playwright';
@@ -18,9 +20,9 @@ import { GhostMouse } from './GhostMouse.js';
 import { HumanScroll } from './HumanScroll.js';
 import { ScreenshotCollector } from './ScreenshotCollector.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
-import type { BrowsingPhase } from '../../types/navigation.js';
 import type { CaptureSource } from '../../types/instagram.js';
 import visionAgentPrompt from '../prompts/vision-agent.md';
+import { labelElements, type LabeledElement } from '../../utils/elementLabeler.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,16 +31,19 @@ import visionAgentPrompt from '../prompts/vision-agent.md';
 /** LLM response schema — the complete output format. */
 interface VisionAction {
     thinking: string;
-    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'capture' | 'wait' | 'done' | 'newtab' | 'closetab';
-    x?: number;
+    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'capture' | /* 'record' | */ 'wait' | 'done' | 'newtab' | 'closetab';
+    element?: number;  // Element label number for click/hover/newtab
+    x?: number;        // Used for capture/record crop coordinates
     y?: number;
-    x2?: number;   // Bottom-right x for capture crop region
-    y2?: number;   // Bottom-right y for capture crop region
+    x2?: number;       // Bottom-right x for capture crop region
+    y2?: number;       // Bottom-right y for capture crop region
     direction?: 'up' | 'down';
     text?: string;
     key?: string;
     seconds?: number;
     memory?: string;
+    phase?: 'posts' | 'search' | 'stories';
+    source?: 'feed' | 'story' | 'carousel' | 'search';  // LLM declares content source on capture
 }
 
 interface ActionHistoryEntry {
@@ -56,6 +61,7 @@ export interface VisionAgentConfig {
 
 export interface VisionAgentResult {
     captureCount: number;
+    // recordCount: number;  // VIDEO RECORDING DISABLED
     decisionCount: number;
     actionHistory: ActionHistoryEntry[];
 }
@@ -95,15 +101,20 @@ export class VisionAgent {
 
     // Session state
     private captureCount: number = 0;
+    // private recordCount: number = 0;  // VIDEO RECORDING DISABLED
+    // private recordedVideoHashes: Set<string> = new Set();
     private startTime: number = 0;
-    private capturedPosts: Array<{ fingerprint: string; url: string; source: string }> = [];
 
-    // Reference example images (loaded once, cached; sent only on first turn)
-    private referenceImages: Array<{ label: string; base64: string }> | null = null;
-    private referenceImagesSent: boolean = false;
+    // Reference example images organized by phase folder (Posts, Search, Stories)
+    private referenceImagesByPhase: Map<string, Array<{ label: string; base64: string }>> | null = null;
+    private sentPhases: Set<string> = new Set();
+    private lastDeclaredPhase: string = ''; // Set by LLM on first turn; empty = no phase yet
 
     // Tab management — tracks the original tab so closetab can return to it
     private originalPage: Page | null = null;
+
+    // Current turn's labeled elements (for click/hover/newtab execution)
+    private currentElements: Map<number, LabeledElement> = new Map();
 
     // External stop signal (set by Cmd+Shift+K)
     private stopped: boolean = false;
@@ -160,17 +171,38 @@ export class VisionAgent {
             }
 
             // 1. Take and resize screenshot
-            const screenshot = await this.captureScreenshot();
-            if (!screenshot) {
+            const rawScreenshot = await this.captureScreenshot();
+            if (!rawScreenshot) {
                 await this.delay(500);
                 continue;
             }
+
+            // 1b. Detect interactive elements and draw labels on screenshot
+            const { buffer: screenshot, elements } = await labelElements(
+                this.page, rawScreenshot,
+                this.screenshotWidth, this.screenshotHeight,
+                this.viewportWidth, this.viewportHeight
+            );
+            this.currentElements = elements;
+            console.log(`  🏷️ Labeled ${elements.size} interactive elements`);
 
             // 2. Call LLM
             const decision = await this.callLLM(screenshot, remaining);
             this.decisionCount++;
 
             console.log(`  🧠 [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
+
+            // 2b. Log full reasoning for element-based actions (click/hover/newtab)
+            if (['click', 'hover', 'newtab'].includes(decision.action) && decision.element !== undefined) {
+                const el = this.currentElements.get(decision.element);
+                const desc = el ? `"${el.text || el.ariaLabel || el.tag}"` : 'unknown';
+                const coordLog = `[${this.decisionCount}] ${decision.action}([${decision.element}] ${desc}) — ${decision.thinking}`;
+                console.log(`  📍 ${coordLog}`);
+                this.collector.appendLog(`📍 ${coordLog}`);
+            }
+
+            // 2c. Save debug screenshot with action overlay
+            await this.saveDebugScreenshot(screenshot, decision);
 
             // 3. Handle "done" — LLM terminates session
             if (decision.action === 'done') {
@@ -179,9 +211,23 @@ export class VisionAgent {
                 break;
             }
 
-            // 4. Persist memory scratchpad
+            // 4. Persist memory scratchpad and phase declaration
             if (decision.memory) {
                 this.lastMemory = decision.memory;
+            }
+            if (decision.phase) {
+                const phaseMap: Record<string, string> = { posts: 'Posts', search: 'Search', stories: 'Stories' };
+                const folder = phaseMap[decision.phase];
+                if (folder && folder !== this.lastDeclaredPhase) {
+                    if (this.lastDeclaredPhase) {
+                        console.log(`  📂 Phase changed: ${this.lastDeclaredPhase} → ${folder}`);
+                        this.collector.appendLog(`📂 Phase changed: ${this.lastDeclaredPhase} → ${folder}`);
+                    } else {
+                        console.log(`  📂 Starting phase: ${folder}`);
+                        this.collector.appendLog(`📂 Starting phase: ${folder}`);
+                    }
+                    this.lastDeclaredPhase = folder;
+                }
             }
 
             // 5. Execute action
@@ -212,6 +258,7 @@ export class VisionAgent {
 
         return {
             captureCount: this.captureCount,
+            // recordCount: this.recordCount,  // VIDEO RECORDING DISABLED
             decisionCount: this.decisionCount,
             actionHistory: [...this.actionHistory]
         };
@@ -266,6 +313,7 @@ export class VisionAgent {
             case 'click': return this.executeClick(decision);
             case 'scroll': return this.executeScroll(decision);
             case 'capture': return this.executeCapture(decision);
+            // case 'record': return this.executeRecord(decision);  // VIDEO RECORDING DISABLED
             case 'type': return this.executeType(decision);
             case 'press': return this.executePress(decision);
             case 'hover': return this.executeHover(decision);
@@ -277,12 +325,15 @@ export class VisionAgent {
     }
 
     private async executeClick(d: VisionAction): Promise<string> {
-        if (d.x === undefined || d.y === undefined) return 'missing coordinates';
-        const { x, y } = this.scaleToViewport(d.x, d.y);
-        console.log(`  🖱️ click: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)}) | url=${this.page.url()}`);
-        this.collector.appendLog(`🖱️ click: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)}) | url=${this.page.url()}`);
-        await this.ghost.clickPoint(x, y);
-        return 'clicked';
+        if (d.element === undefined) return 'missing element number';
+        const el = this.currentElements.get(d.element);
+        if (!el) return `element [${d.element}] not found — pick a visible labeled element`;
+        const cx = el.x + el.width / 2;
+        const cy = el.y + el.height / 2;
+        console.log(`  🖱️ click: element [${d.element}] "${el.text || el.ariaLabel}" → viewport(${Math.round(cx)},${Math.round(cy)}) | url=${this.page.url()}`);
+        this.collector.appendLog(`🖱️ click: element [${d.element}] "${el.text || el.ariaLabel}" → viewport(${Math.round(cx)},${Math.round(cy)}) | url=${this.page.url()}`);
+        await this.ghost.clickPoint(cx, cy);
+        return `clicked [${d.element}] "${el.text || el.ariaLabel || el.tag}"`;
     }
 
     private async executeScroll(d: VisionAction): Promise<string> {
@@ -305,9 +356,7 @@ export class VisionAgent {
     }
 
     private async executeCapture(d: VisionAction): Promise<string> {
-        const source = this.inferCaptureSource();
-        const fingerprint = this.extractUrlFingerprint();
-        const url = this.page.url();
+        const source = this.inferCaptureSource(d);
 
         // Build optional clip region from LLM-provided crop coordinates
         let clip: { x: number; y: number; width: number; height: number } | undefined;
@@ -328,30 +377,29 @@ export class VisionAgent {
             console.log(`  📷 capture: no crop coordinates, using full viewport`);
             this.collector.appendLog(`📷 capture: no crop coordinates, using full viewport`);
         }
-        console.log(`  📷 capture: source=${source}, fingerprint=${fingerprint || 'none'}, url=${url}`);
-        this.collector.appendLog(`📷 capture: source=${source}, fingerprint=${fingerprint || 'none'}, url=${url}`);
+        console.log(`  📷 capture: source=${source}`);
+        this.collector.appendLog(`📷 capture: source=${source}`);
 
         const captured = await this.collector.captureCurrentPost(
             source,
             undefined,
-            fingerprint || undefined,
             clip
         );
 
         if (captured) {
             this.captureCount++;
-            if (fingerprint) {
-                this.capturedPosts.push({ fingerprint, url, source });
-            }
             const cropInfo = clip ? ` [cropped ${Math.round(clip.width)}x${Math.round(clip.height)}]` : '';
             console.log(`  📷 ✅ captured #${this.captureCount} (source=${source})${cropInfo}`);
             this.collector.appendLog(`📷 ✅ captured #${this.captureCount} (source=${source})${cropInfo}`);
             return `captured #${this.captureCount} (source=${source})${cropInfo}`;
         }
-        console.log(`  📷 ❌ capture rejected (duplicate) url=${url}`);
-        this.collector.appendLog(`📷 ❌ capture rejected (duplicate) url=${url}`);
-        return `capture rejected — already captured this post (${url}). Do NOT re-open it.`;
+        console.log(`  📷 ❌ capture rejected (duplicate)`);
+        this.collector.appendLog(`📷 ❌ capture rejected (duplicate)`);
+        return `capture rejected — duplicate content. Move on to the next post.`;
     }
+
+    // VIDEO RECORDING DISABLED — executeRecord() commented out
+    // private async executeRecord(d: VisionAction): Promise<string> { ... }
 
     private async executeType(d: VisionAction): Promise<string> {
         if (!d.text) return 'no text provided';
@@ -381,12 +429,15 @@ export class VisionAgent {
     }
 
     private async executeHover(d: VisionAction): Promise<string> {
-        if (d.x === undefined || d.y === undefined) return 'missing coordinates';
-        const { x, y } = this.scaleToViewport(d.x, d.y);
-        console.log(`  👆 hover: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)})`);
-        this.collector.appendLog(`👆 hover: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)})`);
-        await this.ghost.moveTo({ x, y });
-        return `hovered at (${Math.round(x)}, ${Math.round(y)})`;
+        if (d.element === undefined) return 'missing element number';
+        const el = this.currentElements.get(d.element);
+        if (!el) return `element [${d.element}] not found — pick a visible labeled element`;
+        const cx = el.x + el.width / 2;
+        const cy = el.y + el.height / 2;
+        console.log(`  👆 hover: element [${d.element}] "${el.text || el.ariaLabel}" → viewport(${Math.round(cx)},${Math.round(cy)})`);
+        this.collector.appendLog(`👆 hover: element [${d.element}] "${el.text || el.ariaLabel}" → viewport(${Math.round(cx)},${Math.round(cy)})`);
+        await this.ghost.moveTo({ x: cx, y: cy });
+        return `hovered [${d.element}] "${el.text || el.ariaLabel || el.tag}"`;
     }
 
     private async executeWait(d: VisionAction): Promise<string> {
@@ -402,13 +453,16 @@ export class VisionAgent {
     // -----------------------------------------------------------------------
 
     private async executeNewtab(d: VisionAction): Promise<string> {
-        if (d.x === undefined || d.y === undefined) return 'missing coordinates';
+        if (d.element === undefined) return 'missing element number';
+        const el = this.currentElements.get(d.element);
+        if (!el) return `element [${d.element}] not found — pick a visible labeled element`;
 
         const context = this.page.context();
-        const { x, y } = this.scaleToViewport(d.x, d.y);
+        const cx = el.x + el.width / 2;
+        const cy = el.y + el.height / 2;
 
-        console.log(`  🔗 newtab: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)}) | from=${this.page.url()}`);
-        this.collector.appendLog(`🔗 newtab: screenshot(${d.x},${d.y}) → viewport(${Math.round(x)},${Math.round(y)}) | from=${this.page.url()}`);
+        console.log(`  🔗 newtab: element [${d.element}] "${el.text || el.ariaLabel}" → viewport(${Math.round(cx)},${Math.round(cy)}) | from=${this.page.url()}`);
+        this.collector.appendLog(`🔗 newtab: element [${d.element}] "${el.text || el.ariaLabel}" → viewport(${Math.round(cx)},${Math.round(cy)}) | from=${this.page.url()}`);
 
         // Save the current page as the original if this is the first newtab
         if (!this.originalPage) {
@@ -417,11 +471,11 @@ export class VisionAgent {
 
         try {
             // Move mouse naturally to the target, then middle-click to open in new tab
-            await this.ghost.moveTo({ x, y });
+            await this.ghost.moveTo({ x: cx, y: cy });
 
             // Listen for the new page event BEFORE clicking
             const newPagePromise = context.waitForEvent('page', { timeout: 5000 });
-            await this.page.mouse.click(x, y, { button: 'middle' });
+            await this.page.mouse.click(cx, cy, { button: 'middle' });
 
             const newPage = await newPagePromise;
             await newPage.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
@@ -429,7 +483,7 @@ export class VisionAgent {
             this.switchToPage(newPage);
             console.log(`  🔗 newtab opened → ${newPage.url()}`);
             this.collector.appendLog(`🔗 newtab opened → ${newPage.url()}`);
-            return `opened new tab → ${newPage.url()}`;
+            return `opened new tab → ${newPage.url()}. You are now in a NEW TAB. Use closetab when done to return.`;
         } catch {
             console.log(`  🔗 newtab failed — target not a link`);
             this.collector.appendLog(`🔗 newtab failed — target not a link`);
@@ -486,33 +540,21 @@ export class VisionAgent {
     }
 
     // -----------------------------------------------------------------------
-    // URL-Based Fingerprint & Source Inference
+    // Vision-Based Source Inference
     // -----------------------------------------------------------------------
 
-    private extractUrlFingerprint(): string | null {
-        const url = this.page.url();
-        const match = url.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-        return match ? match[2] : null;
-    }
+    private inferCaptureSource(d: VisionAction): CaptureSource {
+        // Primary: use LLM-declared source if provided
+        if (d.source) return d.source;
 
-    private inferCaptureSource(): CaptureSource {
-        const url = this.page.url();
+        // Fallback: map from LLM-declared phase
+        if (d.phase === 'stories') return 'story';
+        if (d.phase === 'search') return 'search';
 
-        // Story viewer
-        if (url.includes('/stories/')) return 'story';
-
-        // Carousel: last action was ArrowRight on a post detail page
+        // Check action history for carousel detection: last action was ArrowRight
         if (this.actionHistory.length > 0) {
             const last = this.actionHistory[this.actionHistory.length - 1];
-            if (last.action === 'press(ArrowRight)' && this.extractUrlFingerprint()) {
-                return 'carousel';
-            }
-        }
-
-        // Search context: if recent actions include typing (search query)
-        if (url.includes('/explore/')) return 'search';
-        for (let i = this.actionHistory.length - 1; i >= Math.max(0, this.actionHistory.length - 5); i--) {
-            if (this.actionHistory[i].action.startsWith('type(')) return 'search';
+            if (last.action === 'press(ArrowRight)') return 'carousel';
         }
 
         return 'feed';
@@ -555,36 +597,60 @@ export class VisionAgent {
         const systemPrompt = this.getSystemPrompt();
         const userPrompt = this.buildUserPrompt(remainingMs);
         const visionDetail = process.env.KOWALSKI_VISION_DETAIL || 'high';
-        const refImages = this.loadReferenceImages();
+        const allPhaseImages = this.loadReferenceImagesByPhase();
 
-        // Build messages array: system → (optional) reference images → current turn
+        // Build messages array: system → (optional) phase reference images → current turn
         const messages: Array<Record<string, unknown>> = [
             { role: 'system', content: systemPrompt }
         ];
 
-        // Inject reference images as a few-shot user→assistant exchange (first turn only)
-        if (refImages.length > 0 && !this.referenceImagesSent) {
+        // Inject reference images for the current phase (first time entering each phase)
+        const phase = this.lastDeclaredPhase;
+        if (phase && !this.sentPhases.has(phase)) {
             const refContent: Array<Record<string, unknown>> = [];
-            for (const ref of refImages) {
+
+            // Include general images (e.g. goinghome.png) on the very first injection
+            if (this.sentPhases.size === 0) {
+                const generalImages = allPhaseImages.get('general') || [];
+                for (const ref of generalImages) {
+                    refContent.push({
+                        type: 'image_url',
+                        image_url: { url: ref.base64, detail: 'auto' }
+                    });
+                    refContent.push({
+                        type: 'text',
+                        text: `[Reference: ${ref.label}]`
+                    });
+                }
+            }
+
+            // Include this phase's images (numbered step-by-step workflow)
+            const phaseImages = allPhaseImages.get(phase) || [];
+            for (const ref of phaseImages) {
                 refContent.push({
                     type: 'image_url',
                     image_url: { url: ref.base64, detail: 'auto' }
                 });
                 refContent.push({
                     type: 'text',
-                    text: `[Reference: ${ref.label}]`
+                    text: `[Step: ${ref.label}]`
                 });
             }
-            refContent.push({
-                type: 'text',
-                text: 'Above are reference screenshots of Instagram\'s desktop UI. Study them so you know where key elements are.'
-            });
-            messages.push({ role: 'user', content: refContent });
-            messages.push({
-                role: 'assistant',
-                content: 'Understood. I\'ve studied the reference screenshots and will use them to navigate accurately.'
-            });
-            this.referenceImagesSent = true;
+
+            if (refContent.length > 0) {
+                refContent.push({
+                    type: 'text',
+                    text: `These are step-by-step instructions for how to handle ${phase.toLowerCase()} on Instagram. The images are numbered — follow them in sequence. Read the annotations in each image carefully.`
+                });
+                messages.push({ role: 'user', content: refContent });
+                messages.push({
+                    role: 'assistant',
+                    content: `Understood. I'll follow the ${phase.toLowerCase()} workflow steps shown above.`
+                });
+                console.log(`  📎 Injected ${phase} reference images (${phaseImages.length} images)`);
+                this.collector.appendLog(`📎 Injected ${phase} reference images (${phaseImages.length} images)`);
+            }
+            this.sentPhases.add(phase);
         }
 
         // Current turn: live screenshot + context
@@ -660,10 +726,10 @@ export class VisionAgent {
             }
         }
 
-        // Fallback: scroll down and continue
-        console.warn('  ⚠️ LLM fallback: scrolling down');
-        this.collector.appendLog('  ⚠️ LLM fallback: scrolling down');
-        return { thinking: 'LLM error fallback', action: 'scroll', direction: 'down' };
+        // Fallback: wait and let the LLM retry next iteration (no autonomous actions)
+        console.warn('  ⚠️ LLM failed — waiting before retry');
+        this.collector.appendLog('  ⚠️ LLM failed — waiting before retry');
+        return { thinking: 'LLM error — waiting to retry', action: 'wait', seconds: 2 };
     }
 
     // -----------------------------------------------------------------------
@@ -677,51 +743,47 @@ export class VisionAgent {
     }
 
     /**
-     * Load reference example images from src/main/prompts/examples/.
-     * Images are loaded once and cached for the session.
-     *
-     * Naming convention: use descriptive filenames like:
-     *   home-feed.jpg, search-panel.png, post-modal.jpg, story-viewer.jpg
-     * The filename (without extension) becomes the label shown to the LLM.
+     * Load reference images from src/main/prompts/examples/, organized by folder.
+     * Returns a Map: 'general' → root images, 'Posts' → Posts/, 'Search' → Search/, etc.
+     * Images within each folder are sorted alphabetically (so numbered files stay in order).
+     * Loaded once and cached for the session.
      */
-    private loadReferenceImages(): Array<{ label: string; base64: string }> {
-        if (this.referenceImages !== null) return this.referenceImages;
+    private loadReferenceImagesByPhase(): Map<string, Array<{ label: string; base64: string }>> {
+        if (this.referenceImagesByPhase !== null) return this.referenceImagesByPhase;
 
-        this.referenceImages = [];
-        // __dirname at runtime is dist-electron/main/, project root is ../..
+        this.referenceImagesByPhase = new Map();
         const examplesDir = path.join(__dirname, '../../src/main/prompts/examples');
 
         try {
-            if (!fs.existsSync(examplesDir)) return this.referenceImages;
+            if (!fs.existsSync(examplesDir)) return this.referenceImagesByPhase;
 
             const imagePattern = /\.(jpg|jpeg|png|webp)$/i;
             const loaded: string[] = [];
 
-            // Helper: read an image file and push to referenceImages
-            const addImage = (filePath: string, label: string) => {
+            const readImageBase64 = (filePath: string): string => {
                 const buffer = fs.readFileSync(filePath);
                 const ext = path.extname(filePath).toLowerCase().replace('.', '');
                 const mime = ext === 'jpg' ? 'jpeg' : ext;
-                this.referenceImages!.push({
-                    label,
-                    base64: `data:image/${mime};base64,${buffer.toString('base64')}`
-                });
-                loaded.push(path.relative(examplesDir, filePath));
+                return `data:image/${mime};base64,${buffer.toString('base64')}`;
             };
 
-            // Helper: clean filename into readable label
             const cleanName = (name: string) =>
                 path.basename(name, path.extname(name)).replace(/[-_.]/g, ' ').trim();
 
-            // 1. Root-level images first (e.g. goinghome.png)
+            // Root-level images → 'general' group (e.g. goinghome.png)
             const rootFiles = fs.readdirSync(examplesDir)
                 .filter(f => imagePattern.test(f) && fs.statSync(path.join(examplesDir, f)).isFile())
                 .sort();
-            for (const file of rootFiles) {
-                addImage(path.join(examplesDir, file), cleanName(file));
+            if (rootFiles.length > 0) {
+                const generalImages: Array<{ label: string; base64: string }> = [];
+                for (const file of rootFiles) {
+                    generalImages.push({ label: cleanName(file), base64: readImageBase64(path.join(examplesDir, file)) });
+                    loaded.push(file);
+                }
+                this.referenceImagesByPhase.set('general', generalImages);
             }
 
-            // 2. Subdirectories in sorted order (Posts/, Search/, Stories/)
+            // Subdirectories → one group per folder name (Posts, Search, Stories)
             const subdirs = fs.readdirSync(examplesDir)
                 .filter(f => fs.statSync(path.join(examplesDir, f)).isDirectory())
                 .sort();
@@ -730,22 +792,27 @@ export class VisionAgent {
                 const files = fs.readdirSync(dirPath)
                     .filter(f => imagePattern.test(f))
                     .sort();
-                for (const file of files) {
-                    const label = `${dir} - ${cleanName(file)}`;
-                    addImage(path.join(dirPath, file), label);
+                if (files.length > 0) {
+                    const phaseImages: Array<{ label: string; base64: string }> = [];
+                    for (const file of files) {
+                        phaseImages.push({ label: `${dir} - ${cleanName(file)}`, base64: readImageBase64(path.join(dirPath, file)) });
+                        loaded.push(path.join(dir, file));
+                    }
+                    this.referenceImagesByPhase.set(dir, phaseImages);
                 }
             }
 
-            if (this.referenceImages.length > 0) {
-                console.log(`  📎 Loaded ${this.referenceImages.length} reference image(s): ${loaded.join(', ')}`);
-                this.collector.appendLog(`📎 Loaded ${this.referenceImages.length} reference image(s): ${loaded.join(', ')}`);
+            if (loaded.length > 0) {
+                const phases = [...this.referenceImagesByPhase.keys()].join(', ');
+                console.log(`  📎 Loaded ${loaded.length} reference image(s) in phases [${phases}]`);
+                this.collector.appendLog(`📎 Loaded ${loaded.length} reference image(s) in phases [${phases}]`);
             }
         } catch (err) {
             console.warn('  ⚠️ Failed to load reference images:', err);
             this.collector.appendLog(`⚠️ Failed to load reference images: ${err}`);
         }
 
-        return this.referenceImages;
+        return this.referenceImagesByPhase;
     }
 
     // -----------------------------------------------------------------------
@@ -760,7 +827,17 @@ export class VisionAgent {
         const parts: string[] = [];
 
         parts.push(`SESSION: ${elapsedMin} min elapsed, ${remainingMin} min remaining. Use done when you've collected enough content across feed, stories, and searches.`);
+
+        // Tab state — tell the LLM if it's in a secondary tab
+        if (this.originalPage && this.page !== this.originalPage) {
+            parts.push(`TAB: You are in a NEW TAB (opened via newtab). Use closetab to return to the main tab when done here. Do NOT navigate away — use closetab.`);
+        }
+
         parts.push(`CAPTURES: ${this.captureCount} screenshots taken`);
+        // VIDEO RECORDING DISABLED
+        // if (this.recordCount > 0) {
+        //     parts.push(`RECORDINGS: ${this.recordCount} videos recorded`);
+        // }
 
         if (this.config.userInterests.length > 0) {
             parts.push(`INTERESTS TO SEARCH: ${this.config.userInterests.join(', ')}`);
@@ -780,13 +857,15 @@ export class VisionAgent {
             });
         }
 
-        // Captured posts — persistent list so LLM knows what to skip
-        if (this.capturedPosts.length > 0) {
-            parts.push('\nCAPTURED POSTS (do not re-open these):');
-            for (const post of this.capturedPosts) {
-                const shortUrl = post.fingerprint || post.url.split('instagram.com')[1]?.slice(0, 40) || post.url;
-                parts.push(`- ${shortUrl} (${post.source})`);
-            }
+        // Capture breakdown by source — LLM tracks details in memory scratchpad
+        if (this.captureCount > 0) {
+            const breakdown = this.collector.getSourceBreakdown();
+            const breakdownParts: string[] = [];
+            if (breakdown.feed > 0) breakdownParts.push(`${breakdown.feed} feed`);
+            if (breakdown.story > 0) breakdownParts.push(`${breakdown.story} story`);
+            if (breakdown.search > 0) breakdownParts.push(`${breakdown.search} search`);
+            if (breakdown.carousel > 0) breakdownParts.push(`${breakdown.carousel} carousel`);
+            parts.push(`CAPTURE BREAKDOWN: ${breakdownParts.join(', ')}`);
         }
 
         // Session memory digest (cross-session)
@@ -799,9 +878,111 @@ export class VisionAgent {
             parts.push(`\nYOUR NOTES (from last turn):\n${this.lastMemory}`);
         }
 
+        // Text list of labeled elements (cross-reference with visual labels on screenshot)
+        if (this.currentElements.size > 0) {
+            parts.push('\nLABELED ELEMENTS:');
+            for (const [id, el] of this.currentElements) {
+                const desc = el.text || el.ariaLabel || '';
+                const descStr = desc ? ` "${desc.slice(0, 50)}"` : '';
+                parts.push(`[${id}] ${el.tag}${descStr}${el.href ? ' → ' + el.href.slice(0, 40) : ''}`);
+            }
+        }
+
         parts.push('\nWhat do you do next?');
 
         return parts.join('\n');
+    }
+
+    // -----------------------------------------------------------------------
+    // Debug Screenshot Saving
+    // -----------------------------------------------------------------------
+
+    /**
+     * Save the screenshot the LLM saw with action overlay drawn on it.
+     * For click/hover/newtab: draws a red crosshair at the element's center in screenshot space.
+     * For capture/record: draws a red rectangle for the crop region.
+     * Saved to nav/ subdirectory within the session folder.
+     */
+    private async saveDebugScreenshot(screenshot: Buffer, decision: VisionAction): Promise<void> {
+        const outputDir = this.collector.getNavDir();
+        if (!outputDir) return;
+
+        try {
+            const image = await Jimp.read(Buffer.from(screenshot));
+            const RED = 0xFF0000FF;
+
+            // Draw crosshair at element center for click/hover/newtab
+            if (['click', 'hover', 'newtab'].includes(decision.action) && decision.element !== undefined) {
+                const el = this.currentElements.get(decision.element);
+                if (el) {
+                    // Convert element center from viewport to screenshot space
+                    const scaleX = this.screenshotWidth / this.viewportWidth;
+                    const scaleY = this.screenshotHeight / this.viewportHeight;
+                    const cx = Math.round((el.x + el.width / 2) * scaleX);
+                    const cy = Math.round((el.y + el.height / 2) * scaleY);
+                    const armLen = 15;
+                    const thickness = 3;
+
+                    // Horizontal arm
+                    for (let dx = -armLen; dx <= armLen; dx++) {
+                        for (let dt = -Math.floor(thickness / 2); dt <= Math.floor(thickness / 2); dt++) {
+                            const px = cx + dx;
+                            const py = cy + dt;
+                            if (px >= 0 && px < image.width && py >= 0 && py < image.height) {
+                                image.setPixelColor(RED, px, py);
+                            }
+                        }
+                    }
+                    // Vertical arm
+                    for (let dy = -armLen; dy <= armLen; dy++) {
+                        for (let dt = -Math.floor(thickness / 2); dt <= Math.floor(thickness / 2); dt++) {
+                            const px = cx + dt;
+                            const py = cy + dy;
+                            if (px >= 0 && px < image.width && py >= 0 && py < image.height) {
+                                image.setPixelColor(RED, px, py);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Draw rectangle for capture/record crop region (still coordinate-based)
+            if (decision.x2 !== undefined && decision.y2 !== undefined &&
+                decision.x !== undefined && decision.y !== undefined &&
+                (decision.action === 'capture' /* || decision.action === 'record' */)) {
+                const x1 = Math.round(decision.x);
+                const y1 = Math.round(decision.y);
+                const x2 = Math.round(decision.x2);
+                const y2 = Math.round(decision.y2);
+                const thickness = 2;
+
+                // Top and bottom edges
+                for (let x = x1; x <= x2; x++) {
+                    for (let dt = 0; dt < thickness; dt++) {
+                        if (x >= 0 && x < image.width) {
+                            if (y1 + dt >= 0 && y1 + dt < image.height) image.setPixelColor(RED, x, y1 + dt);
+                            if (y2 - dt >= 0 && y2 - dt < image.height) image.setPixelColor(RED, x, y2 - dt);
+                        }
+                    }
+                }
+                // Left and right edges
+                for (let y = y1; y <= y2; y++) {
+                    for (let dt = 0; dt < thickness; dt++) {
+                        if (y >= 0 && y < image.height) {
+                            if (x1 + dt >= 0 && x1 + dt < image.width) image.setPixelColor(RED, x1 + dt, y);
+                            if (x2 - dt >= 0 && x2 - dt < image.width) image.setPixelColor(RED, x2 - dt, y);
+                        }
+                    }
+                }
+            }
+
+            const buffer = await image.getBuffer('image/jpeg', { quality: 85 });
+            const filename = `turn_${String(this.decisionCount).padStart(3, '0')}_${decision.action}.jpg`;
+            fs.writeFileSync(path.join(outputDir, filename), buffer);
+        } catch (err) {
+            // Non-critical — don't break the main loop
+            console.warn(`  ⚠️ Debug screenshot save failed:`, err);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -812,16 +993,18 @@ export class VisionAgent {
         return new Promise(r => setTimeout(r, ms));
     }
 
+
     private formatAction(d: VisionAction): string {
         switch (d.action) {
-            case 'click': return `click(${d.x},${d.y})`;
+            case 'click': return `click([${d.element}])`;
             case 'scroll': return `scroll(${d.direction || 'down'})`;
             case 'capture': return d.x2 !== undefined ? `capture(${d.x},${d.y},${d.x2},${d.y2})` : 'capture';
+            // case 'record': return `record(${d.x},${d.y},${d.x2},${d.y2},${d.seconds || 10}s)`;  // VIDEO RECORDING DISABLED
             case 'type': return `type("${(d.text || '').slice(0, 20)}")`;
             case 'press': return `press(${d.key})`;
-            case 'hover': return `hover(${d.x},${d.y})`;
+            case 'hover': return `hover([${d.element}])`;
             case 'wait': return `wait(${d.seconds || 2}s)`;
-            case 'newtab': return `newtab(${d.x},${d.y})`;
+            case 'newtab': return `newtab([${d.element}])`;
             case 'closetab': return 'closetab';
             case 'done': return 'done';
             default: return d.action;
@@ -830,6 +1013,8 @@ export class VisionAgent {
 
     // Public getters for InstagramScraper session summary
     getCaptureCount(): number { return this.captureCount; }
+    // getRecordCount(): number { return this.recordCount; }  // VIDEO RECORDING DISABLED
+    getRecordCount(): number { return 0; }
     getDecisionCount(): number { return this.decisionCount; }
     getActionHistory(): ActionHistoryEntry[] { return [...this.actionHistory]; }
 }

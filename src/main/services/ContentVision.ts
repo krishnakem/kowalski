@@ -393,4 +393,9 @@ Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}
             return null;
         }
     }
+
+    /**
+     * VIDEO RECORDING DISABLED — extractVideoContent() commented out
+     */
+    // async extractVideoContent(frames: Buffer[]): Promise<ExtractionResult> { ... }
 }

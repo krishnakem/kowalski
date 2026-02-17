@@ -11,8 +11,6 @@ export interface DigestImage {
     filename: string;          // "1.jpg"
     source: 'feed' | 'story' | 'search' | 'profile' | 'carousel';
     interest?: string;         // For search results - which interest triggered this
-    postId?: string;           // Instagram post ID for embed rendering (e.g., "C1a2B3c4D5e")
-    permalink?: string;        // Full Instagram URL (e.g., "https://instagram.com/p/C1a2B3c4D5e/")
 }
 
 /**

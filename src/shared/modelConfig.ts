@@ -6,7 +6,7 @@
  */
 export const ModelConfig = {
     // Navigation decision loop — called every turn (44+ times per session)
-    // Needs: strong vision, instruction following, structured JSON output, LOW LATENCY
+    // Needs: strong vision, instruction following, structured JSON output
     navigation: process.env.KOWALSKI_NAV_MODEL || 'gpt-5-mini',
 
     // Content extraction from viewport screenshots — called per capture
@@ -19,9 +19,9 @@ export const ModelConfig = {
 
     // Batch digest generation — synthesize all captures into a digest
     // Needs: strong reasoning, long context (many captures), good writing
-    digest: process.env.KOWALSKI_DIGEST_MODEL || 'gpt-5.2',
+    digest: process.env.KOWALSKI_DIGEST_MODEL || 'gpt-5',
 
     // Analysis and insights generation
     // Needs: complex reasoning, pattern recognition, good writing
-    analysis: process.env.KOWALSKI_ANALYSIS_MODEL || 'gpt-5.2',
+    analysis: process.env.KOWALSKI_ANALYSIS_MODEL || 'gpt-5',
 } as const;

@@ -192,15 +192,22 @@ export interface CapturedPost {
     screenshot: Buffer;           // Raw JPEG image data
     source: CaptureSource;
     interest?: string;            // For search results - which interest triggered this
-    postId?: string;              // Instagram post ID (e.g., "C1a2B3c4D5e") for embed support
     timestamp: number;            // Unix timestamp of capture
     scrollPosition: number;       // Y scroll position for deduplication
+}
 
-    // Video frame tracking (for multi-frame sampling)
-    isVideoFrame?: boolean;       // True if this is a video frame capture
-    videoId?: string;             // Groups frames from same video (postId or generated)
-    frameIndex?: number;          // 1, 2, 3... for ordering frames
-    totalFrames?: number;         // Total frames captured for this video
+/**
+ * A recorded video clip (sampled frames from CDP screencast).
+ */
+export interface CapturedVideo {
+    id: number;
+    frames: Buffer[];             // Sampled JPEG frames from screencast
+    frameCount: number;           // Total frames collected before sampling
+    durationSeconds: number;      // Actual recording duration
+    source: CaptureSource;
+    interest?: string;
+    timestamp: number;
+    scrollPosition: number;
 }
 
 /**
@@ -208,8 +215,10 @@ export interface CapturedPost {
  */
 export interface BrowsingSession {
     captures: CapturedPost[];     // All captured screenshots
+    videos: CapturedVideo[];      // All recorded video clips
     sessionDuration: number;      // Total milliseconds
     captureCount: number;         // Number of screenshots taken
+    videoCount: number;           // Number of videos recorded
     scrapedAt: string;            // ISO timestamp
 }
 
