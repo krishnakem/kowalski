@@ -42652,7 +42652,7 @@ var ScreenshotCollector = class {
     this.page = page;
   }
   captures = [];
-  capturedVideos = [];
+  // private capturedVideos: CapturedVideo[] = [];  // VIDEO RECORDING DISABLED
   config;
   lastScrollPosition = 0;
   outputDir = null;
@@ -42843,58 +42843,26 @@ var ScreenshotCollector = class {
    */
   getMemoryUsage() {
     const captureBytes = this.captures.reduce((total, c2) => total + c2.screenshot.length, 0);
-    const videoBytes = this.capturedVideos.reduce((total, v) => v.frames.reduce((t2, f) => t2 + f.length, 0) + total, 0);
-    return captureBytes + videoBytes;
+    return captureBytes;
   }
   /**
    * Clear all captures and videos (call after processing to free memory).
    */
   clear() {
     this.captures = [];
-    this.capturedVideos = [];
     this.lastScrollPosition = 0;
     this.capturedHashes.clear();
     this.capturedPositions.clear();
     this.lastCaptureSource = "";
     console.log("\u{1F4F8} Collector cleared");
   }
-  /**
-   * Store a recorded video (sampled frames from CDP screencast).
-   * @returns The video ID.
-   */
-  storeVideoRecording(frames, totalFrameCount, durationSeconds, source, scrollPosition, interest) {
-    const id = this.capturedVideos.length + 1;
-    this.capturedVideos.push({
-      id,
-      frames,
-      frameCount: totalFrameCount,
-      durationSeconds,
-      source,
-      interest,
-      timestamp: Date.now(),
-      scrollPosition
-    });
-    const digestDir = this.getDigestDir();
-    if (digestDir && frames.length > 0) {
-      const filename = `V${id.toString().padStart(3, "0")}_${source}.jpg`;
-      const filepath = path3.join(digestDir, filename);
-      fs4.writeFileSync(filepath, frames[0]);
-      console.log(`  \u{1F4BE} Saved video thumbnail: digest/${filename}`);
-    }
-    console.log(`\u{1F3AC} Stored video #${id} (${source}, ${frames.length} frames, ${durationSeconds}s)`);
-    return id;
-  }
-  /**
-   * Get all recorded videos.
-   */
+  // VIDEO RECORDING DISABLED — storeVideoRecording(), getVideos(), getVideoCount() commented out
+  // storeVideoRecording(...): number { ... }
   getVideos() {
-    return this.capturedVideos;
+    return [];
   }
-  /**
-   * Get recorded video count.
-   */
   getVideoCount() {
-    return this.capturedVideos.length;
+    return 0;
   }
   /**
    * Get the current count of captured photos/screenshots.
@@ -43006,7 +42974,7 @@ var ScreenshotCollector = class {
     const memoryMB = (this.getMemoryUsage() / (1024 * 1024)).toFixed(2);
     console.log(`
 \u{1F4F8} Screenshot Collection Summary:`);
-    console.log(`   Total: ${this.captures.length} captures, ${this.capturedVideos.length} videos`);
+    console.log(`   Total: ${this.captures.length} captures`);
     console.log(`   Feed: ${breakdown.feed}, Stories: ${breakdown.story}, Search: ${breakdown.search}`);
     console.log(`   Memory: ${memoryMB}MB`);
     console.log("");
@@ -43057,8 +43025,7 @@ ACTIONS (pick one per turn):
   type(text)       Type text into the focused input. ONLY use for Search. Never for comments or DMs.
   press(key)       Press a key: Escape, Enter, ArrowRight, ArrowLeft, Backspace, Tab.
   hover(n)         Move mouse to element [n] without clicking. Use to reveal hover-triggered UI (carousel arrows).
-  capture(x1, y1, x2, y2)  Capture a cropped region for the content digest. (x1,y1) = top-left, (x2,y2) = bottom-right in screenshot pixel coordinates. The screenshot is {{SCREENSHOT_WIDTH}}x{{SCREENSHOT_HEIGHT}} pixels. Always crop to JUST the content \u2014 for post modals: the left side (image + caption), for stories: the center story only. Exclude sidebars, comments, other story previews, and navigation. Use for STATIC images only \u2014 use record() for videos.
-  record(x1, y1, x2, y2, seconds)  Record a playing video for the specified duration (5-30s). Use INSTEAD of capture when you see a video/reel playing. Crop coordinates work the same as capture. The system records frames automatically for analysis.
+  capture(x1, y1, x2, y2)  Capture a cropped region for the content digest. (x1,y1) = top-left, (x2,y2) = bottom-right in screenshot pixel coordinates. The screenshot is {{SCREENSHOT_WIDTH}}x{{SCREENSHOT_HEIGHT}} pixels. Always crop to JUST the content \u2014 for post modals: the left side (image + caption), for stories: the center story only. Exclude sidebars, comments, other story previews, and navigation.
   wait(seconds)    Wait 1-5 seconds for content to load.
   newtab(n)        Open the link at element [n] in a new tab and switch to it. Use for search results and account links so you can easily return.
   closetab         Close the current tab and switch back to the previous one. Use when done browsing a search result or account page.
@@ -43139,14 +43106,6 @@ WHAT TO CAPTURE
 - Do NOT capture the feed viewport, profile grids, or search results \u2014 these show multiple items partially, not useful for the digest.
 - NEVER capture if you see the normal feed scroll (white background, multiple posts, story row at top). That means no modal is open.
 
-VIDEO DETECTION
-- If you see a video playing (no static play button overlay, video progress bar/timeline visible, reel indicators, or animated content), use record() INSTEAD of capture().
-- Common indicators: no large play button visible on the content, a video timeline/progress bar at the bottom of the media, the "Reels" label or reel icon, sound/mute toggle visible.
-- If you see a PAUSED video (large play button overlay in the center), click it first to start playback, then use record() on the next turn once it's playing.
-- After recording, move on immediately. Instagram auto-loops videos \u2014 do NOT record the same video twice. Check your RECENT HISTORY; if you see a previous "record \u2192 recorded..." for the same content, skip it.
-- Use the same crop coordinates you would for capture \u2014 crop to just the video content area.
-- Set "seconds" based on what you see: short clips/stories \u2192 10s, longer reels \u2192 15-20s. Default to 10 if unsure.
-
 SAFETY \u2014 HARD RULES
 - NEVER click Like, Follow, Share, or Save buttons. These elements are excluded from the label list, but if you somehow see one, do NOT click it.
 - NEVER type in comment boxes, reply fields, or direct message inputs.
@@ -43193,20 +43152,6 @@ For capture/record (still uses pixel coordinates for crop region):
   "phase": "posts",
   "source": "feed",
   "memory": "Captured: NBA post. Plan: press Escape, find next post."
-}
-
-For videos, use record instead of capture:
-{
-  "thinking": "This post is a video/reel playing \u2014 I'll record it instead of capturing a static frame",
-  "action": "record",
-  "x": 100,
-  "y": 50,
-  "x2": 600,
-  "y2": 800,
-  "seconds": 15,
-  "phase": "posts",
-  "source": "feed",
-  "memory": "Recorded video reel from @creator. Moving to next post."
 }
 
 For hover (uses element number):
@@ -43519,9 +43464,8 @@ var VisionAgent = class {
   lastTokenUsage = null;
   // Session state
   captureCount = 0;
-  recordCount = 0;
-  recordedVideoHashes = /* @__PURE__ */ new Set();
-  // First-frame dedup for video loops
+  // private recordCount: number = 0;  // VIDEO RECORDING DISABLED
+  // private recordedVideoHashes: Set<string> = new Set();
   startTime = 0;
   // Reference example images organized by phase folder (Posts, Search, Stories)
   referenceImagesByPhase = null;
@@ -43640,7 +43584,7 @@ var VisionAgent = class {
     this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions`);
     return {
       captureCount: this.captureCount,
-      recordCount: this.recordCount,
+      // recordCount: this.recordCount,  // VIDEO RECORDING DISABLED
       decisionCount: this.decisionCount,
       actionHistory: [...this.actionHistory]
     };
@@ -43692,8 +43636,7 @@ var VisionAgent = class {
         return this.executeScroll(decision);
       case "capture":
         return this.executeCapture(decision);
-      case "record":
-        return this.executeRecord(decision);
+      // case 'record': return this.executeRecord(decision);  // VIDEO RECORDING DISABLED
       case "type":
         return this.executeType(decision);
       case "press":
@@ -43774,101 +43717,8 @@ var VisionAgent = class {
     this.collector.appendLog(`\u{1F4F7} \u274C capture rejected (duplicate)`);
     return `capture rejected \u2014 duplicate content. Move on to the next post.`;
   }
-  async executeRecord(d) {
-    if (d.x === void 0 || d.y === void 0 || d.x2 === void 0 || d.y2 === void 0) {
-      return "missing crop coordinates \u2014 record requires x, y, x2, y2";
-    }
-    const source = this.inferCaptureSource(d);
-    const seconds = Math.max(5, Math.min(30, d.seconds || 10));
-    const topLeft = this.scaleToViewport(d.x, d.y);
-    const bottomRight = this.scaleToViewport(d.x2, d.y2);
-    const clipWidth = bottomRight.x - topLeft.x;
-    const clipHeight = bottomRight.y - topLeft.y;
-    if (clipWidth <= 50 || clipHeight <= 50) {
-      return "crop region too small for recording";
-    }
-    const clip = { x: topLeft.x, y: topLeft.y, width: clipWidth, height: clipHeight };
-    console.log(`  \u{1F3AC} record: crop screenshot(${d.x},${d.y})\u2192(${d.x2},${d.y2}) \u2192 viewport clip(${Math.round(clip.x)},${Math.round(clip.y)},${Math.round(clipWidth)}x${Math.round(clipHeight)}), ${seconds}s`);
-    this.collector.appendLog(`\u{1F3AC} record: crop screenshot(${d.x},${d.y})\u2192(${d.x2},${d.y2}) \u2192 viewport clip(${Math.round(clip.x)},${Math.round(clip.y)},${Math.round(clipWidth)}x${Math.round(clipHeight)}), ${seconds}s`);
-    try {
-      const firstFrame = await this.page.screenshot({ type: "jpeg", quality: 80, clip });
-      const hash = await this.collector.computePerceptualHash(firstFrame);
-      for (const existing of this.recordedVideoHashes) {
-        let distance3 = 0;
-        if (hash.length === existing.length) {
-          for (let i = 0; i < hash.length; i++) {
-            let xor = parseInt(hash[i], 16) ^ parseInt(existing[i], 16);
-            while (xor) {
-              distance3 += xor & 1;
-              xor >>= 1;
-            }
-          }
-        } else {
-          distance3 = 64;
-        }
-        if (distance3 <= 5) {
-          console.log(`  \u{1F3AC} \u274C record rejected (already recorded this video, hash distance=${distance3})`);
-          this.collector.appendLog(`\u{1F3AC} \u274C record rejected (already recorded this video)`);
-          return "record rejected \u2014 already recorded this video. Move on.";
-        }
-      }
-      const frames = [];
-      const cdpSession = await this.page.context().newCDPSession(this.page);
-      try {
-        cdpSession.on("Page.screencastFrame", (params) => {
-          frames.push(Buffer.from(params.data, "base64"));
-          cdpSession.send("Page.screencastFrameAck", { sessionId: params.sessionId }).catch(() => {
-          });
-        });
-        await cdpSession.send("Page.startScreencast", {
-          format: "jpeg",
-          quality: 80,
-          maxWidth: 1280
-        });
-        console.log(`  \u{1F3AC} recording for ${seconds}s...`);
-        await this.delay(seconds * 1e3);
-        await cdpSession.send("Page.stopScreencast");
-      } finally {
-        await cdpSession.detach().catch(() => {
-        });
-      }
-      if (frames.length === 0) {
-        console.log(`  \u{1F3AC} \u274C record failed \u2014 no frames captured`);
-        this.collector.appendLog(`\u{1F3AC} \u274C record failed \u2014 no frames captured`);
-        return "record failed \u2014 no frames captured";
-      }
-      const croppedFrames = [];
-      for (const frame of frames) {
-        try {
-          const img = await Jimp.read(frame);
-          img.crop({ x: Math.round(clip.x), y: Math.round(clip.y), w: Math.round(clipWidth), h: Math.round(clipHeight) });
-          const buf = await img.getBuffer("image/jpeg", { quality: 80 });
-          croppedFrames.push(buf);
-        } catch {
-        }
-      }
-      if (croppedFrames.length === 0) {
-        console.log(`  \u{1F3AC} \u274C record failed \u2014 all frames failed to crop`);
-        this.collector.appendLog(`\u{1F3AC} \u274C record failed \u2014 all frames failed to crop`);
-        return "record failed \u2014 frame processing error";
-      }
-      const sampleCount = Math.min(12, croppedFrames.length);
-      const stride = Math.max(1, Math.floor(croppedFrames.length / sampleCount));
-      const sampledFrames = croppedFrames.filter((_, i) => i % stride === 0).slice(0, sampleCount);
-      const scrollPosition = await this.collector.getScrollPosition();
-      this.collector.storeVideoRecording(sampledFrames, frames.length, seconds, source, scrollPosition);
-      this.recordedVideoHashes.add(hash);
-      this.recordCount++;
-      const result = `recorded ${seconds}s video, ${sampledFrames.length} frames (source=${source})`;
-      console.log(`  \u{1F3AC} \u2705 ${result}`);
-      this.collector.appendLog(`\u{1F3AC} \u2705 ${result}`);
-      return result;
-    } catch (error) {
-      console.error(`  \u{1F3AC} \u274C record error:`, error);
-      this.collector.appendLog(`\u{1F3AC} \u274C record error: ${error}`);
-      return "record failed \u2014 error during recording";
-    }
-  }
+  // VIDEO RECORDING DISABLED — executeRecord() commented out
+  // private async executeRecord(d: VisionAction): Promise<string> { ... }
   async executeType(d) {
     if (!d.text) return "no text provided";
     const context = await this.getFocusedInputContext();
@@ -44212,9 +44062,6 @@ var VisionAgent = class {
       parts.push(`TAB: You are in a NEW TAB (opened via newtab). Use closetab to return to the main tab when done here. Do NOT navigate away \u2014 use closetab.`);
     }
     parts.push(`CAPTURES: ${this.captureCount} screenshots taken`);
-    if (this.recordCount > 0) {
-      parts.push(`RECORDINGS: ${this.recordCount} videos recorded`);
-    }
     if (this.config.userInterests.length > 0) {
       parts.push(`INTERESTS TO SEARCH: ${this.config.userInterests.join(", ")}`);
     }
@@ -44303,7 +44150,7 @@ ${this.lastMemory}`);
           }
         }
       }
-      if (decision.x2 !== void 0 && decision.y2 !== void 0 && decision.x !== void 0 && decision.y !== void 0 && (decision.action === "capture" || decision.action === "record")) {
+      if (decision.x2 !== void 0 && decision.y2 !== void 0 && decision.x !== void 0 && decision.y !== void 0 && decision.action === "capture") {
         const x1 = Math.round(decision.x);
         const y1 = Math.round(decision.y);
         const x2 = Math.round(decision.x2);
@@ -44347,8 +44194,7 @@ ${this.lastMemory}`);
         return `scroll(${d.direction || "down"})`;
       case "capture":
         return d.x2 !== void 0 ? `capture(${d.x},${d.y},${d.x2},${d.y2})` : "capture";
-      case "record":
-        return `record(${d.x},${d.y},${d.x2},${d.y2},${d.seconds || 10}s)`;
+      // case 'record': return `record(${d.x},${d.y},${d.x2},${d.y2},${d.seconds || 10}s)`;  // VIDEO RECORDING DISABLED
       case "type":
         return `type("${(d.text || "").slice(0, 20)}")`;
       case "press":
@@ -44371,8 +44217,9 @@ ${this.lastMemory}`);
   getCaptureCount() {
     return this.captureCount;
   }
+  // getRecordCount(): number { return this.recordCount; }  // VIDEO RECORDING DISABLED
   getRecordCount() {
-    return this.recordCount;
+    return 0;
   }
   getDecisionCount() {
     return this.decisionCount;
@@ -44584,9 +44431,14 @@ var InstagramScraper = class {
       }
       const vp = this.page.viewportSize();
       if (vp) {
-        const cx = Math.round(vp.width * (0.4 + Math.random() * 0.2));
-        const cy = Math.round(vp.height * (0.3 + Math.random() * 0.4));
-        await this.page.mouse.move(cx, cy);
+        await this.ghost.hover(
+          { x: vp.width * (0.35 + Math.random() * 0.3), y: vp.height * (0.2 + Math.random() * 0.3) },
+          300 + Math.random() * 400
+        );
+        await this.ghost.hover(
+          { x: vp.width * (0.4 + Math.random() * 0.2), y: vp.height * (0.4 + Math.random() * 0.3) },
+          200 + Math.random() * 300
+        );
       }
       console.log("\n\u{1F441}\uFE0F  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
       console.log("\u{1F441}\uFE0F  VISION AGENT MODE ACTIVE");
@@ -44623,7 +44475,6 @@ var InstagramScraper = class {
 ## Summary`);
       this.screenshotCollector.appendLogRaw(`- **Decisions:** ${result.decisionCount}`);
       this.screenshotCollector.appendLogRaw(`- **Captures:** ${result.captureCount}`);
-      this.screenshotCollector.appendLogRaw(`- **Video recordings:** ${result.recordCount}`);
       this.screenshotCollector.appendLogRaw(`- **Duration:** ${((Date.now() - startTime) / 1e3 / 60).toFixed(1)} minutes`);
       this.screenshotCollector.flushSessionLog();
       const capturesPerInterest = Math.round(result.captureCount / Math.max(userInterests.length, 1));
@@ -44661,16 +44512,17 @@ var InstagramScraper = class {
         console.log(`   - Decisions: ${visionAgent.getDecisionCount()}`);
       }
       console.log(`   - Captures: ${this.screenshotCollector.getCaptureCount()}`);
-      console.log(`   - Video recordings: ${this.screenshotCollector.getVideoCount()}`);
       this.screenshotCollector.logSummary();
       await this.page.close();
     }
     return {
       captures: this.screenshotCollector.getCaptures(),
-      videos: this.screenshotCollector.getVideos(),
+      videos: [],
+      // VIDEO RECORDING DISABLED
       sessionDuration: Date.now() - startTime,
       captureCount: this.screenshotCollector.getCaptureCount(),
-      videoCount: this.screenshotCollector.getVideoCount(),
+      videoCount: 0,
+      // VIDEO RECORDING DISABLED
       scrapedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
   }

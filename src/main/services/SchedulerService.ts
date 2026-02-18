@@ -3,7 +3,6 @@ import { app, BrowserWindow, powerMonitor, powerSaveBlocker } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
-import { LoremIpsumGenerator } from './LoremIpsumGenerator.js';
 import { v4 as uuidv4 } from 'uuid';
 import { ActiveSchedule } from '../../types/schedule.js';
 import { BrowserManager } from './BrowserManager.js';
