@@ -215,6 +215,7 @@ export class VisionAgent {
             if (decision.memory) {
                 this.lastMemory = decision.memory;
             }
+            let phaseChangeDeferred = false;
             if (decision.phase) {
                 const phaseMap: Record<string, string> = { posts: 'Posts', search: 'Search', stories: 'Stories' };
                 const folder = phaseMap[decision.phase];
@@ -227,11 +228,27 @@ export class VisionAgent {
                         this.collector.appendLog(`📂 Starting phase: ${folder}`);
                     }
                     this.lastDeclaredPhase = folder;
+
+                    // If reference images for the new phase haven't been sent yet,
+                    // defer this turn's action so the LLM sees the images first
+                    const allPhaseImages = this.loadReferenceImagesByPhase();
+                    const hasUnsentImages = !this.sentPhases.has(folder) &&
+                        (allPhaseImages.get(folder)?.length ?? 0) > 0;
+                    if (hasUnsentImages) {
+                        phaseChangeDeferred = true;
+                        console.log(`  📎 Deferring action — loading ${folder} reference images first`);
+                        this.collector.appendLog(`📎 Deferring action — loading ${folder} reference images first`);
+                    }
                 }
             }
 
-            // 5. Execute action
-            const result = await this.executeAction(decision);
+            // 5. Execute action (or defer if phase just changed and images need loading)
+            let result: string;
+            if (phaseChangeDeferred) {
+                result = `Phase changed to ${this.lastDeclaredPhase!.toLowerCase()}. Reference images loading — review them on the next turn and then act.`;
+            } else {
+                result = await this.executeAction(decision);
+            }
             console.log(`     → ${result}`);
 
             // 6. Record to history
@@ -784,20 +801,42 @@ export class VisionAgent {
             }
 
             // Subdirectories → one group per folder name (Posts, Search, Stories)
+            // Recurses one level deeper for sub-flows (e.g. Search/search.results/)
             const subdirs = fs.readdirSync(examplesDir)
                 .filter(f => fs.statSync(path.join(examplesDir, f)).isDirectory())
                 .sort();
             for (const dir of subdirs) {
                 const dirPath = path.join(examplesDir, dir);
+                const phaseImages: Array<{ label: string; base64: string }> = [];
+
+                // Direct images in this phase folder
                 const files = fs.readdirSync(dirPath)
                     .filter(f => imagePattern.test(f))
                     .sort();
-                if (files.length > 0) {
-                    const phaseImages: Array<{ label: string; base64: string }> = [];
-                    for (const file of files) {
-                        phaseImages.push({ label: `${dir} - ${cleanName(file)}`, base64: readImageBase64(path.join(dirPath, file)) });
-                        loaded.push(path.join(dir, file));
+                for (const file of files) {
+                    phaseImages.push({ label: `${dir} - ${cleanName(file)}`, base64: readImageBase64(path.join(dirPath, file)) });
+                    loaded.push(path.join(dir, file));
+                }
+
+                // Nested subdirectories (sub-flows, e.g. search.results/, search.account/)
+                const nestedDirs = fs.readdirSync(dirPath)
+                    .filter(f => fs.statSync(path.join(dirPath, f)).isDirectory())
+                    .sort();
+                for (const subdir of nestedDirs) {
+                    const subdirPath = path.join(dirPath, subdir);
+                    const nestedFiles = fs.readdirSync(subdirPath)
+                        .filter(f => imagePattern.test(f))
+                        .sort();
+                    for (const file of nestedFiles) {
+                        phaseImages.push({
+                            label: `${dir} - ${cleanName(subdir)} - ${cleanName(file)}`,
+                            base64: readImageBase64(path.join(subdirPath, file))
+                        });
+                        loaded.push(path.join(dir, subdir, file));
                     }
+                }
+
+                if (phaseImages.length > 0) {
                     this.referenceImagesByPhase.set(dir, phaseImages);
                 }
             }

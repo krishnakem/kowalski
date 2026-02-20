@@ -43027,8 +43027,8 @@ ACTIONS (pick one per turn):
   hover(n)         Move mouse to element [n] without clicking. Use to reveal hover-triggered UI (carousel arrows).
   capture(x1, y1, x2, y2)  Capture a cropped region for the content digest. (x1,y1) = top-left, (x2,y2) = bottom-right in screenshot pixel coordinates. The screenshot is {{SCREENSHOT_WIDTH}}x{{SCREENSHOT_HEIGHT}} pixels. Always crop to JUST the content \u2014 for post modals: the left side (image + caption), for stories: the center story only. Exclude sidebars, comments, other story previews, and navigation.
   wait(seconds)    Wait 1-5 seconds for content to load.
-  newtab(n)        Open the link at element [n] in a new tab and switch to it. Use for search results and account links so you can easily return.
-  closetab         Close the current tab and switch back to the previous one. Use when done browsing a search result or account page.
+  newtab(n)        Open the link at element [n] in a new tab and switch to it.
+  closetab         Close the current tab and switch back to the previous one.
   done             End the browsing session.
 
 MISSION
@@ -43038,10 +43038,10 @@ ONLY these three activities are allowed. Do NOT navigate to Explore, Reels, or a
 
 STRATEGY
 - Aim for a steady pace of captures. If 30+ seconds pass with no capture, actively seek something to capture.
-- To SEARCH for an interest: click the magnifying glass in the left sidebar (find its label number), type in the search field, then use newtab() to open results in a new tab. When done with that result, use closetab to return. Do NOT use Messages, DMs, or any other input.
+- To SEARCH for an interest: click the magnifying glass in the left sidebar (find its label number), type in the search field, then click on a search term or account to browse. When done, click the magnifying glass again to start a new search. Do NOT use Messages, DMs, or any other input.
 - After capturing a post, press Escape to close the modal, then scroll or click to find the next one.
 - When opening a post from the feed, click the TIMESTAMP next to the username (e.g. "8m", "2h", "1d"). Find its label number in the LABELED ELEMENTS list \u2014 it will be an \`a\` tag with text like "6h" or "2d".
-- Use newtab(n) instead of click(n) when opening search results or account pages \u2014 this lets you closetab to return cleanly to the search results without losing your place.
+- After browsing a search term grid or account profile, click the magnifying glass in the sidebar to return to search and start a new query.
 - When selecting stories, posts, or search results from a list, ALWAYS click the LEFTMOST or TOPMOST item first. Check the LABELED ELEMENTS list to find the lowest-numbered label in that group. Do not evaluate or scan the list \u2014 just click the first position. Then work forward sequentially.
 
 REFERENCE IMAGES
@@ -43058,7 +43058,7 @@ Color coding in the reference images:
 - BLUE box = a utility button to interact with before the main action (e.g. pause button)
 - PINK box = elements you should NOT click
 
-The images are grouped by task and show step-by-step flows:
+The images are grouped by task and show step-by-step flows. Some flows (like Search) branch into sub-flows with their own step sequences:
 
 GOING HOME: How to navigate back to the home feed \u2014 click the Instagram logo in the top-left corner of the sidebar (highlighted in red).
 
@@ -43073,13 +43073,24 @@ STORIES (story interaction flow):
 3. Once paused, capture the current story content (the center content area, highlighted in red). Crop to just the story \u2014 exclude the dark overlay, side previews, and navigation.
 4. After capturing, click the right arrow (orange box) to advance to the next story. The next story will start playing \u2014 pause it again immediately.
 5. Repeat: pause \u2192 capture \u2192 advance for every story until you reach the last one. Do NOT click elements in pink boxes. Do not skip stories \u2014 capture every one.
+6. After the last story, click the X button (top-right corner) to exit the story viewer and return to the feed.
 
 SEARCH (search interaction flow):
 1. Click the magnifying glass icon in the left sidebar (highlighted in red) to open search.
 2. Type your interest in the search field (highlighted in red). Search one interest at a time \u2014 do not type multiple interests at once. Make sure you are in the search pane, NOT messages or any other input.
-3. Search results appear as a list. Use newtab(n) to open the FIRST (topmost) result in a new tab \u2014 this preserves your search results so you can return easily. Always start from the top of the list; do not skip the first result.
-4. From search results grid (in the new tab): click on any post thumbnail (highlighted in red) to open its modal. Capture the modal content (red box), then click the X (orange box) to close and return to the grid. Repeat for several posts. When done, use closetab to return to the search panel.
-5. From an account profile (in the new tab): click on any post thumbnail (highlighted in red) to open its modal. Same flow \u2014 capture (red box), close (orange box), repeat. When done, use closetab to return to the search panel.
+3. Search results appear as two types: broad search terms (red boxes) and individual accounts (orange boxes). For accounts, prioritize official accounts with blue checkmarks. If there is no official account, click the top search results instead. Click at minimum the top search term and the top account.
+
+If you opened a SEARCH TERM (search results grid):
+4a. You'll see a grid of post thumbnails. Click on a post (highlighted in red) to open its modal.
+5a. Capture the modal content (red box), then click the X (orange box) to close and return to the grid. Repeat for several posts.
+6a. When done, click the magnifying glass in the sidebar to return to search. Start a new search for a different interest \u2014 do not re-search the same query.
+
+If you opened an ACCOUNT profile:
+4b. You'll see the account's profile page with a grid of posts. Click on a post (highlighted in red) to open its modal.
+5b. Capture the modal content (red box), then click the X (orange box) to close and return to the profile grid. Repeat for several posts.
+6b. When done, click the magnifying glass in the sidebar to return to search. Start a new search for a different interest \u2014 do not re-search the same account.
+
+ENDING SEARCH: Once you have searched all the interests listed in INTERESTS TO SEARCH (and reasonable variations/related terms), the search phase is complete. Switch back to feed browsing or stories \u2014 do not keep searching for the same topics.
 
 Use these reference images to understand the UI layout and workflow. Focus on the annotated positions and patterns \u2014 not the specific content shown. When you encounter similar UI states, replicate the same positional targets (e.g. "leftmost avatar" not "this specific account").
 
@@ -43087,11 +43098,11 @@ HOW INSTAGRAM WORKS
 - The HOME FEED shows posts in a vertical scroll. Each post has: a header (profile pic + username + timestamp), the post image/video, and engagement buttons below.
 - Clicking a post's IMAGE opens it as a detail modal (full image + caption + comments). This is what you want to capture.
 - Clicking a USERNAME navigates to that user's profile page (grid of thumbnails). This is NOT a post detail \u2014 don't capture the grid.
-- Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image. Pressing ArrowRight advances to the next slide.
-- STORY CIRCLES appear at the top of the feed. Clicking one enters full-screen story viewing. Press ArrowRight or click the right side to advance.
+- Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image and a right arrow on the image. Click the right arrow to advance to the next slide.
+- STORY CIRCLES appear at the top of the feed. Clicking one enters full-screen story viewing. Click the right arrow to advance to the next story.
 - The STORY VIEWER has a distinctive look: dark/black background filling the entire screen, with one story displayed large in the center. You'll see small story preview circles at the top and the username overlaid on the story. If after clicking a story avatar you still see the white feed with multiple posts, the story did NOT open \u2014 try clicking the avatar again or try a different story avatar.
 - The LEFT SIDEBAR has navigation: Home, Search (magnifying glass), Explore, Reels, Messages, etc. You should ONLY use Home and Search from this sidebar. NEVER click Explore, Reels, or Messages.
-- SEARCH: Click the magnifying glass icon in the left sidebar to open search. A search input will appear \u2014 type your query there. Use newtab() to open results in a new tab, browse and capture posts, then closetab to return to search.
+- SEARCH: Click the magnifying glass icon in the left sidebar to open search. A search input will appear \u2014 type your query there. Results show search terms and accounts. Click either type to browse and capture posts, then click the magnifying glass again to return to search.
 - Pressing ESCAPE closes modals and overlays, returning you to the previous view.
 - The MESSAGES/DMs icon is also in the sidebar \u2014 do NOT click it. You have no reason to go there.
 
@@ -43099,7 +43110,7 @@ WHAT TO CAPTURE
 - VERIFY BEFORE CAPTURING: Before EVERY capture/record, look at the CURRENT screenshot and confirm you are in the correct view. Do NOT assume your previous click worked \u2014 check what you actually see NOW.
   - For feed posts: you MUST see a POST MODAL \u2014 a dark overlay with the post image enlarged in the center and a comments panel on the right. If you still see the normal scrolling feed (white background, multiple posts visible, story circles at top), the modal did NOT open. Do NOT capture \u2014 click the post again or try a different target.
   - For stories: you MUST see the STORY VIEWER \u2014 a full-screen dark/black background with a single story image/video in the center. If you still see the normal feed layout, the story did NOT open. Do NOT capture. Always pause the story before capturing.
-  - For search: you MUST see a post modal (same as feed) opened from a search result grid.
+  - For search: you MUST see a post modal (same as feed) opened from a search result grid or account profile.
 - Capture post detail pages (the modal showing a single post full-size). Crop to the LEFT side of the modal only (image + caption). Exclude the comments panel on the right.
 - Capture story frames. Crop to the CENTER story content only. Exclude the small story previews on the left and right sides, and the dark overlay.
 - Always provide crop coordinates (x1, y1, x2, y2) to capture just the content area \u2014 never capture the full viewport.
@@ -43550,6 +43561,7 @@ var VisionAgent = class {
       if (decision.memory) {
         this.lastMemory = decision.memory;
       }
+      let phaseChangeDeferred = false;
       if (decision.phase) {
         const phaseMap = { posts: "Posts", search: "Search", stories: "Stories" };
         const folder = phaseMap[decision.phase];
@@ -43562,9 +43574,21 @@ var VisionAgent = class {
             this.collector.appendLog(`\u{1F4C2} Starting phase: ${folder}`);
           }
           this.lastDeclaredPhase = folder;
+          const allPhaseImages = this.loadReferenceImagesByPhase();
+          const hasUnsentImages = !this.sentPhases.has(folder) && (allPhaseImages.get(folder)?.length ?? 0) > 0;
+          if (hasUnsentImages) {
+            phaseChangeDeferred = true;
+            console.log(`  \u{1F4CE} Deferring action \u2014 loading ${folder} reference images first`);
+            this.collector.appendLog(`\u{1F4CE} Deferring action \u2014 loading ${folder} reference images first`);
+          }
         }
       }
-      const result = await this.executeAction(decision);
+      let result;
+      if (phaseChangeDeferred) {
+        result = `Phase changed to ${this.lastDeclaredPhase.toLowerCase()}. Reference images loading \u2014 review them on the next turn and then act.`;
+      } else {
+        result = await this.executeAction(decision);
+      }
       console.log(`     \u2192 ${result}`);
       this.actionHistory.push({
         action: this.formatAction(decision),
@@ -44028,13 +44052,25 @@ var VisionAgent = class {
       const subdirs = import_fs5.default.readdirSync(examplesDir).filter((f) => import_fs5.default.statSync(import_path3.default.join(examplesDir, f)).isDirectory()).sort();
       for (const dir of subdirs) {
         const dirPath = import_path3.default.join(examplesDir, dir);
+        const phaseImages = [];
         const files = import_fs5.default.readdirSync(dirPath).filter((f) => imagePattern.test(f)).sort();
-        if (files.length > 0) {
-          const phaseImages = [];
-          for (const file of files) {
-            phaseImages.push({ label: `${dir} - ${cleanName(file)}`, base64: readImageBase64(import_path3.default.join(dirPath, file)) });
-            loaded.push(import_path3.default.join(dir, file));
+        for (const file of files) {
+          phaseImages.push({ label: `${dir} - ${cleanName(file)}`, base64: readImageBase64(import_path3.default.join(dirPath, file)) });
+          loaded.push(import_path3.default.join(dir, file));
+        }
+        const nestedDirs = import_fs5.default.readdirSync(dirPath).filter((f) => import_fs5.default.statSync(import_path3.default.join(dirPath, f)).isDirectory()).sort();
+        for (const subdir of nestedDirs) {
+          const subdirPath = import_path3.default.join(dirPath, subdir);
+          const nestedFiles = import_fs5.default.readdirSync(subdirPath).filter((f) => imagePattern.test(f)).sort();
+          for (const file of nestedFiles) {
+            phaseImages.push({
+              label: `${dir} - ${cleanName(subdir)} - ${cleanName(file)}`,
+              base64: readImageBase64(import_path3.default.join(subdirPath, file))
+            });
+            loaded.push(import_path3.default.join(dir, subdir, file));
           }
+        }
+        if (phaseImages.length > 0) {
           this.referenceImagesByPhase.set(dir, phaseImages);
         }
       }
