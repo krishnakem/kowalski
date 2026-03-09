@@ -18,7 +18,7 @@ import { ModelConfig } from '../../shared/modelConfig.js';
 
 // Token management constants
 const MAX_CAPTION_LENGTH = 280;  // Tweet-length limit per caption
-const MAX_TOTAL_CONTENT_CHARS = 8000;  // Safe for GPT-4 context
+const MAX_TOTAL_CONTENT_CHARS = 8000;  // Safe for Claude context
 
 export class AnalysisGenerator {
     private apiKey: string;
@@ -42,7 +42,7 @@ export class AnalysisGenerator {
         // 1. Prepare content summary for LLM (with truncation)
         const contentSummary = this.prepareContentSummary(session);
 
-        // 2. Generate analysis via GPT-4
+        // 2. Generate analysis via Claude
         const analysis = await this.callGenerationAPI(contentSummary, config);
 
         // 3. Enrich with metadata
@@ -167,7 +167,7 @@ ${posts.join('\n\n')}`;
     }
 
     /**
-     * Call GPT-4 to generate the newspaper-style analysis.
+     * Call Claude to generate the newspaper-style analysis.
      * Uses Smart Brevity format with bullet points and insider context.
      */
     private async callGenerationAPI(
@@ -306,19 +306,19 @@ Return valid JSON:
     ]
 }`;
 
-        console.log('🤖 Generating analysis with GPT-4...');
+        console.log('🤖 Generating analysis with Claude...');
 
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`
+                'x-api-key': this.apiKey,
+                'anthropic-version': '2023-06-01'
             },
             body: JSON.stringify({
                 model: ModelConfig.analysis,
                 messages: [{ role: 'user', content: prompt }],
-                max_completion_tokens: 16384,
-                response_format: { type: 'json_object' }
+                max_tokens: 16384
             })
         });
 
@@ -333,15 +333,12 @@ Return valid JSON:
         // Track usage
         if (data.usage) {
             await this.usageService.incrementUsage(data.usage);
-            console.log(`💰 Generation cost tracked: ${data.usage.total_tokens} tokens`);
+            const totalTokens = (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
+            console.log(`💰 Generation cost tracked: ${totalTokens} tokens`);
         }
 
-        const rawContent = data.choices[0]?.message?.content;
-        const content = typeof rawContent === 'string'
-            ? rawContent
-            : Array.isArray(rawContent)
-                ? rawContent.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
-                : '';
+        const contentBlocks = data.content as Array<{ type: string; text?: string }> | undefined;
+        const content = contentBlocks?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') || '';
 
         if (!content) {
             throw new Error('GENERATION_FAILED');

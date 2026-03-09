@@ -19,7 +19,6 @@ import { ScreenshotCollector } from './ScreenshotCollector.js';
 import { VisionAgent } from './VisionAgent.js';
 import { SessionMemory } from './SessionMemory.js';
 import * as path from 'path';
-import * as os from 'os';
 import { BrowsingSession } from '../../types/instagram.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
 import type { NavigationLoopConfig } from '../../types/navigation.js';
@@ -28,7 +27,6 @@ import type { SessionSummary } from '../../types/session-memory.js';
 export class InstagramScraper {
     private context: BrowserContext;
     private apiKey: string;
-    private usageCap: number;
     private usageService: UsageService;
     private debugMode: boolean;
 
@@ -41,10 +39,9 @@ export class InstagramScraper {
     private sessionMemory: SessionMemory = new SessionMemory();
     private activeVisionAgent: VisionAgent | null = null;
 
-    constructor(context: BrowserContext, apiKey: string, usageCap: number, debugMode: boolean = false) {
+    constructor(context: BrowserContext, apiKey: string, debugMode: boolean = false) {
         this.context = context;
         this.apiKey = apiKey;
-        this.usageCap = usageCap;
         this.usageService = UsageService.getInstance();
         this.debugMode = debugMode;
     }
@@ -93,7 +90,7 @@ export class InstagramScraper {
             maxCaptures: estimatedMaxCaptures,
             jpegQuality: 85,
             minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.10),
-            saveToDirectory: path.join(os.homedir(), 'Documents', 'debug-screenshots')
+            saveToDirectory: path.join(__dirname, '../../debug-screenshots')
         });
 
         let visionAgent: VisionAgent | undefined;

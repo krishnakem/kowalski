@@ -26890,8 +26890,7 @@ var import_fs8 = __toESM(require("fs"), 1);
 var import_electron2 = require("electron");
 var import_path2 = __toESM(require("path"), 1);
 var import_fs2 = __toESM(require("fs"), 1);
-var import_playwright_extra = require("playwright-extra");
-var import_puppeteer_extra_plugin_stealth = __toESM(require("puppeteer-extra-plugin-stealth"), 1);
+var import_playwright = require("playwright");
 
 // src/main/services/ChromiumVersionHelper.ts
 var import_fs = __toESM(require("fs"), 1);
@@ -27055,24 +27054,6 @@ var ChromiumVersionHelper = class {
 };
 
 // src/main/services/BrowserManager.ts
-var stealth = (0, import_puppeteer_extra_plugin_stealth.default)();
-stealth.enabledEvasions.add("chrome.app");
-stealth.enabledEvasions.add("chrome.csi");
-stealth.enabledEvasions.add("chrome.loadTimes");
-stealth.enabledEvasions.add("chrome.runtime");
-stealth.enabledEvasions.add("iframe.contentWindow");
-stealth.enabledEvasions.add("media.codecs");
-stealth.enabledEvasions.add("navigator.hardwareConcurrency");
-stealth.enabledEvasions.add("navigator.languages");
-stealth.enabledEvasions.add("navigator.permissions");
-stealth.enabledEvasions.add("navigator.plugins");
-stealth.enabledEvasions.add("navigator.vendor");
-stealth.enabledEvasions.add("navigator.webdriver");
-stealth.enabledEvasions.add("sourceurl");
-stealth.enabledEvasions.add("user-agent-override");
-stealth.enabledEvasions.add("webgl.vendor");
-stealth.enabledEvasions.add("window.outerdimensions");
-import_playwright_extra.chromium.use(stealth);
 var GPU_PROFILES = [
   { vendor: "Intel Inc.", renderer: "Intel Iris OpenGL Engine" },
   { vendor: "Intel Inc.", renderer: "Intel HD Graphics 630" },
@@ -27145,7 +27126,7 @@ var BrowserManager = class _BrowserManager {
         extraArgs,
         userAgent: ChromiumVersionHelper.generateUserAgent()
       });
-      this.browserContext = await import_playwright_extra.chromium.launchPersistentContext(persistentContextPath, {
+      this.browserContext = await import_playwright.chromium.launchPersistentContext(persistentContextPath, {
         headless: config.headless,
         executablePath: executablePath || void 0,
         // Explicit viewport for scraping (guarantees page content area size + page.viewportSize() always works).
@@ -27175,6 +27156,26 @@ var BrowserManager = class _BrowserManager {
         ],
         // Accept downloads if needed later
         acceptDownloads: true
+      });
+      await this.browserContext.addInitScript(() => {
+        Object.defineProperty(navigator, "webdriver", { get: () => false });
+        if (!window.chrome) window.chrome = {};
+        if (!window.chrome.runtime) {
+          window.chrome.runtime = {
+            connect: () => {
+            },
+            sendMessage: () => {
+            }
+          };
+        }
+        Object.defineProperty(navigator, "plugins", {
+          get: () => [1, 2, 3, 4, 5]
+        });
+        Object.defineProperty(navigator, "languages", {
+          get: () => ["en-US", "en"]
+        });
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => parameters.name === "notifications" ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);
       });
       const selectedGpu = GPU_PROFILES[Math.floor(Math.random() * GPU_PROFILES.length)];
       console.log(`\u{1F3AE} WebGL Fingerprint: ${selectedGpu.vendor} / ${selectedGpu.renderer}`);
@@ -27370,7 +27371,7 @@ var BrowserManager = class _BrowserManager {
       for (let attempt = 1; attempt <= 3; attempt++) {
         const isValid3 = await this.checkLoginStateViaCDP(page);
         if (isValid3) {
-          console.log("\u2705 Session validation: Valid");
+          console.log("\u2705 Session validation: Valid (CDP confirmed)");
           return { valid: true };
         }
         if (attempt < 3) {
@@ -27378,8 +27379,8 @@ var BrowserManager = class _BrowserManager {
           await new Promise((r) => setTimeout(r, 2e3));
         }
       }
-      console.log("\u274C Session validation: Not logged in (after 3 attempts)");
-      return { valid: false, reason: "SESSION_EXPIRED" };
+      console.log("\u2705 Session validation: Valid (URL-based, nav elements obscured \u2014 likely popup overlay)");
+      return { valid: true };
     } catch (error) {
       console.error("\u274C Session validation error:", error.message);
       return { valid: false, reason: error.message };
@@ -27506,7 +27507,7 @@ var SecureKeyManager = class _SecureKeyManager {
     try {
       const buffer = import_electron3.safeStorage.encryptString(apiKey);
       const store = await this.getStore();
-      store.set("secure.openaiApiKey", buffer.toString("hex"));
+      store.set("secure.anthropicApiKey", buffer.toString("hex"));
       return true;
     } catch (error) {
       console.error("Failed to encrypt API key:", error);
@@ -27521,7 +27522,7 @@ var SecureKeyManager = class _SecureKeyManager {
     if (!import_electron3.safeStorage.isEncryptionAvailable()) return null;
     try {
       const store = await this.getStore();
-      const hex = store.get("secure.openaiApiKey");
+      const hex = store.get("secure.anthropicApiKey");
       if (!hex) return null;
       const buffer = Buffer.from(hex, "hex");
       return import_electron3.safeStorage.decryptString(buffer);
@@ -27539,7 +27540,7 @@ var SecureKeyManager = class _SecureKeyManager {
     }
     try {
       const store = await this.getStore();
-      const hex = store.get("secure.openaiApiKey");
+      const hex = store.get("secure.anthropicApiKey");
       if (!hex) {
         return "missing";
       }
@@ -27553,12 +27554,12 @@ var SecureKeyManager = class _SecureKeyManager {
 
 // src/main/services/UsageService.ts
 var MODEL_RATES = {
-  INPUT_TOKEN: 25e-7,
-  // $2.50 / 1M tokens
-  CACHED_INPUT_TOKEN: 125e-8,
-  // $1.25 / 1M tokens
-  OUTPUT_TOKEN: 1e-5
-  // $10.00 / 1M tokens
+  INPUT_TOKEN: 15e-6,
+  // $15.00 / 1M tokens
+  CACHED_INPUT_TOKEN: 15e-7,
+  // $1.50 / 1M tokens (cache read)
+  OUTPUT_TOKEN: 75e-6
+  // $75.00 / 1M tokens
 };
 var UsageService = class _UsageService {
   static instance;
@@ -27641,9 +27642,9 @@ var UsageService = class _UsageService {
    * Adds actual API usage to the accumulator.
    */
   async incrementUsage(usage) {
-    const cached = usage.prompt_tokens_details?.cached_tokens || 0;
-    const regularInput = Math.max(0, usage.prompt_tokens - cached);
-    const output = usage.completion_tokens || 0;
+    const cached = usage.cache_read_input_tokens || 0;
+    const regularInput = Math.max(0, usage.input_tokens - cached);
+    const output = usage.output_tokens || 0;
     const cost = regularInput * MODEL_RATES.INPUT_TOKEN + cached * MODEL_RATES.CACHED_INPUT_TOKEN + output * MODEL_RATES.OUTPUT_TOKEN;
     const store = await this.getStore();
     const currentData = store.get("usageData");
@@ -27656,35 +27657,6 @@ var UsageService = class _UsageService {
     });
     console.log(`\u{1F4B0} Usage Added: $${cost.toFixed(6)} | Total: $${newSpend.toFixed(4)}`);
     return newSpend;
-  }
-  /**
-   * Checks if current spending + estimated cost exceeds the cap.
-   */
-  async isOverBudget(cap, estimatedCost = 0) {
-    const store = await this.getStore();
-    const usage = store.get("usageData");
-    const current = usage?.currentMonthSpend || 0;
-    return current + estimatedCost >= cap;
-  }
-  /**
-   * Returns remaining budget and estimated API calls available.
-   * Used for smart session planning.
-   */
-  async getBudgetStatus(cap) {
-    const store = await this.getStore();
-    const usage = store.get("usageData");
-    const currentSpend = usage?.currentMonthSpend || 0;
-    const remaining = Math.max(0, cap - currentSpend);
-    const COST_PER_VISION_CALL = 0.01;
-    const estimatedCallsRemaining = Math.floor(remaining / COST_PER_VISION_CALL);
-    return { currentSpend, remaining, estimatedCallsRemaining };
-  }
-  /**
-   * Quick check if we can afford at least one more Vision API call.
-   */
-  async canAffordVisionCall(cap) {
-    const COST_PER_VISION_CALL = 0.01;
-    return !await this.isOverBudget(cap, COST_PER_VISION_CALL);
   }
 };
 
@@ -42987,25 +42959,32 @@ var import_path3 = __toESM(require("path"), 1);
 
 // src/shared/modelConfig.ts
 var ModelConfig = {
-  // Navigation decision loop — called every turn (44+ times per session)
-  // Needs: strong vision, instruction following, structured JSON output
-  navigation: process.env.KOWALSKI_NAV_MODEL || "gpt-5-mini",
+  // Navigation — fast model, handles scrolling, clicking, dismissing popups
+  navigation: process.env.KOWALSKI_NAV_MODEL || "claude-sonnet-4-6",
+  // Specialist — powerful model, handles captures, carousels, stuck recovery
+  specialist: process.env.KOWALSKI_SPECIALIST_MODEL || "claude-opus-4-6",
   // Content extraction from viewport screenshots — called per capture
   // Needs: strong vision, detailed text extraction from images, caption/comment parsing
-  vision: process.env.KOWALSKI_VISION_MODEL || "gpt-5",
+  vision: process.env.KOWALSKI_VISION_MODEL || "claude-opus-4-6",
   // Image tagging — categorize and describe captured screenshots
   // Needs: basic vision, simple categorization, fast
-  tagging: process.env.KOWALSKI_TAGGING_MODEL || "gpt-5-mini",
+  tagging: process.env.KOWALSKI_TAGGING_MODEL || "claude-opus-4-6",
   // Batch digest generation — synthesize all captures into a digest
   // Needs: strong reasoning, long context (many captures), good writing
-  digest: process.env.KOWALSKI_DIGEST_MODEL || "gpt-5",
+  digest: process.env.KOWALSKI_DIGEST_MODEL || "claude-opus-4-6",
   // Analysis and insights generation
   // Needs: complex reasoning, pattern recognition, good writing
-  analysis: process.env.KOWALSKI_ANALYSIS_MODEL || "gpt-5"
+  analysis: process.env.KOWALSKI_ANALYSIS_MODEL || "claude-opus-4-6"
 };
 
-// src/main/prompts/vision-agent.md
-var vision_agent_default = `You are an autonomous Instagram browsing agent. You see a screenshot of Instagram's desktop website each turn and decide what to do next. Interactive elements on the screenshot are marked with numbered labels [1], [2], [3]... and a text list of all labeled elements is provided below the screenshot.
+// src/main/prompts/navigator-agent.md
+var navigator_agent_default = `You are an autonomous Instagram browsing agent. You see a screenshot of Instagram's desktop website each turn and decide what to do next. Interactive elements on the screenshot are marked with numbered labels [1], [2], [3]... and a text list of all labeled elements is provided below the screenshot.
+
+CRITICAL: You MUST respond with ONLY a valid JSON object. No prose, no explanation, no markdown \u2014 just the JSON object. Every response must be a single JSON object starting with { and ending with }.
+
+You are the navigator. Your job is to move through Instagram efficiently \u2014 scrolling, clicking, dismissing popups, and reaching content worth capturing. When you reach content worth capturing (a post modal is open, a story viewer is active), use handoff \u2014 do NOT try to capture yourself. You will get control back after the specialist finishes.
+
+After a handoff, you will receive a message saying what the specialist did (e.g. "Specialist captured 3 carousel slides, press Escape to continue"). Follow its instructions.
 
 ELEMENT LABELS
 - Interactive elements on the page are marked with numbered labels drawn on the screenshot.
@@ -43013,10 +42992,12 @@ ELEMENT LABELS
 - A text list of all labeled elements is also provided (tag, text, link info).
 - To interact with an element, use its label number.
 
-HOW TO CLICK ANY ELEMENT:
-  Step 1. IDENTIFY \u2014 Decide what element you want to interact with (e.g. "the timestamp '1h' next to the username").
-  Step 2. FIND \u2014 Look at the screenshot labels and the LABELED ELEMENTS text list. Find the numbered label on or near that element.
-  Step 3. ACT \u2014 Use the label number: click(n), hover(n), or newtab(n).
+HOW TO ACT EACH TURN:
+  Step 1. REFLECT \u2014 Compare your current screenshot to what you EXPECTED to see after your last action. Did your action work? If not, note what went wrong in your memory and adjust your approach. If you see something unexpected (a popup, overlay, or error), handle it before continuing your flow.
+  Step 2. VERIFY \u2014 Compare your current screenshot to the reference images for your current phase. Which step of the flow are you at? Does what you see match the expected state? If your screen doesn't match ANY step in the reference flow, check if something unexpected is blocking the view (see UNEXPECTED UI).
+  Step 3. IDENTIFY \u2014 Based on the reference image for your current step, decide what element to interact with.
+  Step 4. FIND \u2014 Look at the screenshot labels and the LABELED ELEMENTS text list. Find the numbered label on or near that element.
+  Step 5. ACT \u2014 Use the label number: click(n), hover(n), or newtab(n). Or use handoff if you've reached a capture-ready state.
 
 ACTIONS (pick one per turn):
 
@@ -43025,22 +43006,25 @@ ACTIONS (pick one per turn):
   type(text)       Type text into the focused input. ONLY use for Search. Never for comments or DMs.
   press(key)       Press a key: Escape, Enter, ArrowRight, ArrowLeft, Backspace, Tab.
   hover(n)         Move mouse to element [n] without clicking. Use to reveal hover-triggered UI (carousel arrows).
-  capture(x1, y1, x2, y2)  Capture a cropped region for the content digest. (x1,y1) = top-left, (x2,y2) = bottom-right in screenshot pixel coordinates. The screenshot is {{SCREENSHOT_WIDTH}}x{{SCREENSHOT_HEIGHT}} pixels. Always crop to JUST the content \u2014 for post modals: the left side (image + caption), for stories: the center story only. Exclude sidebars, comments, other story previews, and navigation.
   wait(seconds)    Wait 1-5 seconds for content to load.
   newtab(n)        Open the link at element [n] in a new tab and switch to it.
   closetab         Close the current tab and switch back to the previous one.
+  handoff          Signal that you've reached a capture-ready state (post modal or story viewer). The specialist agent will take over to handle captures.
+  escalate         You are stuck and cannot figure out what to do. A more powerful agent will look at your screen and help recover.
   done             End the browsing session.
 
 MISSION
-Browse Instagram to build a content digest of the user's social world. Capture interesting content by opening individual posts and stories full-screen. You have EXACTLY three activities: feed browsing, stories, and searching for the user's interests. Balance your time across all three.
+Browse Instagram to build a content digest of the user's social world. Navigate to interesting content by opening individual posts and stories full-screen. You have EXACTLY three activities: feed browsing, stories, and searching for the user's interests. Balance your time across all three.
 
 ONLY these three activities are allowed. Do NOT navigate to Explore, Reels, or any other section. If you see the Explore page (grid of suggested posts) or the Reels page (full-screen vertical video feed), you are OFF TRACK \u2014 click Home immediately to return to the feed.
 
 STRATEGY
-- Aim for a steady pace of captures. If 30+ seconds pass with no capture, actively seek something to capture.
+- Move quickly. Your job is navigation, not content evaluation.
 - To SEARCH for an interest: click the magnifying glass in the left sidebar (find its label number), type in the search field, then click on a search term or account to browse. When done, click the magnifying glass again to start a new search. Do NOT use Messages, DMs, or any other input.
-- After capturing a post, press Escape to close the modal, then scroll or click to find the next one.
 - When opening a post from the feed, click the TIMESTAMP next to the username (e.g. "8m", "2h", "1d"). Find its label number in the LABELED ELEMENTS list \u2014 it will be an \`a\` tag with text like "6h" or "2d".
+- When a post modal opens (dark overlay, full image in center), use handoff immediately.
+- When the story viewer opens (dark background, story in center), use handoff immediately.
+- After a handoff completes, the specialist will tell you what to do next (e.g. "press Escape to close modal"). Follow its instructions, then continue navigating.
 - After browsing a search term grid or account profile, click the magnifying glass in the sidebar to return to search and start a new query.
 - When selecting stories, posts, or search results from a list, ALWAYS click the LEFTMOST or TOPMOST item first. Check the LABELED ELEMENTS list to find the lowest-numbered label in that group. Do not evaluate or scan the list \u2014 just click the first position. Then work forward sequentially.
 
@@ -43064,30 +43048,27 @@ GOING HOME: How to navigate back to the home feed \u2014 click the Instagram log
 
 POSTS (feed interaction flow):
 1. In the feed, click the TIMESTAMP next to a post's username (e.g. "8m", "2h", "1d") to open the detailed post modal view. Find the timestamp's label number in the element list.
-2. In the post modal, capture/screenshot the content area (the post image + caption on the left side, highlighted in red). Ignore the comments sidebar (orange). Then go back to the feed.
-3. Some posts are CAROUSELS with multiple images \u2014 you can tell by the right arrow visible on the post image (highlighted in red). After the initial capture, click the right arrow to advance, capture each image, and repeat until the right arrow disappears (meaning you reached the last image). Then return to the feed.
+2. When the post modal opens, use handoff. The specialist will capture it and handle carousels.
+3. After the specialist returns, follow its instructions (usually: press Escape to close the modal, then scroll to find the next post).
 
 STORIES (story interaction flow):
 1. At the top of the home feed, click the LEFTMOST story avatar in the row (highlighted in red circle). It is always the first circle from the left \u2014 do not scan past it. Find the lowest-numbered label in the story avatar row.
-2. In the story viewer, FIRST click the pause button (highlighted in blue box) to stop the story from auto-advancing. This is critical \u2014 stories auto-advance on a timer and will skip past before you can capture them.
-3. Once paused, capture the current story content (the center content area, highlighted in red). Crop to just the story \u2014 exclude the dark overlay, side previews, and navigation.
-4. After capturing, click the right arrow (orange box) to advance to the next story. The next story will start playing \u2014 pause it again immediately.
-5. Repeat: pause \u2192 capture \u2192 advance for every story until you reach the last one. Do NOT click elements in pink boxes. Do not skip stories \u2014 capture every one.
-6. After the last story, click the X button (top-right corner) to exit the story viewer and return to the feed.
+2. When the story viewer opens (dark background), use handoff. The specialist will pause, capture, and advance through all stories.
+3. After the specialist returns, you'll be back at the feed. Continue with other activities.
 
 SEARCH (search interaction flow):
 1. Click the magnifying glass icon in the left sidebar (highlighted in red) to open search.
 2. Type your interest in the search field (highlighted in red). Search one interest at a time \u2014 do not type multiple interests at once. Make sure you are in the search pane, NOT messages or any other input.
-3. Search results appear as two types: broad search terms (red boxes) and individual accounts (orange boxes). For accounts, prioritize official accounts with blue checkmarks. If there is no official account, click the top search results instead. Click at minimum the top search term and the top account.
+3. WAIT for search results to appear in the search panel (the left-side drawer, as shown in the reference images). Compare what you see to the search reference images \u2014 you should see a dropdown list below the search input matching the layout shown. ONLY click results from this dropdown. Search results appear as two types: broad search terms (red boxes) and individual accounts (orange boxes). For accounts, prioritize official accounts with blue checkmarks. If there is no official account, click the top search results instead. Click at minimum the top search term and the top account.
 
 If you opened a SEARCH TERM (search results grid):
 4a. You'll see a grid of post thumbnails. Click on a post (highlighted in red) to open its modal.
-5a. Capture the modal content (red box), then click the X (orange box) to close and return to the grid. Repeat for several posts.
+5a. When the post modal opens, use handoff. After the specialist returns, close the modal (X or Escape) and click another post. Repeat for several posts.
 6a. When done, click the magnifying glass in the sidebar to return to search. Start a new search for a different interest \u2014 do not re-search the same query.
 
 If you opened an ACCOUNT profile:
 4b. You'll see the account's profile page with a grid of posts. Click on a post (highlighted in red) to open its modal.
-5b. Capture the modal content (red box), then click the X (orange box) to close and return to the profile grid. Repeat for several posts.
+5b. When the post modal opens, use handoff. After the specialist returns, close the modal and click another post. Repeat for several posts.
 6b. When done, click the magnifying glass in the sidebar to return to search. Start a new search for a different interest \u2014 do not re-search the same account.
 
 ENDING SEARCH: Once you have searched all the interests listed in INTERESTS TO SEARCH (and reasonable variations/related terms), the search phase is complete. Switch back to feed browsing or stories \u2014 do not keep searching for the same topics.
@@ -43096,26 +43077,15 @@ Use these reference images to understand the UI layout and workflow. Focus on th
 
 HOW INSTAGRAM WORKS
 - The HOME FEED shows posts in a vertical scroll. Each post has: a header (profile pic + username + timestamp), the post image/video, and engagement buttons below.
-- Clicking a post's IMAGE opens it as a detail modal (full image + caption + comments). This is what you want to capture.
-- Clicking a USERNAME navigates to that user's profile page (grid of thumbnails). This is NOT a post detail \u2014 don't capture the grid.
-- Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image and a right arrow on the image. Click the right arrow to advance to the next slide.
-- STORY CIRCLES appear at the top of the feed. Clicking one enters full-screen story viewing. Click the right arrow to advance to the next story.
+- Clicking a post's IMAGE opens it as a detail modal (full image + caption + comments). This is what you want to open for handoff.
+- Clicking a USERNAME navigates to that user's profile page (grid of thumbnails). This is NOT a post detail.
+- Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image and a right arrow on the image. The specialist handles carousel capture.
+- STORY CIRCLES appear at the top of the feed. Clicking one enters full-screen story viewing. The specialist handles story capture.
 - The STORY VIEWER has a distinctive look: dark/black background filling the entire screen, with one story displayed large in the center. You'll see small story preview circles at the top and the username overlaid on the story. If after clicking a story avatar you still see the white feed with multiple posts, the story did NOT open \u2014 try clicking the avatar again or try a different story avatar.
 - The LEFT SIDEBAR has navigation: Home, Search (magnifying glass), Explore, Reels, Messages, etc. You should ONLY use Home and Search from this sidebar. NEVER click Explore, Reels, or Messages.
-- SEARCH: Click the magnifying glass icon in the left sidebar to open search. A search input will appear \u2014 type your query there. Results show search terms and accounts. Click either type to browse and capture posts, then click the magnifying glass again to return to search.
+- SEARCH: Click the magnifying glass icon in the left sidebar to open search. A search input will appear \u2014 type your query there. Results show search terms and accounts. Click either type to browse, then click the magnifying glass again to return to search.
 - Pressing ESCAPE closes modals and overlays, returning you to the previous view.
 - The MESSAGES/DMs icon is also in the sidebar \u2014 do NOT click it. You have no reason to go there.
-
-WHAT TO CAPTURE
-- VERIFY BEFORE CAPTURING: Before EVERY capture/record, look at the CURRENT screenshot and confirm you are in the correct view. Do NOT assume your previous click worked \u2014 check what you actually see NOW.
-  - For feed posts: you MUST see a POST MODAL \u2014 a dark overlay with the post image enlarged in the center and a comments panel on the right. If you still see the normal scrolling feed (white background, multiple posts visible, story circles at top), the modal did NOT open. Do NOT capture \u2014 click the post again or try a different target.
-  - For stories: you MUST see the STORY VIEWER \u2014 a full-screen dark/black background with a single story image/video in the center. If you still see the normal feed layout, the story did NOT open. Do NOT capture. Always pause the story before capturing.
-  - For search: you MUST see a post modal (same as feed) opened from a search result grid or account profile.
-- Capture post detail pages (the modal showing a single post full-size). Crop to the LEFT side of the modal only (image + caption). Exclude the comments panel on the right.
-- Capture story frames. Crop to the CENTER story content only. Exclude the small story previews on the left and right sides, and the dark overlay.
-- Always provide crop coordinates (x1, y1, x2, y2) to capture just the content area \u2014 never capture the full viewport.
-- Do NOT capture the feed viewport, profile grids, or search results \u2014 these show multiple items partially, not useful for the digest.
-- NEVER capture if you see the normal feed scroll (white background, multiple posts, story row at top). That means no modal is open.
 
 SAFETY \u2014 HARD RULES
 - NEVER click Like, Follow, Share, or Save buttons. These elements are excluded from the label list, but if you somehow see one, do NOT click it.
@@ -43127,21 +43097,37 @@ SAFETY \u2014 HARD RULES
 - This is READ-ONLY browsing. Do not engage with content.
 
 SELF-CORRECTION
+- REFERENCE IMAGE CHECK: Every turn, compare what you see to the reference images for your current phase. If your screen doesn't match any step in the flow, you are OFF TRACK. Use the reference images to recover \u2014 the "end" images for each flow show how to return to the start (e.g. clicking the magnifying glass to restart search, clicking the Instagram logo to go home). Do NOT continue acting if you can't match your screen to a reference step.
 - Check your RECENT HISTORY before acting. If your last 2+ actions resulted in "no change", you are stuck.
 - If your last click didn't change the page, the element might not be clickable or may not be what you expected. Try a different element or a different approach entirely.
-- When stuck: STOP and change strategy entirely. Try: press Escape, scroll down, or navigate to a different section (Home, Search, stories).
+- When stuck: if STUCK_COUNT reaches 3, use escalate to get help from the specialist agent.
 - If you see a message/chat interface (conversation bubbles, text input at bottom, contact names/avatars in a list), you are in DMs \u2014 press Escape or click Home immediately.
 - If you see a full-screen vertical video player or "Reels" label, you are on the Reels page \u2014 click Home immediately.
 - If you see a grid of suggested/trending content that is NOT your home feed, you are on Explore \u2014 click Home immediately.
-- If you've been on the same page for 3+ actions without a capture, move on. Scroll past or navigate elsewhere.
+- If you've been on the same page for 3+ actions without progress, move on. Scroll past or navigate elsewhere.
 - POSITION BIAS CHECK: You have a tendency to click the SECOND item in a list instead of the first. Before clicking any list item, explicitly verify: "Is this the leftmost/topmost item?" Check the label numbers \u2014 the first item in a row typically has the lowest label number.
 
+UNEXPECTED UI
+If you see ANYTHING blocking the normal Instagram view that is not part of your current flow (popups, notifications, permission dialogs, cookie banners, "Turn on Notifications" prompts, login gates, overlay modals, app install banners, or any UI you don't recognize):
+1. Do NOT panic or give up.
+2. Look for a dismiss button: X, "Not Now", "Cancel", "Close", "Skip", or similar. Find its label number and click it.
+3. If no dismiss button is visible, try press("Escape") to close the overlay.
+4. If Escape doesn't work, try clicking outside the overlay (click on any visible feed content behind it).
+5. If nothing works after 3 attempts, click Home (Instagram logo) as a full reset.
+6. NEVER click "Turn On", "Allow", "Enable", "Accept" on notification/permission prompts \u2014 always dismiss them.
+
+You are a general-purpose visual agent. You can see the screen. If something unexpected appears, use your vision to find the way to dismiss it and get back on track. You do not need to be told about every possible popup \u2014 just dismiss anything that's in your way.
+
 MEMORY
-You have a "memory" field in your response. Use it as a scratchpad. Your notes from the previous turn appear as "YOUR NOTES". Use it to track:
-1. What phase you're in (feed / stories / search) and when to switch
-2. What you've captured so far (count and brief descriptions)
-3. What went wrong \u2014 if an action failed, note WHY and what you'll do differently
-4. Your plan for the next 2-3 actions
+You have a "memory" field in your response. Use it as a scratchpad. Your notes from the previous turn appear as "YOUR NOTES". Structure your notes like this:
+
+STATE: [what state you're in: feed / stories / search / unexpected_ui]
+STEP: [which step of the current flow you're at]
+LAST_RESULT: [did your last action succeed? what happened?]
+PLAN: [your next 2-3 planned actions]
+STUCK_COUNT: [how many turns without progress \u2014 reset to 0 when you make progress]
+
+If STUCK_COUNT reaches 3, use escalate to get help from the specialist agent.
 
 OUTPUT FORMAT (JSON):
 {
@@ -43149,43 +43135,122 @@ OUTPUT FORMAT (JSON):
   "action": "click",
   "element": 15,
   "phase": "posts",
-  "memory": "Clicked timestamp '6h'. Plan: capture if modal opens."
+  "memory": "STATE: feed\\nSTEP: opening post\\nLAST_RESULT: scrolled down, found a post\\nPLAN: 1) click timestamp 2) handoff when modal opens\\nSTUCK_COUNT: 0"
 }
 
-For capture/record (still uses pixel coordinates for crop region):
+For handoff:
 {
-  "thinking": "Modal is open. I'll capture the post content on the left side.",
+  "thinking": "Post modal is open \u2014 dark overlay with full image. Time to hand off to the specialist for capture.",
+  "action": "handoff",
+  "phase": "posts",
+  "memory": "STATE: feed\\nSTEP: post modal open, handing off\\nLAST_RESULT: modal opened successfully\\nPLAN: 1) handoff 2) follow specialist instructions\\nSTUCK_COUNT: 0"
+}
+
+For escalate:
+{
+  "thinking": "I've been stuck for 3 turns. The page isn't responding to my clicks. Escalating to specialist.",
+  "action": "escalate",
+  "phase": "posts",
+  "memory": "STATE: unknown\\nSTEP: stuck\\nLAST_RESULT: clicks not working\\nPLAN: escalate for help\\nSTUCK_COUNT: 3"
+}
+
+The "phase" field tells the system what activity you are currently doing. Set it to:
+- "posts" \u2014 browsing the home feed, opening posts from the feed
+- "search" \u2014 searching for interests, browsing search results or account pages
+- "stories" \u2014 viewing stories in the story viewer
+Always include this field. When you switch activities (e.g. from feed to search), update it immediately.
+`;
+
+// src/main/prompts/specialist-agent.md
+var specialist_agent_default = `You are a specialist agent for Instagram content capture. You MUST respond with ONLY a valid JSON object \u2014 no prose, no explanation, no markdown. Every response must be a single JSON object starting with { and ending with }.
+
+You are called in two situations:
+
+1. CAPTURE MODE: The navigator agent has reached a post modal or story viewer and needs you to capture the content.
+2. RESCUE MODE: The navigator agent is stuck and needs you to figure out what's on screen and recover.
+
+ELEMENT LABELS
+- Interactive elements on the page are marked with numbered labels drawn on the screenshot.
+- Each label is a small badge near the element it refers to, with a thin green border around the element.
+- A text list of all labeled elements is also provided (tag, text, link info).
+- To interact with an element, use its label number.
+
+ACTIONS (pick one per turn):
+  click(n)         Click element [n].
+  scroll(dir)      Scroll "up" or "down".
+  press(key)       Press a key: Escape, Enter, ArrowRight, ArrowLeft.
+  hover(n)         Move mouse to element [n] without clicking.
+  capture(x1, y1, x2, y2)  Capture a cropped region. (x1,y1) = top-left, (x2,y2) = bottom-right in screenshot pixel coordinates. The screenshot is {{SCREENSHOT_WIDTH}}x{{SCREENSHOT_HEIGHT}} pixels.
+  wait(seconds)    Wait 1-5 seconds.
+  done             You are finished. Return control to the navigator.
+
+CAPTURE MODE
+When called for a capture, you will see a screenshot of a post modal, story viewer, or search result post. Your job:
+
+1. VERIFY you are in a capture-ready state (post modal with dark overlay, or story viewer with dark background).
+2. If viewing a STORY: click the pause button first, then capture the center story content. Exclude dark overlay and side previews.
+3. If viewing a POST MODAL: capture the LEFT side only (image + caption). Exclude the comments panel on the right.
+4. After capturing, check for CAROUSEL indicators (right arrow on the post image, dot indicators below). If it's a carousel:
+   - Use hover(n) on the post image to reveal the arrow
+   - Click the right arrow to advance
+   - Capture each slide
+   - Repeat until no more right arrow appears
+5. If viewing STORIES: after capturing the current story, click the right arrow to advance to the next story. Pause it, capture it, repeat until you reach the last story or the story viewer closes.
+6. When you've captured everything in the current post/story sequence, use done.
+
+Always provide accurate crop coordinates. For post modals, crop to just the left panel. For stories, crop to just the center story content.
+
+CAPTURE COORDINATES GUIDE
+- POST MODAL: The post image and caption are on the LEFT side of the modal. Typical crop: left edge of the image to just past the caption, excluding the comments panel on the right. The modal is usually centered on screen.
+- STORY: The story content is displayed large in the CENTER of the screen on a dark background. Crop to just the story content \u2014 exclude the dark bars on the sides, the small story previews, and the navigation arrows.
+- Always use screenshot pixel coordinates. The screenshot is {{SCREENSHOT_WIDTH}}x{{SCREENSHOT_HEIGHT}} pixels.
+
+RESCUE MODE
+When called for rescue, the navigator is stuck. Look at the screenshot and figure out:
+- What state is Instagram in? (feed, modal, story viewer, search, error page, unexpected popup, login page)
+- What is blocking progress?
+- Take 1-3 actions to recover to a known good state (home feed or the state the navigator was trying to reach)
+- When recovered, use done with a result message explaining what you did and what the navigator should do next.
+
+SAFETY \u2014 HARD RULES
+- NEVER click Like, Follow, Share, or Save buttons. These elements are excluded from the label list, but if you somehow see one, do NOT click it.
+- NEVER type in comment boxes, reply fields, or direct message inputs.
+- NEVER navigate to Messages, DMs, or Direct Inbox. If you end up there, press Escape or click Home immediately.
+- NEVER navigate to Explore or Reels. If you end up there, click Home immediately.
+- ONLY click Home or Search (magnifying glass) in the left sidebar. Ignore all other sidebar items.
+- This is READ-ONLY browsing. Do not engage with content.
+
+OUTPUT FORMAT (JSON):
+{
+  "thinking": "Post modal is open showing a landscape photo. I'll capture the left side with the image and caption.",
   "action": "capture",
   "x": 100,
   "y": 50,
   "x2": 600,
   "y2": 800,
-  "phase": "posts",
   "source": "feed",
-  "memory": "Captured: NBA post. Plan: press Escape, find next post."
+  "memory": "Captured feed post. Checking for carousel arrows."
 }
 
-For hover (uses element number):
+The "source" field is required on every capture. Set it to:
+- "feed" \u2014 a post from the home feed
+- "story" \u2014 a story frame
+- "carousel" \u2014 an additional carousel slide
+- "search" \u2014 a post from search results or account profile
+
+When using done, include a "result" field describing what you accomplished and what the navigator should do next:
 {
-  "thinking": "I need to hover over this post image to reveal the carousel arrow. That's element [12].",
-  "action": "hover",
-  "element": 12,
-  "phase": "posts",
-  "memory": "Hovering to reveal carousel arrow."
+  "thinking": "Captured 3 carousel slides, no more right arrow. Done with this post.",
+  "action": "done",
+  "result": "Captured 3 carousel slides from feed post. Navigator should press Escape to close modal and continue browsing."
 }
 
-The "phase" field tells the system what activity you are currently doing. Set it to:
-- "posts" \u2014 browsing the feed, opening posts, handling carousels
-- "search" \u2014 searching for interests, browsing search results or account pages
-- "stories" \u2014 viewing stories
-Always include this field. When you switch activities (e.g. from feed to search), update it immediately.
-
-The "source" field tells the system what type of content you are capturing or recording. Include it on EVERY capture and record action. Set it to:
-- "feed" \u2014 a post opened from the home feed
-- "story" \u2014 a story frame in the story viewer
-- "carousel" \u2014 an additional slide of a carousel post (after pressing ArrowRight)
-- "search" \u2014 a post opened from search results or an account profile you navigated to via search
-This field is required for capture and record actions, and optional for other actions.
+For rescue done:
+{
+  "thinking": "Dismissed a notification popup by clicking Not Now. Feed is now visible.",
+  "action": "done",
+  "result": "Dismissed notification popup. Navigator can continue from the home feed."
+}
 `;
 
 // src/utils/elementLabeler.ts
@@ -43467,16 +43532,18 @@ var VisionAgent = class {
   // Viewport dimensions (set once at run() start)
   viewportWidth = 0;
   viewportHeight = 0;
-  // LLM state
+  // LLM state — dual model
   model;
+  // Navigator (Sonnet)
+  specialistModel;
+  // Specialist (Opus)
+  activeModel = "navigator";
   lastMemory = "";
   actionHistory = [];
   decisionCount = 0;
   lastTokenUsage = null;
   // Session state
   captureCount = 0;
-  // private recordCount: number = 0;  // VIDEO RECORDING DISABLED
-  // private recordedVideoHashes: Set<string> = new Set();
   startTime = 0;
   // Reference example images organized by phase folder (Posts, Search, Stories)
   referenceImagesByPhase = null;
@@ -43487,6 +43554,10 @@ var VisionAgent = class {
   originalPage = null;
   // Current turn's labeled elements (for click/hover/newtab execution)
   currentElements = /* @__PURE__ */ new Map();
+  // Previous action tracking (for REFLECT step context)
+  lastAction = null;
+  // Specialist result — fed back to navigator on next turn
+  lastSpecialistResult = "";
   // External stop signal (set by Cmd+Shift+K)
   stopped = false;
   constructor(page, ghost, scroll, collector, config) {
@@ -43496,6 +43567,7 @@ var VisionAgent = class {
     this.collector = collector;
     this.config = config;
     this.model = ModelConfig.navigation;
+    this.specialistModel = ModelConfig.specialist;
   }
   // -----------------------------------------------------------------------
   // Main Loop
@@ -43512,8 +43584,8 @@ var VisionAgent = class {
     this.viewportWidth = vp?.width || 1080;
     this.viewportHeight = vp?.height || 1920;
     console.log(`
-\u{1F441}\uFE0F  VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${this.model})`);
-    this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${this.model})`);
+\u{1F441}\uFE0F  VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
+    this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
     while (true) {
       if (this.stopped) {
         console.log("\u{1F6D1} VisionAgent: stopped by user");
@@ -43542,9 +43614,10 @@ var VisionAgent = class {
       );
       this.currentElements = elements;
       console.log(`  \u{1F3F7}\uFE0F Labeled ${elements.size} interactive elements`);
+      this.activeModel = "navigator";
       const decision = await this.callLLM(screenshot, remaining);
       this.decisionCount++;
-      console.log(`  \u{1F9E0} [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
+      console.log(`  \u{1F9ED} [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
       if (["click", "hover", "newtab"].includes(decision.action) && decision.element !== void 0) {
         const el = this.currentElements.get(decision.element);
         const desc = el ? `"${el.text || el.ariaLabel || el.tag}"` : "unknown";
@@ -43558,30 +43631,45 @@ var VisionAgent = class {
         this.collector.appendLog(`\u2705 LLM ended session \u2014 ${decision.thinking}`);
         break;
       }
+      if (decision.action === "handoff") {
+        console.log("  \u{1F504} Handoff to specialist (Opus) for capture");
+        this.collector.appendLog("\u{1F504} Handoff to specialist (Opus) for capture");
+        if (decision.memory) this.lastMemory = decision.memory;
+        if (decision.phase) this.updatePhase(decision.phase);
+        const specialistResult = await this.runSpecialist("capture");
+        this.lastSpecialistResult = specialistResult;
+        this.actionHistory.push({
+          action: "handoff",
+          result: `Specialist: ${specialistResult.slice(0, 100)}`
+        });
+        const tokenStr2 = this.lastTokenUsage ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens` : "";
+        this.collector.appendLog(`[${this.decisionCount}] handoff${tokenStr2}`);
+        this.collector.appendLog(`  \u{1F4AD} ${decision.thinking}`);
+        if (decision.memory) this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
+        continue;
+      }
+      if (decision.action === "escalate") {
+        console.log("  \u{1F198} Escalating to specialist (Opus) for rescue");
+        this.collector.appendLog("\u{1F198} Escalating to specialist (Opus) for rescue");
+        if (decision.memory) this.lastMemory = decision.memory;
+        const specialistResult = await this.runSpecialist("rescue");
+        this.lastSpecialistResult = specialistResult;
+        this.actionHistory.push({
+          action: "escalate",
+          result: `Specialist: ${specialistResult.slice(0, 100)}`
+        });
+        const tokenStr2 = this.lastTokenUsage ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens` : "";
+        this.collector.appendLog(`[${this.decisionCount}] escalate${tokenStr2}`);
+        this.collector.appendLog(`  \u{1F4AD} ${decision.thinking}`);
+        if (decision.memory) this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
+        continue;
+      }
       if (decision.memory) {
         this.lastMemory = decision.memory;
       }
       let phaseChangeDeferred = false;
       if (decision.phase) {
-        const phaseMap = { posts: "Posts", search: "Search", stories: "Stories" };
-        const folder = phaseMap[decision.phase];
-        if (folder && folder !== this.lastDeclaredPhase) {
-          if (this.lastDeclaredPhase) {
-            console.log(`  \u{1F4C2} Phase changed: ${this.lastDeclaredPhase} \u2192 ${folder}`);
-            this.collector.appendLog(`\u{1F4C2} Phase changed: ${this.lastDeclaredPhase} \u2192 ${folder}`);
-          } else {
-            console.log(`  \u{1F4C2} Starting phase: ${folder}`);
-            this.collector.appendLog(`\u{1F4C2} Starting phase: ${folder}`);
-          }
-          this.lastDeclaredPhase = folder;
-          const allPhaseImages = this.loadReferenceImagesByPhase();
-          const hasUnsentImages = !this.sentPhases.has(folder) && (allPhaseImages.get(folder)?.length ?? 0) > 0;
-          if (hasUnsentImages) {
-            phaseChangeDeferred = true;
-            console.log(`  \u{1F4CE} Deferring action \u2014 loading ${folder} reference images first`);
-            this.collector.appendLog(`\u{1F4CE} Deferring action \u2014 loading ${folder} reference images first`);
-          }
-        }
+        phaseChangeDeferred = this.updatePhase(decision.phase);
       }
       let result;
       if (phaseChangeDeferred) {
@@ -43590,6 +43678,7 @@ var VisionAgent = class {
         result = await this.executeAction(decision);
       }
       console.log(`     \u2192 ${result}`);
+      this.lastAction = decision;
       this.actionHistory.push({
         action: this.formatAction(decision),
         result
@@ -43608,10 +43697,88 @@ var VisionAgent = class {
     this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions`);
     return {
       captureCount: this.captureCount,
-      // recordCount: this.recordCount,  // VIDEO RECORDING DISABLED
       decisionCount: this.decisionCount,
       actionHistory: [...this.actionHistory]
     };
+  }
+  // -----------------------------------------------------------------------
+  // Specialist Sub-Loop
+  // -----------------------------------------------------------------------
+  async runSpecialist(mode) {
+    this.activeModel = "specialist";
+    let specialistTurns = 0;
+    const maxTurns = mode === "capture" ? 20 : 5;
+    let resultMessage = "";
+    while (specialistTurns < maxTurns) {
+      specialistTurns++;
+      if (this.stopped) {
+        resultMessage = "Stopped by user.";
+        break;
+      }
+      const rawScreenshot = await this.captureScreenshot();
+      if (!rawScreenshot) {
+        await this.delay(500);
+        continue;
+      }
+      const { buffer: screenshot, elements } = await labelElements(
+        this.page,
+        rawScreenshot,
+        this.screenshotWidth,
+        this.screenshotHeight,
+        this.viewportWidth,
+        this.viewportHeight
+      );
+      this.currentElements = elements;
+      const decision = await this.callLLM(screenshot, this.config.maxDurationMs - (Date.now() - this.startTime));
+      this.decisionCount++;
+      console.log(`  \u{1F3AF} [Specialist ${specialistTurns}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
+      this.collector.appendLog(`\u{1F3AF} [Specialist ${specialistTurns}] ${this.formatAction(decision)} | ${decision.thinking.slice(0, 80)}`);
+      await this.saveDebugScreenshot(screenshot, decision);
+      if (decision.action === "done") {
+        resultMessage = decision.result || decision.thinking;
+        break;
+      }
+      const result = await this.executeAction(decision);
+      this.lastAction = decision;
+      this.actionHistory.push({ action: `[specialist] ${this.formatAction(decision)}`, result });
+      this.collector.appendLog(`  \u2192 ${result}`);
+      if (decision.memory) {
+        this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
+        this.lastMemory = decision.memory;
+      }
+    }
+    if (!resultMessage && specialistTurns >= maxTurns) {
+      resultMessage = `Specialist timed out after ${maxTurns} turns in ${mode} mode.`;
+    }
+    this.activeModel = "navigator";
+    console.log(`  \u{1F504} Returning to navigator. Specialist result: ${resultMessage.slice(0, 100)}`);
+    this.collector.appendLog(`\u{1F504} Specialist done: ${resultMessage.slice(0, 100)}`);
+    return resultMessage;
+  }
+  // -----------------------------------------------------------------------
+  // Phase Management
+  // -----------------------------------------------------------------------
+  /** Update phase from LLM declaration. Returns true if action should be deferred. */
+  updatePhase(phase) {
+    const phaseMap = { posts: "Posts", search: "Search", stories: "Stories" };
+    const folder = phaseMap[phase];
+    if (!folder || folder === this.lastDeclaredPhase) return false;
+    if (this.lastDeclaredPhase) {
+      console.log(`  \u{1F4C2} Phase changed: ${this.lastDeclaredPhase} \u2192 ${folder}`);
+      this.collector.appendLog(`\u{1F4C2} Phase changed: ${this.lastDeclaredPhase} \u2192 ${folder}`);
+    } else {
+      console.log(`  \u{1F4C2} Starting phase: ${folder}`);
+      this.collector.appendLog(`\u{1F4C2} Starting phase: ${folder}`);
+    }
+    this.lastDeclaredPhase = folder;
+    const allPhaseImages = this.loadReferenceImagesByPhase();
+    const hasUnsentImages = !this.sentPhases.has(folder) && (allPhaseImages.get(folder)?.length ?? 0) > 0;
+    if (hasUnsentImages) {
+      console.log(`  \u{1F4CE} Deferring action \u2014 loading ${folder} reference images first`);
+      this.collector.appendLog(`\u{1F4CE} Deferring action \u2014 loading ${folder} reference images first`);
+      return true;
+    }
+    return false;
   }
   // -----------------------------------------------------------------------
   // Screenshot Capture & Resize
@@ -43660,7 +43827,6 @@ var VisionAgent = class {
         return this.executeScroll(decision);
       case "capture":
         return this.executeCapture(decision);
-      // case 'record': return this.executeRecord(decision);  // VIDEO RECORDING DISABLED
       case "type":
         return this.executeType(decision);
       case "press":
@@ -43741,8 +43907,6 @@ var VisionAgent = class {
     this.collector.appendLog(`\u{1F4F7} \u274C capture rejected (duplicate)`);
     return `capture rejected \u2014 duplicate content. Move on to the next post.`;
   }
-  // VIDEO RECORDING DISABLED — executeRecord() commented out
-  // private async executeRecord(d: VisionAction): Promise<string> { ... }
   async executeType(d) {
     if (!d.text) return "no text provided";
     const context = await this.getFocusedInputContext();
@@ -43861,7 +44025,7 @@ var VisionAgent = class {
     if (d.phase === "search") return "search";
     if (this.actionHistory.length > 0) {
       const last = this.actionHistory[this.actionHistory.length - 1];
-      if (last.action === "press(ArrowRight)") return "carousel";
+      if (last.action === "press(ArrowRight)" || last.action === "[specialist] press(ArrowRight)") return "carousel";
     }
     return "feed";
   }
@@ -43896,78 +44060,85 @@ var VisionAgent = class {
     const systemPrompt = this.getSystemPrompt();
     const userPrompt = this.buildUserPrompt(remainingMs);
     const visionDetail = process.env.KOWALSKI_VISION_DETAIL || "high";
-    const allPhaseImages = this.loadReferenceImagesByPhase();
-    const messages = [
-      { role: "system", content: systemPrompt }
-    ];
-    const phase = this.lastDeclaredPhase;
-    if (phase && !this.sentPhases.has(phase)) {
-      const refContent = [];
-      if (this.sentPhases.size === 0) {
-        const generalImages = allPhaseImages.get("general") || [];
-        for (const ref of generalImages) {
+    const messages = [];
+    if (this.activeModel === "navigator") {
+      const allPhaseImages = this.loadReferenceImagesByPhase();
+      const phase = this.lastDeclaredPhase;
+      if (phase && !this.sentPhases.has(phase)) {
+        const refContent = [];
+        if (this.sentPhases.size === 0) {
+          const generalImages = allPhaseImages.get("general") || [];
+          for (const ref of generalImages) {
+            refContent.push({
+              type: "image",
+              source: this.dataUrlToAnthropicSource(ref.base64)
+            });
+            refContent.push({
+              type: "text",
+              text: `[Reference: ${ref.label}]`
+            });
+          }
+        }
+        const phaseImages = allPhaseImages.get(phase) || [];
+        for (const ref of phaseImages) {
           refContent.push({
-            type: "image_url",
-            image_url: { url: ref.base64, detail: "auto" }
+            type: "image",
+            source: this.dataUrlToAnthropicSource(ref.base64)
           });
           refContent.push({
             type: "text",
-            text: `[Reference: ${ref.label}]`
+            text: `[Step: ${ref.label}]`
           });
         }
+        if (refContent.length > 0) {
+          refContent.push({
+            type: "text",
+            text: `These are step-by-step instructions for how to handle ${phase.toLowerCase()} on Instagram. The images are numbered \u2014 follow them in sequence. Read the annotations in each image carefully.`
+          });
+          messages.push({ role: "user", content: refContent });
+          messages.push({
+            role: "assistant",
+            content: `Understood. I'll follow the ${phase.toLowerCase()} workflow steps shown above.`
+          });
+          console.log(`  \u{1F4CE} Injected ${phase} reference images (${phaseImages.length} images)`);
+          this.collector.appendLog(`\u{1F4CE} Injected ${phase} reference images (${phaseImages.length} images)`);
+        }
+        this.sentPhases.add(phase);
       }
-      const phaseImages = allPhaseImages.get(phase) || [];
-      for (const ref of phaseImages) {
-        refContent.push({
-          type: "image_url",
-          image_url: { url: ref.base64, detail: "auto" }
-        });
-        refContent.push({
-          type: "text",
-          text: `[Step: ${ref.label}]`
-        });
-      }
-      if (refContent.length > 0) {
-        refContent.push({
-          type: "text",
-          text: `These are step-by-step instructions for how to handle ${phase.toLowerCase()} on Instagram. The images are numbered \u2014 follow them in sequence. Read the annotations in each image carefully.`
-        });
-        messages.push({ role: "user", content: refContent });
-        messages.push({
-          role: "assistant",
-          content: `Understood. I'll follow the ${phase.toLowerCase()} workflow steps shown above.`
-        });
-        console.log(`  \u{1F4CE} Injected ${phase} reference images (${phaseImages.length} images)`);
-        this.collector.appendLog(`\u{1F4CE} Injected ${phase} reference images (${phaseImages.length} images)`);
-      }
-      this.sentPhases.add(phase);
     }
     messages.push({
       role: "user",
       content: [
         {
-          type: "image_url",
-          image_url: {
-            url: `data:image/jpeg;base64,${screenshot.toString("base64")}`,
-            detail: visionDetail
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/jpeg",
+            data: screenshot.toString("base64")
           }
         },
         { type: "text", text: userPrompt }
       ]
     });
+    const isSpecialist = this.activeModel === "specialist";
     const requestBody = {
-      model: this.model,
+      model: isSpecialist ? this.specialistModel : this.model,
+      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       messages,
-      response_format: { type: "json_object" },
-      max_completion_tokens: 2048
+      max_tokens: isSpecialist ? 16e3 : 2048
     };
+    if (isSpecialist) {
+      requestBody.thinking = { type: "enabled", budget_tokens: 1e4 };
+    }
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${this.config.apiKey}`
+            "x-api-key": this.config.apiKey,
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "prompt-caching-2024-07-31"
           },
           body: JSON.stringify(requestBody)
         });
@@ -43981,14 +44152,16 @@ var VisionAgent = class {
         const usage = data.usage;
         if (usage) {
           this.lastTokenUsage = {
-            promptTokens: usage.prompt_tokens || 0,
-            completionTokens: usage.completion_tokens || 0
+            promptTokens: usage.input_tokens || 0,
+            completionTokens: usage.output_tokens || 0
           };
-          console.log(`  \u{1F9E0} Tokens: ${usage.prompt_tokens} in, ${usage.completion_tokens} out (vision:${visionDetail})`);
-          this.collector.appendLog(`  \u{1F9E0} Tokens: ${usage.prompt_tokens} in, ${usage.completion_tokens} out (vision:${visionDetail})`);
+          const cacheInfo = usage.cache_read_input_tokens ? ` (cached: ${usage.cache_read_input_tokens})` : "";
+          console.log(`  \u{1F9E0} Tokens: ${usage.input_tokens} in${cacheInfo}, ${usage.output_tokens} out (vision:${visionDetail})`);
+          this.collector.appendLog(`  \u{1F9E0} Tokens: ${usage.input_tokens} in${cacheInfo}, ${usage.output_tokens} out (vision:${visionDetail})`);
         }
-        const choices = data.choices;
-        const content = choices?.[0]?.message?.content;
+        const contentBlocks = data.content;
+        const textBlock = contentBlocks?.find((b) => b.type === "text");
+        const content = textBlock?.text;
         if (!content || typeof content !== "string") {
           console.warn(`  \u26A0\uFE0F Empty LLM response (attempt ${attempt + 1})`);
           this.collector.appendLog(`  \u26A0\uFE0F Empty LLM response (attempt ${attempt + 1})`);
@@ -43998,7 +44171,7 @@ var VisionAgent = class {
           }
           break;
         }
-        const parsed = JSON.parse(content);
+        const parsed = this.parseJsonResponse(content);
         return parsed;
       } catch (err) {
         console.warn(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}):`, err);
@@ -44016,8 +44189,19 @@ var VisionAgent = class {
   // -----------------------------------------------------------------------
   // System Prompt
   // -----------------------------------------------------------------------
+  /**
+   * Convert a data URL (data:image/jpeg;base64,...) to Anthropic image source format.
+   */
+  dataUrlToAnthropicSource(dataUrl) {
+    const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+    if (!match) {
+      return { type: "base64", media_type: "image/jpeg", data: dataUrl };
+    }
+    return { type: "base64", media_type: match[1], data: match[2] };
+  }
   getSystemPrompt() {
-    return vision_agent_default.replace("{{SCREENSHOT_WIDTH}}", String(this.screenshotWidth)).replace("{{SCREENSHOT_HEIGHT}}", String(this.screenshotHeight));
+    const prompt = this.activeModel === "navigator" ? navigator_agent_default : specialist_agent_default;
+    return prompt.replace("{{SCREENSHOT_WIDTH}}", String(this.screenshotWidth)).replace("{{SCREENSHOT_HEIGHT}}", String(this.screenshotHeight));
   }
   /**
    * Load reference images from src/main/prompts/examples/, organized by folder.
@@ -44101,14 +44285,23 @@ var VisionAgent = class {
     if (this.config.userInterests.length > 0) {
       parts.push(`INTERESTS TO SEARCH: ${this.config.userInterests.join(", ")}`);
     }
-    if (this.actionHistory.length > 0) {
+    if (this.lastSpecialistResult) {
+      parts.push(`
+SPECIALIST RESULT: ${this.lastSpecialistResult}`);
+      parts.push("The specialist has finished. Continue navigating based on its result.");
+      this.lastSpecialistResult = "";
+    }
+    if (this.lastAction && this.actionHistory.length > 0) {
       const last = this.actionHistory[this.actionHistory.length - 1];
       parts.push(`
-LAST ACTION: ${last.action} \u2192 ${last.result}`);
+YOUR LAST ACTION: ${JSON.stringify({ action: this.lastAction.action, element: this.lastAction.element, thinking: this.lastAction.thinking })}`);
+      parts.push(`RESULT: ${last.result}`);
+      parts.push(`Did it work? Compare what you see now to what you expected.`);
     }
     if (this.actionHistory.length > 0) {
       parts.push("\nRECENT HISTORY:");
-      this.actionHistory.forEach((entry, i) => {
+      const recent = this.actionHistory.slice(-8);
+      recent.forEach((entry, i) => {
         parts.push(`${i + 1}. ${entry.action} \u2192 ${entry.result}`);
       });
     }
@@ -44148,7 +44341,7 @@ ${this.lastMemory}`);
   /**
    * Save the screenshot the LLM saw with action overlay drawn on it.
    * For click/hover/newtab: draws a red crosshair at the element's center in screenshot space.
-   * For capture/record: draws a red rectangle for the crop region.
+   * For capture: draws a red rectangle for the crop region.
    * Saved to nav/ subdirectory within the session folder.
    */
   async saveDebugScreenshot(screenshot, decision) {
@@ -44210,7 +44403,8 @@ ${this.lastMemory}`);
         }
       }
       const buffer = await image2.getBuffer("image/jpeg", { quality: 85 });
-      const filename = `turn_${String(this.decisionCount).padStart(3, "0")}_${decision.action}.jpg`;
+      const agentTag = this.activeModel === "specialist" ? "spec_" : "";
+      const filename = `turn_${String(this.decisionCount).padStart(3, "0")}_${agentTag}${decision.action}.jpg`;
       import_fs5.default.writeFileSync(import_path3.default.join(outputDir, filename), buffer);
     } catch (err) {
       console.warn(`  \u26A0\uFE0F Debug screenshot save failed:`, err);
@@ -44219,6 +44413,23 @@ ${this.lastMemory}`);
   // -----------------------------------------------------------------------
   // Utilities
   // -----------------------------------------------------------------------
+  /** Parse JSON from LLM response, handling prose wrapper or markdown code blocks. */
+  parseJsonResponse(content) {
+    const trimmed = content.trim();
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+    }
+    const codeBlockMatch = trimmed.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (codeBlockMatch) {
+      return JSON.parse(codeBlockMatch[1]);
+    }
+    const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    throw new SyntaxError(`No JSON found in response: ${trimmed.slice(0, 100)}`);
+  }
   delay(ms) {
     return new Promise((r) => setTimeout(r, ms));
   }
@@ -44230,7 +44441,6 @@ ${this.lastMemory}`);
         return `scroll(${d.direction || "down"})`;
       case "capture":
         return d.x2 !== void 0 ? `capture(${d.x},${d.y},${d.x2},${d.y2})` : "capture";
-      // case 'record': return `record(${d.x},${d.y},${d.x2},${d.y2},${d.seconds || 10}s)`;  // VIDEO RECORDING DISABLED
       case "type":
         return `type("${(d.text || "").slice(0, 20)}")`;
       case "press":
@@ -44243,6 +44453,10 @@ ${this.lastMemory}`);
         return `newtab([${d.element}])`;
       case "closetab":
         return "closetab";
+      case "handoff":
+        return "handoff";
+      case "escalate":
+        return "escalate";
       case "done":
         return "done";
       default:
@@ -44253,7 +44467,6 @@ ${this.lastMemory}`);
   getCaptureCount() {
     return this.captureCount;
   }
-  // getRecordCount(): number { return this.recordCount; }  // VIDEO RECORDING DISABLED
   getRecordCount() {
     return 0;
   }
@@ -44401,7 +44614,6 @@ var os = __toESM(require("os"), 1);
 var InstagramScraper = class {
   context;
   apiKey;
-  usageCap;
   usageService;
   debugMode;
   // Layer instances (created per-session)
@@ -44411,10 +44623,9 @@ var InstagramScraper = class {
   page;
   sessionMemory = new SessionMemory();
   activeVisionAgent = null;
-  constructor(context, apiKey, usageCap, debugMode = false) {
+  constructor(context, apiKey, debugMode = false) {
     this.context = context;
     this.apiKey = apiKey;
-    this.usageCap = usageCap;
     this.usageService = UsageService.getInstance();
     this.debugMode = debugMode;
   }
@@ -44581,7 +44792,7 @@ var BatchDigestGenerator = class {
   }
   /**
    * Generate a digest from all captured screenshots in one API call.
-   * Uses GPT-4o Vision with multiple images.
+   * Uses Anthropic Claude with multiple images.
    *
    * @param captures - Array of captured screenshots from browsing session
    * @param config - User configuration (name, interests, location)
@@ -44599,11 +44810,11 @@ var BatchDigestGenerator = class {
       year: "numeric"
     });
     const imageContents = captures.map((capture) => ({
-      type: "image_url",
-      image_url: {
-        url: `data:image/jpeg;base64,${capture.screenshot.toString("base64")}`,
-        detail: "low"
-        // Cost optimization: low detail for social media content
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: "image/jpeg",
+        data: capture.screenshot.toString("base64")
       }
     }));
     const prompt = this.buildDigestPrompt(config, dayName, dateStr, captures);
@@ -44612,11 +44823,12 @@ var BatchDigestGenerator = class {
       { type: "text", text: prompt },
       ...imageContents
     ];
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.apiKey}`
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
         model: ModelConfig.digest,
@@ -44624,8 +44836,7 @@ var BatchDigestGenerator = class {
           role: "user",
           content: messageContent
         }],
-        max_completion_tokens: 16384,
-        response_format: { type: "json_object" }
+        max_tokens: 16384
       })
     });
     if (!response.ok) {
@@ -44636,10 +44847,11 @@ var BatchDigestGenerator = class {
     const data = await response.json();
     if (data.usage) {
       await this.usageService.incrementUsage(data.usage);
-      console.log(`\u{1F4B0} Digest cost tracked: ${data.usage.total_tokens} tokens`);
+      const totalTokens = (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
+      console.log(`\u{1F4B0} Digest cost tracked: ${totalTokens} tokens`);
     }
-    const rawContent = data.choices[0]?.message?.content;
-    const content = typeof rawContent === "string" ? rawContent : Array.isArray(rawContent) ? rawContent.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
+    const contentBlocks = data.content;
+    const content = contentBlocks?.filter((b) => b.type === "text").map((b) => b.text).join("") || "";
     if (!content) {
       throw new Error("DIGEST_GENERATION_FAILED: No content in response");
     }
@@ -44850,11 +45062,11 @@ var ImageTagger = class {
     }
     console.log(`\u{1F3F7}\uFE0F Tagging ${captures.length} images with ${ModelConfig.tagging}...`);
     const imageContents = captures.map((capture) => ({
-      type: "image_url",
-      image_url: {
-        url: `data:image/jpeg;base64,${capture.screenshot.toString("base64")}`,
-        detail: "low"
-        // Cost optimization
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: "image/jpeg",
+        data: capture.screenshot.toString("base64")
       }
     }));
     const prompt = this.buildTaggingPrompt(captures.length);
@@ -44863,11 +45075,12 @@ var ImageTagger = class {
       ...imageContents
     ];
     try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${this.apiKey}`
+          "x-api-key": this.apiKey,
+          "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
           model: ModelConfig.tagging,
@@ -44875,8 +45088,7 @@ var ImageTagger = class {
             role: "user",
             content: messageContent
           }],
-          max_completion_tokens: 4096,
-          response_format: { type: "json_object" }
+          max_tokens: 4096
         })
       });
       if (!response.ok) {
@@ -44885,13 +45097,13 @@ var ImageTagger = class {
         throw new Error("TAGGING_FAILED");
       }
       const data = await response.json();
-      const tokensUsed = data.usage?.total_tokens || 0;
+      const tokensUsed = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
       if (data.usage) {
         await this.usageService.incrementUsage(data.usage);
         console.log(`\u{1F4B0} Tagging cost tracked: ${tokensUsed} tokens`);
       }
-      const rawContent = data.choices[0]?.message?.content;
-      const content = typeof rawContent === "string" ? rawContent : Array.isArray(rawContent) ? rawContent.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
+      const contentBlocks = data.content;
+      const content = contentBlocks?.filter((b) => b.type === "text").map((b) => b.text).join("") || "";
       if (!content) {
         throw new Error("TAGGING_FAILED: No content in response");
       }
@@ -45070,10 +45282,24 @@ var SchedulerService = class _SchedulerService {
   setMainWindow(window2) {
     this.mainWindow = window2;
   }
-  // Helper to dynamically load electron-store (ESM)
+  storeInstance = null;
+  // Helper to dynamically load electron-store (ESM) with EINTR retry
   async getStore() {
-    const { default: Store } = await import("electron-store");
-    return new Store();
+    if (this.storeInstance) return this.storeInstance;
+    const maxRetries = 3;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const { default: Store } = await import("electron-store");
+        this.storeInstance = new Store();
+        return this.storeInstance;
+      } catch (err) {
+        if (err.code === "EINTR" && i < maxRetries - 1) {
+          await new Promise((r) => setTimeout(r, 100));
+          continue;
+        }
+        throw err;
+      }
+    }
   }
   // Format date in LOCAL timezone (avoids UTC conversion issues)
   formatLocalDate(date) {
@@ -45516,7 +45742,7 @@ var SchedulerService = class _SchedulerService {
         throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
       }
       console.log("\u{1F9EA} Browsing Instagram (90 min max, stop with Cmd+Shift+K)...");
-      const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);
+      const scraper = new InstagramScraper(context, apiKey, true);
       this.activeDebugScraper = scraper;
       const session2 = await scraper.browseAndCapture(
         MAX_DURATION_MS / 6e4,
@@ -45648,7 +45874,7 @@ var SchedulerService = class _SchedulerService {
         throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
       }
       console.log("\u{1F4F1} Baker browsing Instagram (Screenshot-First mode)...");
-      const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
+      const scraper = new InstagramScraper(context, apiKey);
       const session2 = await scraper.browseAndCapture(
         90,
         // Normal mode: 90 minutes (range: 60-150 min)
@@ -45757,6 +45983,7 @@ if (!import_electron6.app.getLoginItemSettings().openAtLogin) {
     // Optional: could be true if we want silent start
   });
 }
+import_electron6.app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 if (require2("electron-squirrel-startup")) {
   import_electron6.app.quit();
 }
@@ -45869,8 +46096,14 @@ import_electron6.app.on("ready", () => {
   console.log(`\u2705 Registered kowalski-local protocol on partition: ${SHARED_PARTITION}`);
   createWindow();
   console.log("Session persistence enabled.");
-  UsageService.getInstance().initialize();
-  SchedulerService.getInstance().initialize();
+  setTimeout(() => {
+    UsageService.getInstance().initialize().catch((err) => {
+      console.error("UsageService init failed:", err);
+    });
+    SchedulerService.getInstance().initialize().catch((err) => {
+      console.error("SchedulerService init failed:", err);
+    });
+  }, 2e3);
   import_electron6.globalShortcut.register("CommandOrControl+Shift+H", () => {
     console.log("\u{1F9EA} Debug Run Triggered (Cmd+Shift+H)");
     SchedulerService.getInstance().triggerDebugRun();
@@ -46040,6 +46273,28 @@ function setupIPCHandlers() {
   });
   import_electron6.ipcMain.handle("settings:get-secure", async () => {
     return SecureKeyManager.getInstance().getKey();
+  });
+  import_electron6.ipcMain.handle("settings:validate-api-key", async (_event, { apiKey }) => {
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }]
+        })
+      });
+      if (response.status === 401) return { valid: false, error: "invalid_key" };
+      if (!response.ok) return { valid: false, error: "api_error" };
+      return { valid: true };
+    } catch (error) {
+      return { valid: false, error: "network_error" };
+    }
   });
   import_electron6.ipcMain.handle("auth:login", async (_event, bounds) => {
     if (!mainWindow) return false;

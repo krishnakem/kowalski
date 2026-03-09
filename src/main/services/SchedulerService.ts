@@ -65,10 +65,25 @@ export class SchedulerService {
         this.mainWindow = window;
     }
 
-    // Helper to dynamically load electron-store (ESM)
+    private storeInstance: any = null;
+
+    // Helper to dynamically load electron-store (ESM) with EINTR retry
     private async getStore(): Promise<any> {
-        const { default: Store } = await import('electron-store');
-        return new Store();
+        if (this.storeInstance) return this.storeInstance;
+        const maxRetries = 3;
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                const { default: Store } = await import('electron-store');
+                this.storeInstance = new Store();
+                return this.storeInstance;
+            } catch (err: any) {
+                if (err.code === 'EINTR' && i < maxRetries - 1) {
+                    await new Promise(r => setTimeout(r, 100));
+                    continue;
+                }
+                throw err;
+            }
+        }
     }
 
     // Format date in LOCAL timezone (avoids UTC conversion issues)
@@ -691,7 +706,7 @@ export class SchedulerService {
 
             // 4. Browse Instagram and capture screenshots (90 min max, or stop with Cmd+Shift+K)
             console.log('🧪 Browsing Instagram (90 min max, stop with Cmd+Shift+K)...');
-            const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10, true);  // debugMode = true
+            const scraper = new InstagramScraper(context, apiKey, true);  // debugMode = true
             this.activeDebugScraper = scraper;
             const session = await scraper.browseAndCapture(
                 MAX_DURATION_MS / 60000,  // Convert to minutes (24h safety net)
@@ -874,7 +889,7 @@ export class SchedulerService {
 
             // 4. Browse Instagram and capture screenshots
             console.log('📱 Baker browsing Instagram (Screenshot-First mode)...');
-            const scraper = new InstagramScraper(context, apiKey, settings.usageCap || 10);
+            const scraper = new InstagramScraper(context, apiKey);
             const session = await scraper.browseAndCapture(
                 90,  // Normal mode: 90 minutes (range: 60-150 min)
                 settings.interests || []

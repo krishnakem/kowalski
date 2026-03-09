@@ -92,7 +92,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [eveningTime, setEveningTime] = useState("6:00 PM");
   const [instagramPhase, setInstagramPhase] = useState<InstagramPhase>("trigger");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [usageCap, setUsageCap] = useState(10);
   const [isValidating, setIsValidating] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
   const [interests, setInterests] = useState<string[]>([]);
@@ -109,7 +108,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
       if (settings.digestFrequency) setDigestCount(settings.digestFrequency as DigestCount);
       if (settings.morningTime) setMorningTime(settings.morningTime);
       if (settings.eveningTime) setEveningTime(settings.eveningTime);
-      if (settings.usageCap) setUsageCap(settings.usageCap);
     }
   }, [isLoaded, settings]);
 
@@ -212,17 +210,14 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
     setKeyError(null);
 
     try {
-      const response = await fetch('https://api.openai.com/v1/models', {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-      });
-
-      if (response.status === 401) {
+      const result = await window.api.settings.validateApiKey(apiKey);
+      if (!result.valid) {
         setKeyError('Invalid API key. Please check and try again.');
         return;
       }
 
       // Valid key - save and proceed
-      patchSettings({ apiKey, usageCap });
+      patchSettings({ apiKey });
       setStep("instagram");
     } catch (error) {
       setKeyError('Could not validate key. Check your connection.');
@@ -770,16 +765,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-md w-full space-y-12 relative"
           >
-            {/* Temporary dev skip button - DELETE BEFORE SHIPPING */}
-            <button
-              onClick={() => {
-                patchSettings({ usageCap });
-                setStep("instagram");
-              }}
-              className="absolute -top-8 right-0 text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
-            >
-              Skip (dev only)
-            </button>
             {/* Headline */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -788,10 +773,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
               className="text-center space-y-4"
             >
               <h2 className="text-5xl font-serif text-foreground">
-                {userName.trim() ? `${userName.trim()}, what` : "What"} is your OpenAI API Key?
+                {userName.trim() ? `${userName.trim()}, what` : "What"} is your Anthropic API Key?
               </h2>
               <p className="text-muted-foreground text-sm font-sans leading-relaxed max-w-sm mx-auto">
-                Kowalski is private by design. Your data is processed using your personal OpenAI account and stored locally on your device.
+                Kowalski is private by design. Your data is processed using your personal Anthropic API key and stored locally on your device.
               </p>
             </motion.div>
 
@@ -810,7 +795,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     setApiKey(e.target.value);
                     setKeyError(null);
                   }}
-                  placeholder="sk-..."
+                  placeholder="sk-ant-..."
                   className={`w-full input-dotted text-foreground placeholder:text-foreground/30
                              font-sans text-lg tracking-wider pr-12 py-4 ${keyError ? 'border-destructive' : ''}`}
                 />
@@ -830,52 +815,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   {keyError}
                 </motion.p>
               )}
-            </motion.div>
-
-            {/* Safety Limit Slider */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.35, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-              className="space-y-4 pt-2"
-            >
-              <div className="text-center space-y-1">
-                <label className="block text-sm font-sans">
-                  <span className="font-semibold text-foreground">Monthly Usage Cap:</span>{" "}
-                  <span className="text-foreground">${usageCap}</span>
-                </label>
-                <p className="text-sm text-muted-foreground font-sans">
-                  Kowalski will stop processing requests once this limit is reached
-                </p>
-              </div>
-              <div className="relative px-1">
-                <input
-                  type="range"
-                  min={5}
-                  max={15}
-                  value={usageCap}
-                  onChange={(e) => setUsageCap(Number(e.target.value))}
-                  className="w-full h-0.5 bg-transparent appearance-none cursor-pointer
-                             [&::-webkit-slider-runnable-track]:h-0.5 
-                             [&::-webkit-slider-runnable-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
-                             [&::-webkit-slider-thumb]:appearance-none 
-                             [&::-webkit-slider-thumb]:w-4 
-                             [&::-webkit-slider-thumb]:h-4 
-                             [&::-webkit-slider-thumb]:rounded-full 
-                             [&::-webkit-slider-thumb]:bg-foreground 
-                             [&::-webkit-slider-thumb]:-mt-[7px]
-                             [&::-webkit-slider-thumb]:cursor-pointer
-                             [&::-moz-range-track]:h-0.5 
-                             [&::-moz-range-track]:bg-[repeating-linear-gradient(90deg,hsl(var(--foreground)/0.3)_0px,hsl(var(--foreground)/0.3)_4px,transparent_4px,transparent_8px)]
-                             [&::-moz-range-thumb]:appearance-none 
-                             [&::-moz-range-thumb]:w-4 
-                             [&::-moz-range-thumb]:h-4 
-                             [&::-moz-range-thumb]:rounded-full 
-                             [&::-moz-range-thumb]:bg-foreground 
-                             [&::-moz-range-thumb]:border-0
-                             [&::-moz-range-thumb]:cursor-pointer"
-                />
-              </div>
             </motion.div>
 
             {/* Next Button */}

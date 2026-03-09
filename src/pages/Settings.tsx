@@ -79,7 +79,7 @@ const Settings = memo(() => {
 
   const getApiSummary = () => {
     if (settings.apiKey) {
-      return `$${settings.usageCap} cap`;
+      return "Key configured";
     }
     return "No API key set";
   };

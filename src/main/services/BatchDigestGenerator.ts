@@ -17,18 +17,19 @@ import { ModelConfig } from '../../shared/modelConfig.js';
 import { UsageService } from './UsageService.js';
 
 /**
- * Internal type for image content in OpenAI API.
+ * Internal type for image content in Anthropic API.
  */
 interface ImageContent {
-    type: 'image_url';
-    image_url: {
-        url: string;
-        detail: 'low' | 'high' | 'auto';
+    type: 'image';
+    source: {
+        type: 'base64';
+        media_type: string;
+        data: string;
     };
 }
 
 /**
- * Internal type for text content in OpenAI API.
+ * Internal type for text content in Anthropic API.
  */
 interface TextContent {
     type: 'text';
@@ -46,7 +47,7 @@ export class BatchDigestGenerator {
 
     /**
      * Generate a digest from all captured screenshots in one API call.
-     * Uses GPT-4o Vision with multiple images.
+     * Uses Anthropic Claude with multiple images.
      *
      * @param captures - Array of captured screenshots from browsing session
      * @param config - User configuration (name, interests, location)
@@ -68,12 +69,13 @@ export class BatchDigestGenerator {
             year: 'numeric'
         });
 
-        // Build image content array for GPT-4o
+        // Build image content array for Anthropic
         const imageContents: ImageContent[] = captures.map((capture) => ({
-            type: 'image_url' as const,
-            image_url: {
-                url: `data:image/jpeg;base64,${capture.screenshot.toString('base64')}`,
-                detail: 'low' as const  // Cost optimization: low detail for social media content
+            type: 'image' as const,
+            source: {
+                type: 'base64' as const,
+                media_type: 'image/jpeg',
+                data: capture.screenshot.toString('base64')
             }
         }));
 
@@ -88,11 +90,12 @@ export class BatchDigestGenerator {
             ...imageContents
         ];
 
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`
+                'x-api-key': this.apiKey,
+                'anthropic-version': '2023-06-01'
             },
             body: JSON.stringify({
                 model: ModelConfig.digest,
@@ -100,8 +103,7 @@ export class BatchDigestGenerator {
                     role: 'user',
                     content: messageContent
                 }],
-                max_completion_tokens: 16384,
-                response_format: { type: 'json_object' }
+                max_tokens: 16384
             })
         });
 
@@ -116,15 +118,12 @@ export class BatchDigestGenerator {
         // Track usage
         if (data.usage) {
             await this.usageService.incrementUsage(data.usage);
-            console.log(`💰 Digest cost tracked: ${data.usage.total_tokens} tokens`);
+            const totalTokens = (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
+            console.log(`💰 Digest cost tracked: ${totalTokens} tokens`);
         }
 
-        const rawContent = data.choices[0]?.message?.content;
-        const content = typeof rawContent === 'string'
-            ? rawContent
-            : Array.isArray(rawContent)
-                ? rawContent.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
-                : '';
+        const contentBlocks = data.content as Array<{ type: string; text?: string }> | undefined;
+        const content = contentBlocks?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') || '';
 
         if (!content) {
             throw new Error('DIGEST_GENERATION_FAILED: No content in response');

@@ -19,6 +19,7 @@ interface Window {
             setSecure: (apiKey: string) => Promise<boolean>;
             checkKeyStatus: () => Promise<'locked' | 'secured' | 'missing'>;
             getSecureKey: () => Promise<string | null>;
+            validateApiKey: (apiKey: string) => Promise<{ valid: boolean; error?: string }>;
             onAnalysisReady: (callback: (analysis: any) => void) => () => void;
             onScheduleUpdated: (callback: (schedule: any) => void) => () => void;
             // Debug run timer events (Cmd+Shift+H)

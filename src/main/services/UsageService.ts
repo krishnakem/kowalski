@@ -4,19 +4,18 @@ interface UsageData {
     lastResetDate: string; // ISO String
 }
 
-interface OpenAITokenUsage {
-    prompt_tokens: number;
-    completion_tokens: number;
-    prompt_tokens_details?: {
-        cached_tokens?: number;
-    };
+interface AnthropicTokenUsage {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
 }
 
-// GPT-4o pricing (used for both Vision and Analysis)
+// Claude Opus 4.6 pricing
 const MODEL_RATES = {
-    INPUT_TOKEN: 0.0000025,       // $2.50 / 1M tokens
-    CACHED_INPUT_TOKEN: 0.00000125, // $1.25 / 1M tokens
-    OUTPUT_TOKEN: 0.00001,        // $10.00 / 1M tokens
+    INPUT_TOKEN: 0.000015,        // $15.00 / 1M tokens
+    CACHED_INPUT_TOKEN: 0.0000015, // $1.50 / 1M tokens (cache read)
+    OUTPUT_TOKEN: 0.000075,       // $75.00 / 1M tokens
 };
 
 export class UsageService {
@@ -121,10 +120,10 @@ export class UsageService {
     /**
      * Adds actual API usage to the accumulator.
      */
-    public async incrementUsage(usage: OpenAITokenUsage): Promise<number> {
-        const cached = usage.prompt_tokens_details?.cached_tokens || 0;
-        const regularInput = Math.max(0, usage.prompt_tokens - cached);
-        const output = usage.completion_tokens || 0;
+    public async incrementUsage(usage: AnthropicTokenUsage): Promise<number> {
+        const cached = usage.cache_read_input_tokens || 0;
+        const regularInput = Math.max(0, usage.input_tokens - cached);
+        const output = usage.output_tokens || 0;
 
         const cost = (regularInput * MODEL_RATES.INPUT_TOKEN) +
             (cached * MODEL_RATES.CACHED_INPUT_TOKEN) +
@@ -148,43 +147,4 @@ export class UsageService {
         return newSpend;
     }
 
-    /**
-     * Checks if current spending + estimated cost exceeds the cap.
-     */
-    public async isOverBudget(cap: number, estimatedCost: number = 0): Promise<boolean> {
-        const store = await this.getStore();
-        const usage = store.get('usageData') as UsageData;
-        const current = usage?.currentMonthSpend || 0;
-
-        return (current + estimatedCost) >= cap;
-    }
-
-    /**
-     * Returns remaining budget and estimated API calls available.
-     * Used for smart session planning.
-     */
-    public async getBudgetStatus(cap: number): Promise<{
-        currentSpend: number;
-        remaining: number;
-        estimatedCallsRemaining: number;
-    }> {
-        const store = await this.getStore();
-        const usage = store.get('usageData') as UsageData;
-        const currentSpend = usage?.currentMonthSpend || 0;
-        const remaining = Math.max(0, cap - currentSpend);
-
-        // Estimate: ~$0.01 per Vision API call (low detail mode)
-        const COST_PER_VISION_CALL = 0.01;
-        const estimatedCallsRemaining = Math.floor(remaining / COST_PER_VISION_CALL);
-
-        return { currentSpend, remaining, estimatedCallsRemaining };
-    }
-
-    /**
-     * Quick check if we can afford at least one more Vision API call.
-     */
-    public async canAffordVisionCall(cap: number): Promise<boolean> {
-        const COST_PER_VISION_CALL = 0.01;
-        return !(await this.isOverBudget(cap, COST_PER_VISION_CALL));
-    }
 }

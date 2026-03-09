@@ -1,12 +1,11 @@
 /**
- * VisionAgent - Set-of-Mark (SoM) Instagram Browsing Agent
+ * VisionAgent - Dual-Agent Instagram Browsing System
  *
- * Vision-based loop with numbered element labels. Interactive elements are
- * detected via page.evaluate(), labeled on the screenshot server-side (Jimp),
- * and the LLM outputs an element number for click/hover/newtab actions.
- * Capture/record still uses x,y crop coordinates.
+ * Navigator (Sonnet) handles all navigation — scrolling, clicking, dismissing popups.
+ * Specialist (Opus) handles captures, carousels, stories, and stuck recovery.
  *
- * Core loop: screenshot → label elements → LLM → action → repeat
+ * Core loop: screenshot → label elements → Navigator LLM → action → repeat
+ * On handoff: screenshot → label elements → Specialist LLM → capture → repeat until done
  *
  * Stealth: all labeling is server-side on the screenshot buffer. No DOM
  * modifications, no injected scripts. GhostMouse handles all clicks.
@@ -21,7 +20,8 @@ import { HumanScroll } from './HumanScroll.js';
 import { ScreenshotCollector } from './ScreenshotCollector.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
 import type { CaptureSource } from '../../types/instagram.js';
-import visionAgentPrompt from '../prompts/vision-agent.md';
+import navigatorPrompt from '../prompts/navigator-agent.md';
+import specialistPrompt from '../prompts/specialist-agent.md';
 import { labelElements, type LabeledElement } from '../../utils/elementLabeler.js';
 
 // ---------------------------------------------------------------------------
@@ -31,9 +31,9 @@ import { labelElements, type LabeledElement } from '../../utils/elementLabeler.j
 /** LLM response schema — the complete output format. */
 interface VisionAction {
     thinking: string;
-    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'capture' | /* 'record' | */ 'wait' | 'done' | 'newtab' | 'closetab';
+    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'capture' | 'wait' | 'done' | 'newtab' | 'closetab' | 'handoff' | 'escalate';
     element?: number;  // Element label number for click/hover/newtab
-    x?: number;        // Used for capture/record crop coordinates
+    x?: number;        // Used for capture crop coordinates
     y?: number;
     x2?: number;       // Bottom-right x for capture crop region
     y2?: number;       // Bottom-right y for capture crop region
@@ -44,6 +44,7 @@ interface VisionAction {
     memory?: string;
     phase?: 'posts' | 'search' | 'stories';
     source?: 'feed' | 'story' | 'carousel' | 'search';  // LLM declares content source on capture
+    result?: string;   // Specialist's done result message
 }
 
 interface ActionHistoryEntry {
@@ -61,7 +62,6 @@ export interface VisionAgentConfig {
 
 export interface VisionAgentResult {
     captureCount: number;
-    // recordCount: number;  // VIDEO RECORDING DISABLED
     decisionCount: number;
     actionHistory: ActionHistoryEntry[];
 }
@@ -71,7 +71,6 @@ export interface VisionAgentResult {
 // ---------------------------------------------------------------------------
 
 const SCREENSHOT_WIDTH = 1280;
-// No cap — LLM sees full history for the run
 
 // ---------------------------------------------------------------------------
 // VisionAgent
@@ -92,8 +91,10 @@ export class VisionAgent {
     private viewportWidth: number = 0;
     private viewportHeight: number = 0;
 
-    // LLM state
-    private model: string;
+    // LLM state — dual model
+    private model: string;              // Navigator (Sonnet)
+    private specialistModel: string;    // Specialist (Opus)
+    private activeModel: 'navigator' | 'specialist' = 'navigator';
     private lastMemory: string = '';
     private actionHistory: ActionHistoryEntry[] = [];
     private decisionCount: number = 0;
@@ -101,8 +102,6 @@ export class VisionAgent {
 
     // Session state
     private captureCount: number = 0;
-    // private recordCount: number = 0;  // VIDEO RECORDING DISABLED
-    // private recordedVideoHashes: Set<string> = new Set();
     private startTime: number = 0;
 
     // Reference example images organized by phase folder (Posts, Search, Stories)
@@ -115,6 +114,12 @@ export class VisionAgent {
 
     // Current turn's labeled elements (for click/hover/newtab execution)
     private currentElements: Map<number, LabeledElement> = new Map();
+
+    // Previous action tracking (for REFLECT step context)
+    private lastAction: VisionAction | null = null;
+
+    // Specialist result — fed back to navigator on next turn
+    private lastSpecialistResult: string = '';
 
     // External stop signal (set by Cmd+Shift+K)
     private stopped: boolean = false;
@@ -132,6 +137,7 @@ export class VisionAgent {
         this.collector = collector;
         this.config = config;
         this.model = ModelConfig.navigation;
+        this.specialistModel = ModelConfig.specialist;
     }
 
     // -----------------------------------------------------------------------
@@ -151,8 +157,8 @@ export class VisionAgent {
         this.viewportWidth = vp?.width || 1080;
         this.viewportHeight = vp?.height || 1920;
 
-        console.log(`\n👁️  VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${this.model})`);
-        this.collector.appendLog(`👁️ VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${this.model})`);
+        console.log(`\n👁️  VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
+        this.collector.appendLog(`👁️ VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
 
         while (true) {
             // Check external stop signal (Cmd+Shift+K)
@@ -186,11 +192,12 @@ export class VisionAgent {
             this.currentElements = elements;
             console.log(`  🏷️ Labeled ${elements.size} interactive elements`);
 
-            // 2. Call LLM
+            // 2. Call Navigator LLM
+            this.activeModel = 'navigator';
             const decision = await this.callLLM(screenshot, remaining);
             this.decisionCount++;
 
-            console.log(`  🧠 [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
+            console.log(`  🧭 [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
 
             // 2b. Log full reasoning for element-based actions (click/hover/newtab)
             if (['click', 'hover', 'newtab'].includes(decision.action) && decision.element !== undefined) {
@@ -211,35 +218,67 @@ export class VisionAgent {
                 break;
             }
 
+            // 3b. Handle handoff — switch to specialist for captures
+            if (decision.action === 'handoff') {
+                console.log('  🔄 Handoff to specialist (Opus) for capture');
+                this.collector.appendLog('🔄 Handoff to specialist (Opus) for capture');
+
+                // Persist navigator memory before handoff
+                if (decision.memory) this.lastMemory = decision.memory;
+                if (decision.phase) this.updatePhase(decision.phase);
+
+                const specialistResult = await this.runSpecialist('capture');
+                this.lastSpecialistResult = specialistResult;
+
+                // Record handoff in history
+                this.actionHistory.push({
+                    action: 'handoff',
+                    result: `Specialist: ${specialistResult.slice(0, 100)}`
+                });
+
+                // Log
+                const tokenStr = this.lastTokenUsage
+                    ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens`
+                    : '';
+                this.collector.appendLog(`[${this.decisionCount}] handoff${tokenStr}`);
+                this.collector.appendLog(`  💭 ${decision.thinking}`);
+                if (decision.memory) this.collector.appendLog(`  📝 Memory: ${decision.memory}`);
+
+                continue;
+            }
+
+            // 3c. Handle escalate — switch to specialist for rescue
+            if (decision.action === 'escalate') {
+                console.log('  🆘 Escalating to specialist (Opus) for rescue');
+                this.collector.appendLog('🆘 Escalating to specialist (Opus) for rescue');
+
+                if (decision.memory) this.lastMemory = decision.memory;
+
+                const specialistResult = await this.runSpecialist('rescue');
+                this.lastSpecialistResult = specialistResult;
+
+                this.actionHistory.push({
+                    action: 'escalate',
+                    result: `Specialist: ${specialistResult.slice(0, 100)}`
+                });
+
+                const tokenStr = this.lastTokenUsage
+                    ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens`
+                    : '';
+                this.collector.appendLog(`[${this.decisionCount}] escalate${tokenStr}`);
+                this.collector.appendLog(`  💭 ${decision.thinking}`);
+                if (decision.memory) this.collector.appendLog(`  📝 Memory: ${decision.memory}`);
+
+                continue;
+            }
+
             // 4. Persist memory scratchpad and phase declaration
             if (decision.memory) {
                 this.lastMemory = decision.memory;
             }
             let phaseChangeDeferred = false;
             if (decision.phase) {
-                const phaseMap: Record<string, string> = { posts: 'Posts', search: 'Search', stories: 'Stories' };
-                const folder = phaseMap[decision.phase];
-                if (folder && folder !== this.lastDeclaredPhase) {
-                    if (this.lastDeclaredPhase) {
-                        console.log(`  📂 Phase changed: ${this.lastDeclaredPhase} → ${folder}`);
-                        this.collector.appendLog(`📂 Phase changed: ${this.lastDeclaredPhase} → ${folder}`);
-                    } else {
-                        console.log(`  📂 Starting phase: ${folder}`);
-                        this.collector.appendLog(`📂 Starting phase: ${folder}`);
-                    }
-                    this.lastDeclaredPhase = folder;
-
-                    // If reference images for the new phase haven't been sent yet,
-                    // defer this turn's action so the LLM sees the images first
-                    const allPhaseImages = this.loadReferenceImagesByPhase();
-                    const hasUnsentImages = !this.sentPhases.has(folder) &&
-                        (allPhaseImages.get(folder)?.length ?? 0) > 0;
-                    if (hasUnsentImages) {
-                        phaseChangeDeferred = true;
-                        console.log(`  📎 Deferring action — loading ${folder} reference images first`);
-                        this.collector.appendLog(`📎 Deferring action — loading ${folder} reference images first`);
-                    }
-                }
+                phaseChangeDeferred = this.updatePhase(decision.phase);
             }
 
             // 5. Execute action (or defer if phase just changed and images need loading)
@@ -250,6 +289,9 @@ export class VisionAgent {
                 result = await this.executeAction(decision);
             }
             console.log(`     → ${result}`);
+
+            // 5b. Track last action for REFLECT step context
+            this.lastAction = decision;
 
             // 6. Record to history
             this.actionHistory.push({
@@ -275,10 +317,116 @@ export class VisionAgent {
 
         return {
             captureCount: this.captureCount,
-            // recordCount: this.recordCount,  // VIDEO RECORDING DISABLED
             decisionCount: this.decisionCount,
             actionHistory: [...this.actionHistory]
         };
+    }
+
+    // -----------------------------------------------------------------------
+    // Specialist Sub-Loop
+    // -----------------------------------------------------------------------
+
+    private async runSpecialist(mode: 'capture' | 'rescue'): Promise<string> {
+        this.activeModel = 'specialist';
+        let specialistTurns = 0;
+        const maxTurns = mode === 'capture' ? 20 : 5;
+        let resultMessage = '';
+
+        while (specialistTurns < maxTurns) {
+            specialistTurns++;
+
+            // Check stop signal
+            if (this.stopped) {
+                resultMessage = 'Stopped by user.';
+                break;
+            }
+
+            // Take screenshot
+            const rawScreenshot = await this.captureScreenshot();
+            if (!rawScreenshot) { await this.delay(500); continue; }
+
+            const { buffer: screenshot, elements } = await labelElements(
+                this.page, rawScreenshot,
+                this.screenshotWidth, this.screenshotHeight,
+                this.viewportWidth, this.viewportHeight
+            );
+            this.currentElements = elements;
+
+            // Call specialist model
+            const decision = await this.callLLM(screenshot, this.config.maxDurationMs - (Date.now() - this.startTime));
+            this.decisionCount++;
+
+            console.log(`  🎯 [Specialist ${specialistTurns}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
+            this.collector.appendLog(`🎯 [Specialist ${specialistTurns}] ${this.formatAction(decision)} | ${decision.thinking.slice(0, 80)}`);
+
+            // Save debug screenshot
+            await this.saveDebugScreenshot(screenshot, decision);
+
+            // Specialist says done — return to navigator
+            if (decision.action === 'done') {
+                resultMessage = decision.result || decision.thinking;
+                break;
+            }
+
+            // Execute the action normally
+            const result = await this.executeAction(decision);
+
+            // Track last action for context
+            this.lastAction = decision;
+            this.actionHistory.push({ action: `[specialist] ${this.formatAction(decision)}`, result });
+
+            // Log
+            this.collector.appendLog(`  → ${result}`);
+            if (decision.memory) {
+                this.collector.appendLog(`  📝 Memory: ${decision.memory}`);
+                this.lastMemory = decision.memory;
+            }
+        }
+
+        if (!resultMessage && specialistTurns >= maxTurns) {
+            resultMessage = `Specialist timed out after ${maxTurns} turns in ${mode} mode.`;
+        }
+
+        // Switch back to navigator
+        this.activeModel = 'navigator';
+        console.log(`  🔄 Returning to navigator. Specialist result: ${resultMessage.slice(0, 100)}`);
+        this.collector.appendLog(`🔄 Specialist done: ${resultMessage.slice(0, 100)}`);
+
+        return resultMessage;
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase Management
+    // -----------------------------------------------------------------------
+
+    /** Update phase from LLM declaration. Returns true if action should be deferred. */
+    private updatePhase(phase: string): boolean {
+        const phaseMap: Record<string, string> = { posts: 'Posts', search: 'Search', stories: 'Stories' };
+        const folder = phaseMap[phase];
+        if (!folder || folder === this.lastDeclaredPhase) return false;
+
+        if (this.lastDeclaredPhase) {
+            console.log(`  📂 Phase changed: ${this.lastDeclaredPhase} → ${folder}`);
+            this.collector.appendLog(`📂 Phase changed: ${this.lastDeclaredPhase} → ${folder}`);
+        } else {
+            console.log(`  📂 Starting phase: ${folder}`);
+            this.collector.appendLog(`📂 Starting phase: ${folder}`);
+        }
+        this.lastDeclaredPhase = folder;
+
+        // If reference images for the new phase haven't been sent yet,
+        // defer this turn's action so the LLM sees the images first
+        const allPhaseImages = this.loadReferenceImagesByPhase();
+        const hasUnsentImages = !this.sentPhases.has(folder) &&
+            (allPhaseImages.get(folder)?.length ?? 0) > 0;
+
+        if (hasUnsentImages) {
+            console.log(`  📎 Deferring action — loading ${folder} reference images first`);
+            this.collector.appendLog(`📎 Deferring action — loading ${folder} reference images first`);
+            return true;
+        }
+
+        return false;
     }
 
     // -----------------------------------------------------------------------
@@ -330,7 +478,6 @@ export class VisionAgent {
             case 'click': return this.executeClick(decision);
             case 'scroll': return this.executeScroll(decision);
             case 'capture': return this.executeCapture(decision);
-            // case 'record': return this.executeRecord(decision);  // VIDEO RECORDING DISABLED
             case 'type': return this.executeType(decision);
             case 'press': return this.executePress(decision);
             case 'hover': return this.executeHover(decision);
@@ -414,9 +561,6 @@ export class VisionAgent {
         this.collector.appendLog(`📷 ❌ capture rejected (duplicate)`);
         return `capture rejected — duplicate content. Move on to the next post.`;
     }
-
-    // VIDEO RECORDING DISABLED — executeRecord() commented out
-    // private async executeRecord(d: VisionAction): Promise<string> { ... }
 
     private async executeType(d: VisionAction): Promise<string> {
         if (!d.text) return 'no text provided';
@@ -571,7 +715,7 @@ export class VisionAgent {
         // Check action history for carousel detection: last action was ArrowRight
         if (this.actionHistory.length > 0) {
             const last = this.actionHistory[this.actionHistory.length - 1];
-            if (last.action === 'press(ArrowRight)') return 'carousel';
+            if (last.action === 'press(ArrowRight)' || last.action === '[specialist] press(ArrowRight)') return 'carousel';
         }
 
         return 'feed';
@@ -614,60 +758,60 @@ export class VisionAgent {
         const systemPrompt = this.getSystemPrompt();
         const userPrompt = this.buildUserPrompt(remainingMs);
         const visionDetail = process.env.KOWALSKI_VISION_DETAIL || 'high';
-        const allPhaseImages = this.loadReferenceImagesByPhase();
 
-        // Build messages array: system → (optional) phase reference images → current turn
-        const messages: Array<Record<string, unknown>> = [
-            { role: 'system', content: systemPrompt }
-        ];
+        // Build messages array
+        const messages: Array<Record<string, unknown>> = [];
 
-        // Inject reference images for the current phase (first time entering each phase)
-        const phase = this.lastDeclaredPhase;
-        if (phase && !this.sentPhases.has(phase)) {
-            const refContent: Array<Record<string, unknown>> = [];
+        // Inject reference images only for navigator (specialist works from current screenshot)
+        if (this.activeModel === 'navigator') {
+            const allPhaseImages = this.loadReferenceImagesByPhase();
+            const phase = this.lastDeclaredPhase;
+            if (phase && !this.sentPhases.has(phase)) {
+                const refContent: Array<Record<string, unknown>> = [];
 
-            // Include general images (e.g. goinghome.png) on the very first injection
-            if (this.sentPhases.size === 0) {
-                const generalImages = allPhaseImages.get('general') || [];
-                for (const ref of generalImages) {
+                // Include general images (e.g. goinghome.png) on the very first injection
+                if (this.sentPhases.size === 0) {
+                    const generalImages = allPhaseImages.get('general') || [];
+                    for (const ref of generalImages) {
+                        refContent.push({
+                            type: 'image',
+                            source: this.dataUrlToAnthropicSource(ref.base64)
+                        });
+                        refContent.push({
+                            type: 'text',
+                            text: `[Reference: ${ref.label}]`
+                        });
+                    }
+                }
+
+                // Include this phase's images (numbered step-by-step workflow)
+                const phaseImages = allPhaseImages.get(phase) || [];
+                for (const ref of phaseImages) {
                     refContent.push({
-                        type: 'image_url',
-                        image_url: { url: ref.base64, detail: 'auto' }
+                        type: 'image',
+                        source: this.dataUrlToAnthropicSource(ref.base64)
                     });
                     refContent.push({
                         type: 'text',
-                        text: `[Reference: ${ref.label}]`
+                        text: `[Step: ${ref.label}]`
                     });
                 }
-            }
 
-            // Include this phase's images (numbered step-by-step workflow)
-            const phaseImages = allPhaseImages.get(phase) || [];
-            for (const ref of phaseImages) {
-                refContent.push({
-                    type: 'image_url',
-                    image_url: { url: ref.base64, detail: 'auto' }
-                });
-                refContent.push({
-                    type: 'text',
-                    text: `[Step: ${ref.label}]`
-                });
+                if (refContent.length > 0) {
+                    refContent.push({
+                        type: 'text',
+                        text: `These are step-by-step instructions for how to handle ${phase.toLowerCase()} on Instagram. The images are numbered — follow them in sequence. Read the annotations in each image carefully.`
+                    });
+                    messages.push({ role: 'user', content: refContent });
+                    messages.push({
+                        role: 'assistant',
+                        content: `Understood. I'll follow the ${phase.toLowerCase()} workflow steps shown above.`
+                    });
+                    console.log(`  📎 Injected ${phase} reference images (${phaseImages.length} images)`);
+                    this.collector.appendLog(`📎 Injected ${phase} reference images (${phaseImages.length} images)`);
+                }
+                this.sentPhases.add(phase);
             }
-
-            if (refContent.length > 0) {
-                refContent.push({
-                    type: 'text',
-                    text: `These are step-by-step instructions for how to handle ${phase.toLowerCase()} on Instagram. The images are numbered — follow them in sequence. Read the annotations in each image carefully.`
-                });
-                messages.push({ role: 'user', content: refContent });
-                messages.push({
-                    role: 'assistant',
-                    content: `Understood. I'll follow the ${phase.toLowerCase()} workflow steps shown above.`
-                });
-                console.log(`  📎 Injected ${phase} reference images (${phaseImages.length} images)`);
-                this.collector.appendLog(`📎 Injected ${phase} reference images (${phaseImages.length} images)`);
-            }
-            this.sentPhases.add(phase);
         }
 
         // Current turn: live screenshot + context
@@ -675,31 +819,41 @@ export class VisionAgent {
             role: 'user',
             content: [
                 {
-                    type: 'image_url',
-                    image_url: {
-                        url: `data:image/jpeg;base64,${screenshot.toString('base64')}`,
-                        detail: visionDetail
+                    type: 'image',
+                    source: {
+                        type: 'base64',
+                        media_type: 'image/jpeg',
+                        data: screenshot.toString('base64')
                     }
                 },
                 { type: 'text', text: userPrompt }
             ]
         });
 
-        const requestBody = {
-            model: this.model,
+        // Build request body — different config per model
+        const isSpecialist = this.activeModel === 'specialist';
+        const requestBody: Record<string, unknown> = {
+            model: isSpecialist ? this.specialistModel : this.model,
+            system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
             messages,
-            response_format: { type: 'json_object' },
-            max_completion_tokens: 2048
+            max_tokens: isSpecialist ? 16000 : 2048,
         };
+
+        // Only enable extended thinking for specialist (Opus)
+        if (isSpecialist) {
+            requestBody.thinking = { type: 'enabled', budget_tokens: 10000 };
+        }
 
         // Attempt LLM call with one retry on JSON failure
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
-                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.config.apiKey}`
+                        'x-api-key': this.config.apiKey,
+                        'anthropic-version': '2023-06-01',
+                        'anthropic-beta': 'prompt-caching-2024-07-31'
                     },
                     body: JSON.stringify(requestBody)
                 });
@@ -708,24 +862,36 @@ export class VisionAgent {
                     const errText = await response.text();
                     console.warn(`  ⚠️ LLM API error (${response.status}): ${errText.slice(0, 200)}`);
                     this.collector.appendLog(`  ⚠️ LLM API error (${response.status}): ${errText.slice(0, 200)}`);
-                    break; // Don't retry API errors
+                    // Retry on overload (529) or rate limit (429) with backoff
+                    if ((response.status === 529 || response.status === 429) && attempt === 0) {
+                        const backoff = response.status === 429 ? 10000 : 5000;
+                        console.log(`  ⏳ Retrying after ${backoff / 1000}s backoff...`);
+                        await this.delay(backoff);
+                        continue;
+                    }
+                    break; // Don't retry other API errors
                 }
 
                 const data = await response.json() as Record<string, unknown>;
 
                 // Log token usage
-                const usage = data.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+                const usage = data.usage as { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } | undefined;
                 if (usage) {
                     this.lastTokenUsage = {
-                        promptTokens: usage.prompt_tokens || 0,
-                        completionTokens: usage.completion_tokens || 0
+                        promptTokens: usage.input_tokens || 0,
+                        completionTokens: usage.output_tokens || 0
                     };
-                    console.log(`  🧠 Tokens: ${usage.prompt_tokens} in, ${usage.completion_tokens} out (vision:${visionDetail})`);
-                    this.collector.appendLog(`  🧠 Tokens: ${usage.prompt_tokens} in, ${usage.completion_tokens} out (vision:${visionDetail})`);
+                    const cacheInfo = usage.cache_read_input_tokens
+                        ? ` (cached: ${usage.cache_read_input_tokens})`
+                        : '';
+                    console.log(`  🧠 Tokens: ${usage.input_tokens} in${cacheInfo}, ${usage.output_tokens} out (vision:${visionDetail})`);
+                    this.collector.appendLog(`  🧠 Tokens: ${usage.input_tokens} in${cacheInfo}, ${usage.output_tokens} out (vision:${visionDetail})`);
                 }
 
-                const choices = data.choices as Array<{ message?: { content?: string } }> | undefined;
-                const content = choices?.[0]?.message?.content;
+                const contentBlocks = data.content as Array<{ type: string; text?: string; thinking?: string }> | undefined;
+                // Skip 'thinking' blocks from extended thinking — only extract the 'text' block
+                const textBlock = contentBlocks?.find(b => b.type === 'text');
+                const content = textBlock?.text;
                 if (!content || typeof content !== 'string') {
                     console.warn(`  ⚠️ Empty LLM response (attempt ${attempt + 1})`);
                     this.collector.appendLog(`  ⚠️ Empty LLM response (attempt ${attempt + 1})`);
@@ -733,7 +899,7 @@ export class VisionAgent {
                     break;
                 }
 
-                const parsed = JSON.parse(content) as VisionAction;
+                const parsed = this.parseJsonResponse(content);
                 return parsed;
 
             } catch (err) {
@@ -753,8 +919,20 @@ export class VisionAgent {
     // System Prompt
     // -----------------------------------------------------------------------
 
+    /**
+     * Convert a data URL (data:image/jpeg;base64,...) to Anthropic image source format.
+     */
+    private dataUrlToAnthropicSource(dataUrl: string): { type: 'base64'; media_type: string; data: string } {
+        const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+        if (!match) {
+            return { type: 'base64', media_type: 'image/jpeg', data: dataUrl };
+        }
+        return { type: 'base64', media_type: match[1], data: match[2] };
+    }
+
     private getSystemPrompt(): string {
-        return visionAgentPrompt
+        const prompt = this.activeModel === 'navigator' ? navigatorPrompt : specialistPrompt;
+        return prompt
             .replace('{{SCREENSHOT_WIDTH}}', String(this.screenshotWidth))
             .replace('{{SCREENSHOT_HEIGHT}}', String(this.screenshotHeight));
     }
@@ -801,7 +979,6 @@ export class VisionAgent {
             }
 
             // Subdirectories → one group per folder name (Posts, Search, Stories)
-            // Recurses one level deeper for sub-flows (e.g. Search/search.results/)
             const subdirs = fs.readdirSync(examplesDir)
                 .filter(f => fs.statSync(path.join(examplesDir, f)).isDirectory())
                 .sort();
@@ -818,7 +995,7 @@ export class VisionAgent {
                     loaded.push(path.join(dir, file));
                 }
 
-                // Nested subdirectories (sub-flows, e.g. search.results/, search.account/)
+                // Nested subdirectories (sub-flows)
                 const nestedDirs = fs.readdirSync(dirPath)
                     .filter(f => fs.statSync(path.join(dirPath, f)).isDirectory())
                     .sort();
@@ -873,30 +1050,36 @@ export class VisionAgent {
         }
 
         parts.push(`CAPTURES: ${this.captureCount} screenshots taken`);
-        // VIDEO RECORDING DISABLED
-        // if (this.recordCount > 0) {
-        //     parts.push(`RECORDINGS: ${this.recordCount} videos recorded`);
-        // }
 
         if (this.config.userInterests.length > 0) {
             parts.push(`INTERESTS TO SEARCH: ${this.config.userInterests.join(', ')}`);
         }
 
-        // Last action + result
-        if (this.actionHistory.length > 0) {
-            const last = this.actionHistory[this.actionHistory.length - 1];
-            parts.push(`\nLAST ACTION: ${last.action} → ${last.result}`);
+        // Specialist result — feed back to navigator
+        if (this.lastSpecialistResult) {
+            parts.push(`\nSPECIALIST RESULT: ${this.lastSpecialistResult}`);
+            parts.push('The specialist has finished. Continue navigating based on its result.');
+            this.lastSpecialistResult = ''; // Clear after sending
         }
 
-        // Recent history
+        // Last action + result with verification prompt for REFLECT step
+        if (this.lastAction && this.actionHistory.length > 0) {
+            const last = this.actionHistory[this.actionHistory.length - 1];
+            parts.push(`\nYOUR LAST ACTION: ${JSON.stringify({ action: this.lastAction.action, element: this.lastAction.element, thinking: this.lastAction.thinking })}`);
+            parts.push(`RESULT: ${last.result}`);
+            parts.push(`Did it work? Compare what you see now to what you expected.`);
+        }
+
+        // Recent history — capped at last 8
         if (this.actionHistory.length > 0) {
             parts.push('\nRECENT HISTORY:');
-            this.actionHistory.forEach((entry, i) => {
+            const recent = this.actionHistory.slice(-8);
+            recent.forEach((entry, i) => {
                 parts.push(`${i + 1}. ${entry.action} → ${entry.result}`);
             });
         }
 
-        // Capture breakdown by source — LLM tracks details in memory scratchpad
+        // Capture breakdown by source
         if (this.captureCount > 0) {
             const breakdown = this.collector.getSourceBreakdown();
             const breakdownParts: string[] = [];
@@ -939,7 +1122,7 @@ export class VisionAgent {
     /**
      * Save the screenshot the LLM saw with action overlay drawn on it.
      * For click/hover/newtab: draws a red crosshair at the element's center in screenshot space.
-     * For capture/record: draws a red rectangle for the crop region.
+     * For capture: draws a red rectangle for the crop region.
      * Saved to nav/ subdirectory within the session folder.
      */
     private async saveDebugScreenshot(screenshot: Buffer, decision: VisionAction): Promise<void> {
@@ -985,10 +1168,10 @@ export class VisionAgent {
                 }
             }
 
-            // Draw rectangle for capture/record crop region (still coordinate-based)
+            // Draw rectangle for capture crop region
             if (decision.x2 !== undefined && decision.y2 !== undefined &&
                 decision.x !== undefined && decision.y !== undefined &&
-                (decision.action === 'capture' /* || decision.action === 'record' */)) {
+                decision.action === 'capture') {
                 const x1 = Math.round(decision.x);
                 const y1 = Math.round(decision.y);
                 const x2 = Math.round(decision.x2);
@@ -1016,7 +1199,8 @@ export class VisionAgent {
             }
 
             const buffer = await image.getBuffer('image/jpeg', { quality: 85 });
-            const filename = `turn_${String(this.decisionCount).padStart(3, '0')}_${decision.action}.jpg`;
+            const agentTag = this.activeModel === 'specialist' ? 'spec_' : '';
+            const filename = `turn_${String(this.decisionCount).padStart(3, '0')}_${agentTag}${decision.action}.jpg`;
             fs.writeFileSync(path.join(outputDir, filename), buffer);
         } catch (err) {
             // Non-critical — don't break the main loop
@@ -1028,6 +1212,31 @@ export class VisionAgent {
     // Utilities
     // -----------------------------------------------------------------------
 
+    /** Parse JSON from LLM response, handling prose wrapper or markdown code blocks. */
+    private parseJsonResponse(content: string): VisionAction {
+        // Try direct parse first
+        const trimmed = content.trim();
+        try {
+            return JSON.parse(trimmed) as VisionAction;
+        } catch {
+            // Fall through to extraction
+        }
+
+        // Try extracting JSON from markdown code block
+        const codeBlockMatch = trimmed.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+        if (codeBlockMatch) {
+            return JSON.parse(codeBlockMatch[1]) as VisionAction;
+        }
+
+        // Try extracting first JSON object from the text
+        const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]) as VisionAction;
+        }
+
+        throw new SyntaxError(`No JSON found in response: ${trimmed.slice(0, 100)}`);
+    }
+
     private delay(ms: number): Promise<void> {
         return new Promise(r => setTimeout(r, ms));
     }
@@ -1038,13 +1247,14 @@ export class VisionAgent {
             case 'click': return `click([${d.element}])`;
             case 'scroll': return `scroll(${d.direction || 'down'})`;
             case 'capture': return d.x2 !== undefined ? `capture(${d.x},${d.y},${d.x2},${d.y2})` : 'capture';
-            // case 'record': return `record(${d.x},${d.y},${d.x2},${d.y2},${d.seconds || 10}s)`;  // VIDEO RECORDING DISABLED
             case 'type': return `type("${(d.text || '').slice(0, 20)}")`;
             case 'press': return `press(${d.key})`;
             case 'hover': return `hover([${d.element}])`;
             case 'wait': return `wait(${d.seconds || 2}s)`;
             case 'newtab': return `newtab([${d.element}])`;
             case 'closetab': return 'closetab';
+            case 'handoff': return 'handoff';
+            case 'escalate': return 'escalate';
             case 'done': return 'done';
             default: return d.action;
         }
@@ -1052,7 +1262,6 @@ export class VisionAgent {
 
     // Public getters for InstagramScraper session summary
     getCaptureCount(): number { return this.captureCount; }
-    // getRecordCount(): number { return this.recordCount; }  // VIDEO RECORDING DISABLED
     getRecordCount(): number { return 0; }
     getDecisionCount(): number { return this.decisionCount; }
     getActionHistory(): ActionHistoryEntry[] { return [...this.actionHistory]; }

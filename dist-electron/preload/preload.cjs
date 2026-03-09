@@ -26,6 +26,7 @@ import_electron.contextBridge.exposeInMainWorld("api", {
     setSecure: (apiKey) => import_electron.ipcRenderer.invoke("settings:set-secure", { apiKey }),
     checkKeyStatus: () => import_electron.ipcRenderer.invoke("settings:check-key-status"),
     getSecureKey: () => import_electron.ipcRenderer.invoke("settings:get-secure"),
+    validateApiKey: (apiKey) => import_electron.ipcRenderer.invoke("settings:validate-api-key", { apiKey }),
     onAnalysisReady: (callback) => {
       const subscription = (_event, analysis) => callback(analysis);
       import_electron.ipcRenderer.on("analysis-ready", subscription);

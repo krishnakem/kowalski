@@ -34,6 +34,9 @@ if (!app.getLoginItemSettings().openAtLogin) {
   });
 }
 
+// Disable macOS window restoration prompt after force-quit
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
   app.quit();
@@ -202,11 +205,18 @@ app.on('ready', () => {
 
   console.log('Session persistence enabled.');
 
-  // Initialize Usage Service (Checks for monthly reset)
-  UsageService.getInstance().initialize();
+  // Delay service initialization to avoid EINTR during Electron startup
+  setTimeout(() => {
+    // Initialize Usage Service (Checks for monthly reset)
+    UsageService.getInstance().initialize().catch(err => {
+      console.error('UsageService init failed:', err);
+    });
 
-  // Initialize Scheduler
-  SchedulerService.getInstance().initialize();
+    // Initialize Scheduler
+    SchedulerService.getInstance().initialize().catch(err => {
+      console.error('SchedulerService init failed:', err);
+    });
+  }, 2000);
 
   // === DEBUG SHORTCUTS ===
   // Cmd+Shift+H: Start debug run (runs until LLM done or manually stopped)
@@ -443,6 +453,29 @@ function setupIPCHandlers() {
 
   ipcMain.handle('settings:get-secure', async () => {
     return SecureKeyManager.getInstance().getKey();
+  });
+
+  ipcMain.handle('settings:validate-api-key', async (_event, { apiKey }) => {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1,
+          messages: [{ role: 'user', content: 'hi' }]
+        })
+      });
+      if (response.status === 401) return { valid: false, error: 'invalid_key' };
+      if (!response.ok) return { valid: false, error: 'api_error' };
+      return { valid: true };
+    } catch (error: any) {
+      return { valid: false, error: 'network_error' };
+    }
   });
   // -------------------------------
   // -------------------------------

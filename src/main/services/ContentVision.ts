@@ -1,7 +1,7 @@
 /**
  * ContentVision - Stateless Vision API Content Extraction
  *
- * Uses OpenAI Vision API ONLY for content extraction (not navigation).
+ * Uses Anthropic Messages API ONLY for content extraction (not navigation).
  * Each call is stateless - no conversation history maintained.
  *
  * Cost: varies by model (see ModelConfig.vision)
@@ -184,12 +184,13 @@ export class ContentVision {
 
             // 3. Single stateless Vision API call (with exponential backoff)
             const response = await this.fetchWithBackoff(
-                'https://api.openai.com/v1/chat/completions',
+                'https://api.anthropic.com/v1/messages',
                 {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.apiKey}`
+                        'x-api-key': this.apiKey,
+                        'anthropic-version': '2023-06-01'
                     },
                     body: JSON.stringify({
                         model: ModelConfig.vision,
@@ -221,16 +222,16 @@ Return ONLY valid JSON. Example:
 If no posts visible, return: {"posts": []}`
                                 },
                                 {
-                                    type: 'image_url',
-                                    image_url: {
-                                        url: `data:image/jpeg;base64,${base64Image}`,
-                                        detail: 'low'  // Lower detail = lower cost
+                                    type: 'image',
+                                    source: {
+                                        type: 'base64',
+                                        media_type: 'image/jpeg',
+                                        data: base64Image
                                     }
                                 }
                             ]
                         }],
-                        max_completion_tokens: 16384,
-                        response_format: { type: 'json_object' }
+                        max_tokens: 16384
                     })
                 }
             );
@@ -266,12 +267,8 @@ If no posts visible, return: {"posts": []}`
                 await this.usageService.incrementUsage(data.usage);
             }
 
-            const rawContent = data.choices[0]?.message?.content;
-            const content = typeof rawContent === 'string'
-                ? rawContent
-                : Array.isArray(rawContent)
-                    ? rawContent.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
-                    : '';
+            const contentBlocks = data.content as Array<{ type: string; text?: string }> | undefined;
+            const content = contentBlocks?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') || '';
 
             // 4. Parse response
             const parsed = JSON.parse(content);
@@ -321,12 +318,13 @@ If no posts visible, return: {"posts": []}`
             const base64Image = screenshot.toString('base64');
 
             const response = await this.fetchWithBackoff(
-                'https://api.openai.com/v1/chat/completions',
+                'https://api.anthropic.com/v1/messages',
                 {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.apiKey}`
+                        'x-api-key': this.apiKey,
+                        'anthropic-version': '2023-06-01'
                     },
                     body: JSON.stringify({
                         model: ModelConfig.vision,
@@ -343,16 +341,16 @@ If no posts visible, return: {"posts": []}`
 Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}`
                                 },
                                 {
-                                    type: 'image_url',
-                                    image_url: {
-                                        url: `data:image/jpeg;base64,${base64Image}`,
-                                        detail: 'low'
+                                    type: 'image',
+                                    source: {
+                                        type: 'base64',
+                                        media_type: 'image/jpeg',
+                                        data: base64Image
                                     }
                                 }
                             ]
                         }],
-                        max_completion_tokens: 16384,
-                        response_format: { type: 'json_object' }
+                        max_tokens: 16384
                     })
                 }
             );
@@ -370,12 +368,8 @@ Return ONLY valid JSON: {"username": "", "caption": "", "visualDescription": ""}
             }
 
             // Parse response, stripping any markdown code blocks if present
-            const rawMsg = data.choices[0]?.message?.content;
-            let rawContent = typeof rawMsg === 'string'
-                ? rawMsg
-                : Array.isArray(rawMsg)
-                    ? rawMsg.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
-                    : '{}';
+            const contentBlocks2 = data.content as Array<{ type: string; text?: string }> | undefined;
+            let rawContent = contentBlocks2?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') || '{}';
             if (!rawContent) rawContent = '{}';
             // Strip ```json ... ``` wrapper if present
             rawContent = rawContent.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();

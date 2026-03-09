@@ -29,7 +29,7 @@ export class SecureKeyManager {
         try {
             const buffer = safeStorage.encryptString(apiKey);
             const store = await this.getStore();
-            store.set('secure.openaiApiKey', buffer.toString('hex'));
+            store.set('secure.anthropicApiKey', buffer.toString('hex'));
             return true;
         } catch (error) {
             console.error('Failed to encrypt API key:', error);
@@ -46,7 +46,7 @@ export class SecureKeyManager {
 
         try {
             const store = await this.getStore();
-            const hex = store.get('secure.openaiApiKey') as string;
+            const hex = store.get('secure.anthropicApiKey') as string;
             if (!hex) return null;
 
             const buffer = Buffer.from(hex, 'hex');
@@ -68,7 +68,7 @@ export class SecureKeyManager {
 
         try {
             const store = await this.getStore();
-            const hex = store.get('secure.openaiApiKey') as string;
+            const hex = store.get('secure.anthropicApiKey') as string;
             if (!hex) {
                 return 'missing';
             }

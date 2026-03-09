@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
         setSecure: (apiKey: string) => ipcRenderer.invoke('settings:set-secure', { apiKey }),
         checkKeyStatus: () => ipcRenderer.invoke('settings:check-key-status'),
         getSecureKey: () => ipcRenderer.invoke('settings:get-secure'),
+        validateApiKey: (apiKey: string) => ipcRenderer.invoke('settings:validate-api-key', { apiKey }),
         onAnalysisReady: (callback: (analysis: any) => void) => {
             const subscription = (_event: any, analysis: any) => callback(analysis);
             ipcRenderer.on('analysis-ready', subscription);

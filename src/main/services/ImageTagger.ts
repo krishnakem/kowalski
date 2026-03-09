@@ -18,18 +18,19 @@ import { UsageService } from './UsageService.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
 
 /**
- * Internal type for image content in OpenAI API.
+ * Internal type for image content in Anthropic API.
  */
 interface ImageContent {
-    type: 'image_url';
-    image_url: {
-        url: string;
-        detail: 'low' | 'high' | 'auto';
+    type: 'image';
+    source: {
+        type: 'base64';
+        media_type: string;
+        data: string;
     };
 }
 
 /**
- * Internal type for text content in OpenAI API.
+ * Internal type for text content in Anthropic API.
  */
 interface TextContent {
     type: 'text';
@@ -64,10 +65,11 @@ export class ImageTagger {
 
         // Build image content array
         const imageContents: ImageContent[] = captures.map((capture) => ({
-            type: 'image_url' as const,
-            image_url: {
-                url: `data:image/jpeg;base64,${capture.screenshot.toString('base64')}`,
-                detail: 'low' as const  // Cost optimization
+            type: 'image' as const,
+            source: {
+                type: 'base64' as const,
+                media_type: 'image/jpeg',
+                data: capture.screenshot.toString('base64')
             }
         }));
 
@@ -80,11 +82,12 @@ export class ImageTagger {
         ];
 
         try {
-            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.apiKey}`
+                    'x-api-key': this.apiKey,
+                    'anthropic-version': '2023-06-01'
                 },
                 body: JSON.stringify({
                     model: ModelConfig.tagging,
@@ -92,8 +95,7 @@ export class ImageTagger {
                         role: 'user',
                         content: messageContent
                     }],
-                    max_completion_tokens: 4096,
-                    response_format: { type: 'json_object' }
+                    max_tokens: 4096
                 })
             });
 
@@ -106,18 +108,14 @@ export class ImageTagger {
             const data = await response.json();
 
             // Track usage
-            const tokensUsed = data.usage?.total_tokens || 0;
+            const tokensUsed = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
             if (data.usage) {
                 await this.usageService.incrementUsage(data.usage);
                 console.log(`💰 Tagging cost tracked: ${tokensUsed} tokens`);
             }
 
-            const rawContent = data.choices[0]?.message?.content;
-            const content = typeof rawContent === 'string'
-                ? rawContent
-                : Array.isArray(rawContent)
-                    ? rawContent.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
-                    : '';
+            const contentBlocks = data.content as Array<{ type: string; text?: string }> | undefined;
+            const content = contentBlocks?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') || '';
             if (!content) {
                 throw new Error('TAGGING_FAILED: No content in response');
             }

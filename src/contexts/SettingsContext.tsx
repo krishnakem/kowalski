@@ -13,7 +13,6 @@ export interface SettingsData {
     morningTime: string;
     eveningTime: string;
     apiKey: string;
-    usageCap: number;
     interests: string[];
     hasOnboarded: boolean;
     analysisStatus: AnalysisStatus;
@@ -27,7 +26,6 @@ export const DEFAULT_SETTINGS: SettingsData = {
     morningTime: "8:00 AM",
     eveningTime: "6:00 PM",
     apiKey: "",
-    usageCap: 10,
     interests: [],
     hasOnboarded: false,
     analysisStatus: "idle",
@@ -41,7 +39,6 @@ const settingsSchema = z.object({
     morningTime: z.string().catch("8:00 AM"),
     eveningTime: z.string().catch("6:00 PM"),
     apiKey: z.string().catch(""),
-    usageCap: z.coerce.number().min(1).catch(10),
     interests: z.array(z.string()).catch([]),
     hasOnboarded: z.boolean().catch(false),
     analysisStatus: z.enum(["idle", "working", "ready"]).catch("idle"),
