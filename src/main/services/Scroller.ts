@@ -19,7 +19,7 @@ import { GhostMouse } from './GhostMouse.js';
 import { HumanScroll } from './HumanScroll.js';
 import { ScreenshotCollector } from './ScreenshotCollector.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
-import type { CaptureSource } from '../../types/instagram.js';
+// CaptureSource import removed — no longer used (capture handled by filter agent)
 import navigatorPrompt from '../prompts/navigator-agent.md';
 import specialistPrompt from '../prompts/specialist-agent.md';
 import { labelElements, type LabeledElement } from '../../utils/elementLabeler.js';
@@ -31,19 +31,14 @@ import { labelElements, type LabeledElement } from '../../utils/elementLabeler.j
 /** LLM response schema — the complete output format. */
 interface VisionAction {
     thinking: string;
-    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'capture' | 'wait' | 'done' | 'newtab' | 'closetab' | 'handoff' | 'escalate';
+    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'wait' | 'done' | 'newtab' | 'closetab' | 'handoff' | 'escalate';
     element?: number;  // Element label number for click/hover/newtab
-    x?: number;        // Used for capture crop coordinates
-    y?: number;
-    x2?: number;       // Bottom-right x for capture crop region
-    y2?: number;       // Bottom-right y for capture crop region
     direction?: 'up' | 'down';
     text?: string;
     key?: string;
     seconds?: number;
     memory?: string;
     phase?: 'posts' | 'search' | 'stories';
-    source?: 'feed' | 'story' | 'carousel' | 'search';  // LLM declares content source on capture
     result?: string;   // Specialist's done result message
 }
 
@@ -52,16 +47,17 @@ interface ActionHistoryEntry {
     result: string;
 }
 
-export interface VisionAgentConfig {
+export interface ScrollerConfig {
     apiKey: string;
     maxDurationMs: number;
     userInterests: string[];
     debugMode?: boolean;
     sessionMemoryDigest?: string;
+    rawDir?: string;  // Directory for raw screenshot dumps (three-agent pipeline)
 }
 
-export interface VisionAgentResult {
-    captureCount: number;
+export interface ScrollerResult {
+    rawScreenshotCount: number;
     decisionCount: number;
     actionHistory: ActionHistoryEntry[];
 }
@@ -76,12 +72,12 @@ const SCREENSHOT_WIDTH = 1280;
 // VisionAgent
 // ---------------------------------------------------------------------------
 
-export class VisionAgent {
+export class Scroller {
     private page: Page;
     private ghost: GhostMouse;
     private scroll: HumanScroll;
     private collector: ScreenshotCollector;
-    private config: VisionAgentConfig;
+    private config: ScrollerConfig;
 
     // Screenshot dimensions (updated after each resize)
     private screenshotWidth: number = SCREENSHOT_WIDTH;
@@ -101,8 +97,11 @@ export class VisionAgent {
     private lastTokenUsage: { promptTokens: number; completionTokens: number } | null = null;
 
     // Session state
-    private captureCount: number = 0;
     private startTime: number = 0;
+
+    // Raw screenshot dump for three-agent pipeline
+    private rawDir: string = '';
+    private rawCount: number = 0;
 
     // Reference example images organized by phase folder (Posts, Search, Stories)
     private referenceImagesByPhase: Map<string, Array<{ label: string; base64: string }>> | null = null;
@@ -129,7 +128,7 @@ export class VisionAgent {
         ghost: GhostMouse,
         scroll: HumanScroll,
         collector: ScreenshotCollector,
-        config: VisionAgentConfig
+        config: ScrollerConfig
     ) {
         this.page = page;
         this.ghost = ghost;
@@ -151,7 +150,7 @@ export class VisionAgent {
         this.collector.appendLog('🛑 External stop signal received');
     }
 
-    async run(): Promise<VisionAgentResult> {
+    async run(): Promise<ScrollerResult> {
         this.startTime = Date.now();
         const vp = this.page.viewportSize();
         this.viewportWidth = vp?.width || 1080;
@@ -159,6 +158,18 @@ export class VisionAgent {
 
         console.log(`\n👁️  VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
         this.collector.appendLog(`👁️ VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
+
+        // Set up raw screenshot directory for the three-agent pipeline
+        if (this.config.rawDir) {
+            this.rawDir = this.config.rawDir;
+            if (!fs.existsSync(this.rawDir)) fs.mkdirSync(this.rawDir, { recursive: true });
+        } else {
+            const sessionOutputDir = this.collector.getOutputDir();
+            if (sessionOutputDir) {
+                this.rawDir = path.join(sessionOutputDir, 'raw');
+                if (!fs.existsSync(this.rawDir)) fs.mkdirSync(this.rawDir, { recursive: true });
+            }
+        }
 
         while (true) {
             // Check external stop signal (Cmd+Shift+K)
@@ -182,6 +193,9 @@ export class VisionAgent {
                 await this.delay(500);
                 continue;
             }
+
+            // Save raw screenshot for filter agent (Agent 2)
+            this.saveRawScreenshot(rawScreenshot);
 
             // 1b. Detect interactive elements and draw labels on screenshot
             const { buffer: screenshot, elements } = await labelElements(
@@ -312,11 +326,20 @@ export class VisionAgent {
 
         }
 
-        console.log(`\n👁️  VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions\n`);
-        this.collector.appendLog(`👁️ VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions`);
+        // Signal to the filter agent that navigation is complete
+        if (this.rawDir) {
+            fs.writeFileSync(path.join(this.rawDir, 'done.marker'), JSON.stringify({
+                totalScreenshots: this.rawCount,
+                totalDecisions: this.decisionCount,
+                timestamp: Date.now()
+            }));
+        }
+
+        console.log(`\n👁️  VisionAgent finished: ${this.rawCount} raw screenshots, ${this.decisionCount} decisions\n`);
+        this.collector.appendLog(`👁️ VisionAgent finished: ${this.rawCount} raw screenshots, ${this.decisionCount} decisions`);
 
         return {
-            captureCount: this.captureCount,
+            rawScreenshotCount: this.rawCount,
             decisionCount: this.decisionCount,
             actionHistory: [...this.actionHistory]
         };
@@ -344,6 +367,9 @@ export class VisionAgent {
             // Take screenshot
             const rawScreenshot = await this.captureScreenshot();
             if (!rawScreenshot) { await this.delay(500); continue; }
+
+            // Save raw screenshot for filter agent (Agent 2)
+            this.saveRawScreenshot(rawScreenshot);
 
             const { buffer: screenshot, elements } = await labelElements(
                 this.page, rawScreenshot,
@@ -457,16 +483,25 @@ export class VisionAgent {
     }
 
     // -----------------------------------------------------------------------
-    // Coordinate Scaling
+    // Raw Screenshot Dump (Three-Agent Pipeline)
     // -----------------------------------------------------------------------
 
-    private scaleToViewport(x: number, y: number): { x: number; y: number } {
-        const scaledX = (x / this.screenshotWidth) * this.viewportWidth;
-        const scaledY = (y / this.screenshotHeight) * this.viewportHeight;
-        return {
-            x: Math.max(0, Math.min(this.viewportWidth, scaledX)),
-            y: Math.max(0, Math.min(this.viewportHeight, scaledY))
-        };
+    /**
+     * Save a raw screenshot to the raw/ directory for the filter agent.
+     * Every navigation screenshot gets saved — no filtering, no dedup.
+     * The filter agent (Agent 2) handles quality decisions.
+     */
+    private saveRawScreenshot(buffer: Buffer): void {
+        if (!this.rawDir) return;
+        this.rawCount++;
+        const padded = this.rawCount.toString().padStart(3, '0');
+        fs.writeFileSync(path.join(this.rawDir, `${padded}.jpg`), buffer);
+        fs.writeFileSync(path.join(this.rawDir, `${padded}.json`), JSON.stringify({
+            turn: this.decisionCount,
+            phase: this.lastDeclaredPhase || 'unknown',
+            timestamp: Date.now(),
+            agent: this.activeModel
+        }));
     }
 
     // -----------------------------------------------------------------------
@@ -477,7 +512,6 @@ export class VisionAgent {
         switch (decision.action) {
             case 'click': return this.executeClick(decision);
             case 'scroll': return this.executeScroll(decision);
-            case 'capture': return this.executeCapture(decision);
             case 'type': return this.executeType(decision);
             case 'press': return this.executePress(decision);
             case 'hover': return this.executeHover(decision);
@@ -517,49 +551,6 @@ export class VisionAgent {
         console.log(`  📜 scrolled ${direction} ${Math.abs(result.actualDelta)}px`);
         this.collector.appendLog(`📜 scrolled ${direction} ${Math.abs(result.actualDelta)}px`);
         return `scrolled ${direction} ${Math.abs(result.actualDelta)}px`;
-    }
-
-    private async executeCapture(d: VisionAction): Promise<string> {
-        const source = this.inferCaptureSource(d);
-
-        // Build optional clip region from LLM-provided crop coordinates
-        let clip: { x: number; y: number; width: number; height: number } | undefined;
-        if (d.x !== undefined && d.y !== undefined && d.x2 !== undefined && d.y2 !== undefined) {
-            const topLeft = this.scaleToViewport(d.x, d.y);
-            const bottomRight = this.scaleToViewport(d.x2, d.y2);
-            const width = bottomRight.x - topLeft.x;
-            const height = bottomRight.y - topLeft.y;
-            if (width > 50 && height > 50) {
-                clip = { x: topLeft.x, y: topLeft.y, width, height };
-                console.log(`  📷 capture: crop screenshot(${d.x},${d.y})→(${d.x2},${d.y2}) → viewport clip(${Math.round(topLeft.x)},${Math.round(topLeft.y)},${Math.round(width)}x${Math.round(height)})`);
-                this.collector.appendLog(`📷 capture: crop screenshot(${d.x},${d.y})→(${d.x2},${d.y2}) → viewport clip(${Math.round(topLeft.x)},${Math.round(topLeft.y)},${Math.round(width)}x${Math.round(height)})`);
-            } else {
-                console.log(`  📷 capture: crop region too small (${Math.round(width)}x${Math.round(height)}), using full viewport`);
-                this.collector.appendLog(`📷 capture: crop region too small (${Math.round(width)}x${Math.round(height)}), using full viewport`);
-            }
-        } else {
-            console.log(`  📷 capture: no crop coordinates, using full viewport`);
-            this.collector.appendLog(`📷 capture: no crop coordinates, using full viewport`);
-        }
-        console.log(`  📷 capture: source=${source}`);
-        this.collector.appendLog(`📷 capture: source=${source}`);
-
-        const captured = await this.collector.captureCurrentPost(
-            source,
-            undefined,
-            clip
-        );
-
-        if (captured) {
-            this.captureCount++;
-            const cropInfo = clip ? ` [cropped ${Math.round(clip.width)}x${Math.round(clip.height)}]` : '';
-            console.log(`  📷 ✅ captured #${this.captureCount} (source=${source})${cropInfo}`);
-            this.collector.appendLog(`📷 ✅ captured #${this.captureCount} (source=${source})${cropInfo}`);
-            return `captured #${this.captureCount} (source=${source})${cropInfo}`;
-        }
-        console.log(`  📷 ❌ capture rejected (duplicate)`);
-        this.collector.appendLog(`📷 ❌ capture rejected (duplicate)`);
-        return `capture rejected — duplicate content. Move on to the next post.`;
     }
 
     private async executeType(d: VisionAction): Promise<string> {
@@ -701,27 +692,6 @@ export class VisionAgent {
     }
 
     // -----------------------------------------------------------------------
-    // Vision-Based Source Inference
-    // -----------------------------------------------------------------------
-
-    private inferCaptureSource(d: VisionAction): CaptureSource {
-        // Primary: use LLM-declared source if provided
-        if (d.source) return d.source;
-
-        // Fallback: map from LLM-declared phase
-        if (d.phase === 'stories') return 'story';
-        if (d.phase === 'search') return 'search';
-
-        // Check action history for carousel detection: last action was ArrowRight
-        if (this.actionHistory.length > 0) {
-            const last = this.actionHistory[this.actionHistory.length - 1];
-            if (last.action === 'press(ArrowRight)' || last.action === '[specialist] press(ArrowRight)') return 'carousel';
-        }
-
-        return 'feed';
-    }
-
-    // -----------------------------------------------------------------------
     // Safety Guardrail — Input Context Detection
     // -----------------------------------------------------------------------
 
@@ -844,8 +814,9 @@ export class VisionAgent {
             requestBody.thinking = { type: 'enabled', budget_tokens: 10000 };
         }
 
-        // Attempt LLM call with one retry on JSON failure
-        for (let attempt = 0; attempt < 2; attempt++) {
+        // Attempt LLM call with exponential backoff on overload/rate-limit
+        const maxRetries = 4;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
@@ -862,11 +833,15 @@ export class VisionAgent {
                     const errText = await response.text();
                     console.warn(`  ⚠️ LLM API error (${response.status}): ${errText.slice(0, 200)}`);
                     this.collector.appendLog(`  ⚠️ LLM API error (${response.status}): ${errText.slice(0, 200)}`);
-                    // Retry on overload (529) or rate limit (429) with backoff
-                    if ((response.status === 529 || response.status === 429) && attempt === 0) {
-                        const backoff = response.status === 429 ? 10000 : 5000;
-                        console.log(`  ⏳ Retrying after ${backoff / 1000}s backoff...`);
-                        await this.delay(backoff);
+                    // Retry on overload (529) or rate limit (429) with exponential backoff
+                    if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
+                        const baseDelay = response.status === 429 ? 10000 : 5000;
+                        const backoff = Math.min(baseDelay * Math.pow(2, attempt), 60000);
+                        const jitter = backoff * 0.25 * (Math.random() * 2 - 1);
+                        const delay = Math.round(backoff + jitter);
+                        console.log(`  ⏳ Retrying (${attempt + 1}/${maxRetries - 1}) after ${(delay / 1000).toFixed(1)}s backoff...`);
+                        this.collector.appendLog(`  ⏳ Retrying (${attempt + 1}/${maxRetries - 1}) after ${(delay / 1000).toFixed(1)}s backoff...`);
+                        await this.delay(delay);
                         continue;
                     }
                     break; // Don't retry other API errors
@@ -893,9 +868,9 @@ export class VisionAgent {
                 const textBlock = contentBlocks?.find(b => b.type === 'text');
                 const content = textBlock?.text;
                 if (!content || typeof content !== 'string') {
-                    console.warn(`  ⚠️ Empty LLM response (attempt ${attempt + 1})`);
-                    this.collector.appendLog(`  ⚠️ Empty LLM response (attempt ${attempt + 1})`);
-                    if (attempt === 0) { await this.delay(500); continue; }
+                    console.warn(`  ⚠️ Empty LLM response (attempt ${attempt + 1}/${maxRetries})`);
+                    this.collector.appendLog(`  ⚠️ Empty LLM response (attempt ${attempt + 1}/${maxRetries})`);
+                    if (attempt < maxRetries - 1) { await this.delay(500); continue; }
                     break;
                 }
 
@@ -903,9 +878,9 @@ export class VisionAgent {
                 return parsed;
 
             } catch (err) {
-                console.warn(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}):`, err);
-                this.collector.appendLog(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}): ${err}`);
-                if (attempt === 0) { await this.delay(500); continue; }
+                console.warn(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}/${maxRetries}):`, err);
+                this.collector.appendLog(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}/${maxRetries}): ${err}`);
+                if (attempt < maxRetries - 1) { await this.delay(500); continue; }
             }
         }
 
@@ -1049,7 +1024,7 @@ export class VisionAgent {
             parts.push(`TAB: You are in a NEW TAB (opened via newtab). Use closetab to return to the main tab when done here. Do NOT navigate away — use closetab.`);
         }
 
-        parts.push(`CAPTURES: ${this.captureCount} screenshots taken`);
+        parts.push(`SCREENSHOTS: ${this.rawCount} raw screenshots saved (filter runs async)`);
 
         if (this.config.userInterests.length > 0) {
             parts.push(`INTERESTS TO SEARCH: ${this.config.userInterests.join(', ')}`);
@@ -1079,15 +1054,9 @@ export class VisionAgent {
             });
         }
 
-        // Capture breakdown by source
-        if (this.captureCount > 0) {
-            const breakdown = this.collector.getSourceBreakdown();
-            const breakdownParts: string[] = [];
-            if (breakdown.feed > 0) breakdownParts.push(`${breakdown.feed} feed`);
-            if (breakdown.story > 0) breakdownParts.push(`${breakdown.story} story`);
-            if (breakdown.search > 0) breakdownParts.push(`${breakdown.search} search`);
-            if (breakdown.carousel > 0) breakdownParts.push(`${breakdown.carousel} carousel`);
-            parts.push(`CAPTURE BREAKDOWN: ${breakdownParts.join(', ')}`);
+        // Raw screenshot count
+        if (this.rawCount > 0) {
+            parts.push(`RAW SCREENSHOTS: ${this.rawCount} saved so far`);
         }
 
         // Session memory digest (cross-session)
@@ -1168,36 +1137,6 @@ export class VisionAgent {
                 }
             }
 
-            // Draw rectangle for capture crop region
-            if (decision.x2 !== undefined && decision.y2 !== undefined &&
-                decision.x !== undefined && decision.y !== undefined &&
-                decision.action === 'capture') {
-                const x1 = Math.round(decision.x);
-                const y1 = Math.round(decision.y);
-                const x2 = Math.round(decision.x2);
-                const y2 = Math.round(decision.y2);
-                const thickness = 2;
-
-                // Top and bottom edges
-                for (let x = x1; x <= x2; x++) {
-                    for (let dt = 0; dt < thickness; dt++) {
-                        if (x >= 0 && x < image.width) {
-                            if (y1 + dt >= 0 && y1 + dt < image.height) image.setPixelColor(RED, x, y1 + dt);
-                            if (y2 - dt >= 0 && y2 - dt < image.height) image.setPixelColor(RED, x, y2 - dt);
-                        }
-                    }
-                }
-                // Left and right edges
-                for (let y = y1; y <= y2; y++) {
-                    for (let dt = 0; dt < thickness; dt++) {
-                        if (y >= 0 && y < image.height) {
-                            if (x1 + dt >= 0 && x1 + dt < image.width) image.setPixelColor(RED, x1 + dt, y);
-                            if (x2 - dt >= 0 && x2 - dt < image.width) image.setPixelColor(RED, x2 - dt, y);
-                        }
-                    }
-                }
-            }
-
             const buffer = await image.getBuffer('image/jpeg', { quality: 85 });
             const agentTag = this.activeModel === 'specialist' ? 'spec_' : '';
             const filename = `turn_${String(this.decisionCount).padStart(3, '0')}_${agentTag}${decision.action}.jpg`;
@@ -1246,7 +1185,6 @@ export class VisionAgent {
         switch (d.action) {
             case 'click': return `click([${d.element}])`;
             case 'scroll': return `scroll(${d.direction || 'down'})`;
-            case 'capture': return d.x2 !== undefined ? `capture(${d.x},${d.y},${d.x2},${d.y2})` : 'capture';
             case 'type': return `type("${(d.text || '').slice(0, 20)}")`;
             case 'press': return `press(${d.key})`;
             case 'hover': return `hover([${d.element}])`;
@@ -1261,7 +1199,7 @@ export class VisionAgent {
     }
 
     // Public getters for InstagramScraper session summary
-    getCaptureCount(): number { return this.captureCount; }
+    getRawScreenshotCount(): number { return this.rawCount; }
     getRecordCount(): number { return 0; }
     getDecisionCount(): number { return this.decisionCount; }
     getActionHistory(): ActionHistoryEntry[] { return [...this.actionHistory]; }

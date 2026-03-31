@@ -8,8 +8,9 @@ import { ActiveSchedule } from '../../types/schedule.js';
 import { BrowserManager } from './BrowserManager.js';
 import { InstagramScraper } from './InstagramScraper.js';
 import { AnalysisGenerator } from './AnalysisGenerator.js';
-import { BatchDigestGenerator } from './BatchDigestGenerator.js';
+import { DigestGeneration } from './DigestGeneration.js';
 import { ImageTagger } from './ImageTagger.js';
+import { Filterer } from './Filterer.js';
 import { SecureKeyManager } from './SecureKeyManager.js';
 import { AutomationErrorType } from '../../types/instagram.js';
 
@@ -45,8 +46,9 @@ export class SchedulerService {
     private lastWakeTime: Date = new Date(); // Track when app started/woke
     private suspensionBlockerId: number | null = null;
 
-    // Active debug run scraper (for Cmd+Shift+K stop)
+    // Active debug run scraper and filter (for Cmd+Shift+K stop)
     private activeDebugScraper: InstagramScraper | null = null;
+    private activeFilter: Filterer | null = null;
 
     private constructor() { }
 
@@ -654,7 +656,11 @@ export class SchedulerService {
         if (this.activeDebugScraper) {
             console.log('🛑 Stopping debug run (Cmd+Shift+K)...');
             this.activeDebugScraper.stop();
-        } else {
+        }
+        if (this.activeFilter) {
+            this.activeFilter.stop();
+        }
+        if (!this.activeDebugScraper && !this.activeFilter) {
             console.log('🛑 No active debug run to stop');
         }
     }
@@ -704,38 +710,80 @@ export class SchedulerService {
                 throw new Error(sessionCheck.reason || 'SESSION_EXPIRED');
             }
 
-            // 4. Browse Instagram and capture screenshots (90 min max, or stop with Cmd+Shift+K)
+            // 4. Set up three-agent pipeline directories
+            const debugScreenshotsDir = path.join(__dirname, '../../debug-screenshots');
+            const sessionTimestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const sessionDir = path.join(debugScreenshotsDir, `session_${sessionTimestamp}`);
+            const rawDir = path.join(sessionDir, 'raw');
+            const filteredDir = path.join(sessionDir, 'filtered');
+            fs.mkdirSync(rawDir, { recursive: true });
+            fs.mkdirSync(filteredDir, { recursive: true });
+
+            // 4a. Start Agent 2 (Filter) in the background — it polls raw/ for new screenshots
+            console.log('🧪 Starting screenshot filter agent (Agent 2)...');
+            const filter = new Filterer(rawDir, filteredDir, apiKey, settings.interests || []);
+            this.activeFilter = filter;
+            const filterPromise = filter.start();
+
+            // 4b. Run Agent 1 (Navigator) — browses Instagram, dumps every screenshot to raw/
             console.log('🧪 Browsing Instagram (90 min max, stop with Cmd+Shift+K)...');
             const scraper = new InstagramScraper(context, apiKey, true);  // debugMode = true
             this.activeDebugScraper = scraper;
             const session = await scraper.browseAndCapture(
-                MAX_DURATION_MS / 60000,  // Convert to minutes (24h safety net)
-                settings.interests || []
+                MAX_DURATION_MS / 60000,
+                settings.interests || [],
+                { rawDir }
             );
-
             this.activeDebugScraper = null;
-            console.log(`🧪 Browsing complete: ${session.captureCount} screenshots captured`);
+            console.log(`🧪 Browsing complete: ${session.rawScreenshotCount} raw screenshots saved`);
 
             // 5. Close browser before generation
             await browserManager.close();
             context = null;
 
-            // 6. Warn if very few captures, but don't abort — time is the only limit
-            if (session.captureCount < 3) {
-                console.warn(`🧪 Very few captures (${session.captureCount}), digest quality may be low`);
+            // 5a. Wait for Agent 2 (Filter) to finish processing remaining screenshots
+            console.log('🧪 Waiting for filter agent to finish...');
+            const filterStats = await filterPromise;
+            this.activeFilter = null;
+            console.log(`🧪 Filter complete: ${filterStats.kept} kept, ${filterStats.rejected} rejected, ${filterStats.tokensUsed} tokens`);
+
+            // 6. Warn if very few filtered captures
+            if (filterStats.kept < 3) {
+                console.warn(`🧪 Very few filtered captures (${filterStats.kept}), digest quality may be low`);
             }
 
-            // 6.5. Tag and select best images (scale with capture count, cap at 50 for token limits)
-            console.log('🧪 Tagging captured images for smart selection...');
-            const tagger = new ImageTagger(apiKey, settings.interests || []);
-            const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session.captures);
-            const selectCount = Math.min(50, session.captureCount);
-            const bestCaptures = tagger.selectBest(session.captures, tags, selectCount);
-            console.log(`🧪 Tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
+            // 6.5. Load filtered images from disk (replaces ImageTagger)
+            console.log('🧪 Loading filtered screenshots...');
+            const filteredFiles = fs.readdirSync(filteredDir)
+                .filter((f: string) => f.endsWith('.jpg'))
+                .sort();
 
-            // 7. Generate digest from SELECTED screenshots
-            console.log('🧪 Generating digest from selected screenshots...');
-            const digestGenerator = new BatchDigestGenerator(apiKey);
+            const bestCaptures = filteredFiles.map((filename: string, index: number) => {
+                const screenshot = fs.readFileSync(path.join(filteredDir, filename));
+                let source: 'feed' | 'story' | 'search' | 'profile' | 'carousel' = 'feed';
+                const jsonFile = filename.replace('.jpg', '.json');
+                const jsonPath = path.join(filteredDir, jsonFile);
+                if (fs.existsSync(jsonPath)) {
+                    try {
+                        const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+                        if (meta.phase === 'Stories') source = 'story';
+                        else if (meta.phase === 'Search') source = 'search';
+                    } catch { /* ignore parse errors */ }
+                }
+                return {
+                    id: index + 1,
+                    screenshot,
+                    source,
+                    interest: undefined as string | undefined,
+                    timestamp: Date.now(),
+                    scrollPosition: 0
+                };
+            });
+            console.log(`🧪 Loaded ${bestCaptures.length} filtered screenshots`);
+
+            // 7. Run Agent 3 (Digest Writer) — generate digest from filtered screenshots
+            console.log('🧪 Generating digest from filtered screenshots...');
+            const digestGenerator = new DigestGeneration(apiKey);
             const analysis = await digestGenerator.generateDigest(bestCaptures, {
                 userName: settings.userName || 'User',
                 interests: settings.interests || [],
@@ -750,33 +798,22 @@ export class SchedulerService {
 
             await fs.promises.mkdir(imagesDir, { recursive: true });
 
-            // Build a set of selected image IDs for quick lookup
-            const selectedIds = new Set(bestCaptures.map(c => c.id));
-
-            // Build image metadata and save SELECTED files only
-            const imageMetadata: { id: number; filename: string; source: string; interest?: string; tag?: { relevance: number; quality: number; description: string } }[] = [];
+            // Build image metadata and save filtered files
+            const imageMetadata: { id: number; filename: string; source: string; interest?: string }[] = [];
             for (const capture of bestCaptures) {
                 const filename = `${capture.id}.jpg`;
                 const imagePath = path.join(imagesDir, filename);
                 await fs.promises.writeFile(imagePath, capture.screenshot);
 
-                // Find the tag for this capture
-                const captureTag = tags.find(t => t.imageId === capture.id);
-
                 imageMetadata.push({
                     id: capture.id,
                     filename,
                     source: capture.source,
-                    interest: capture.interest,
-                    tag: captureTag ? {
-                        relevance: captureTag.relevance,
-                        quality: captureTag.quality,
-                        description: captureTag.description
-                    } : undefined
+                    interest: capture.interest
                 });
             }
 
-            console.log(`🖼️ Saved ${imageMetadata.length} selected images to ${imagesDir}`);
+            console.log(`🖼️ Saved ${imageMetadata.length} filtered images to ${imagesDir}`);
 
             // 9. Save analysis JSON with image metadata
             const analysisWithImages = {
@@ -828,7 +865,7 @@ export class SchedulerService {
                 this.mainWindow.webContents.send('debug-run-complete', {});
             }
 
-            console.log(`🧪 Debug Run (Screenshot-First) Complete! Captures: ${session.captureCount}`);
+            console.log(`🧪 Debug Run (Three-Agent Pipeline) Complete! Raw: ${session.rawScreenshotCount}, Filtered: ${filterStats.kept}`);
 
         } catch (error: any) {
             console.error('🧪 Debug Run Failed:', error.message);
@@ -887,36 +924,77 @@ export class SchedulerService {
                 throw new Error(sessionCheck.reason || 'SESSION_EXPIRED');
             }
 
-            // 4. Browse Instagram and capture screenshots
-            console.log('📱 Baker browsing Instagram (Screenshot-First mode)...');
+            // 4. Set up three-agent pipeline directories
+            const bakerScreenshotsDir = path.join(__dirname, '../../debug-screenshots');
+            const bakerSessionTimestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const bakerSessionDir = path.join(bakerScreenshotsDir, `session_${bakerSessionTimestamp}`);
+            const bakerRawDir = path.join(bakerSessionDir, 'raw');
+            const bakerFilteredDir = path.join(bakerSessionDir, 'filtered');
+            fs.mkdirSync(bakerRawDir, { recursive: true });
+            fs.mkdirSync(bakerFilteredDir, { recursive: true });
+
+            // 4a. Start Agent 2 (Filter) in the background
+            console.log('🔍 Baker starting screenshot filter agent (Agent 2)...');
+            const bakerFilter = new Filterer(bakerRawDir, bakerFilteredDir, apiKey, settings.interests || []);
+            const bakerFilterPromise = bakerFilter.start();
+
+            // 4b. Run Agent 1 (Navigator) — browses Instagram, dumps every screenshot to raw/
+            console.log('📱 Baker browsing Instagram (Three-Agent Pipeline)...');
             const scraper = new InstagramScraper(context, apiKey);
             const session = await scraper.browseAndCapture(
-                90,  // Normal mode: 90 minutes (range: 60-150 min)
-                settings.interests || []
+                90,  // Normal mode: 90 minutes
+                settings.interests || [],
+                { rawDir: bakerRawDir }
             );
 
-            console.log(`📸 Baker browsing complete: ${session.captureCount} screenshots captured`);
+            console.log(`📸 Baker browsing complete: ${session.rawScreenshotCount} raw screenshots saved`);
 
             // 5. Close browser before generation
             await browserManager.close();
             context = null;
 
-            // 6. Warn if very few captures, but don't abort
-            if (session.captureCount < 3) {
-                console.warn(`⚠️ Baker: Very few captures (${session.captureCount}), digest quality may be low`);
+            // 5a. Wait for Agent 2 (Filter) to finish
+            console.log('🔍 Baker waiting for filter agent to finish...');
+            const bakerFilterStats = await bakerFilterPromise;
+            console.log(`🔍 Baker filter complete: ${bakerFilterStats.kept} kept, ${bakerFilterStats.rejected} rejected, ${bakerFilterStats.tokensUsed} tokens`);
+
+            // 6. Warn if very few filtered captures, but don't abort
+            if (bakerFilterStats.kept < 3) {
+                console.warn(`⚠️ Baker: Very few filtered captures (${bakerFilterStats.kept}), digest quality may be low`);
             }
 
-            // 6.5. Tag and select best images (scale with capture count, cap at 50 for token limits)
-            console.log('🏷️ Baker tagging captured images for smart selection...');
-            const tagger = new ImageTagger(apiKey, settings.interests || []);
-            const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session.captures);
-            const selectCount = Math.min(50, session.captureCount);
-            const bestCaptures = tagger.selectBest(session.captures, tags, selectCount);
-            console.log(`🏷️ Baker tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
+            // 6.5. Load filtered images from disk (replaces ImageTagger)
+            console.log('🏷️ Baker loading filtered screenshots...');
+            const bakerFilteredFiles = fs.readdirSync(bakerFilteredDir)
+                .filter((f: string) => f.endsWith('.jpg'))
+                .sort();
 
-            // 7. Generate digest from SELECTED screenshots
-            console.log('🤖 Baker generating digest from selected screenshots...');
-            const digestGenerator = new BatchDigestGenerator(apiKey);
+            const bestCaptures = bakerFilteredFiles.map((filename: string, index: number) => {
+                const screenshot = fs.readFileSync(path.join(bakerFilteredDir, filename));
+                let source: 'feed' | 'story' | 'search' | 'profile' | 'carousel' = 'feed';
+                const jsonFile = filename.replace('.jpg', '.json');
+                const jsonPath = path.join(bakerFilteredDir, jsonFile);
+                if (fs.existsSync(jsonPath)) {
+                    try {
+                        const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+                        if (meta.phase === 'Stories') source = 'story';
+                        else if (meta.phase === 'Search') source = 'search';
+                    } catch { /* ignore parse errors */ }
+                }
+                return {
+                    id: index + 1,
+                    screenshot,
+                    source,
+                    interest: undefined as string | undefined,
+                    timestamp: Date.now(),
+                    scrollPosition: 0
+                };
+            });
+            console.log(`🏷️ Baker loaded ${bestCaptures.length} filtered screenshots`);
+
+            // 7. Run Agent 3 (Digest Writer) — generate digest from filtered screenshots
+            console.log('🤖 Baker generating digest from filtered screenshots...');
+            const digestGenerator = new DigestGeneration(apiKey);
             const analysis = await digestGenerator.generateDigest(bestCaptures, {
                 userName: settings.userName || 'User',
                 interests: settings.interests || [],
@@ -931,30 +1009,22 @@ export class SchedulerService {
 
             await fs.promises.mkdir(imagesDir, { recursive: true });
 
-            // Build image metadata and save SELECTED files only
-            const imageMetadata: { id: number; filename: string; source: string; interest?: string; tag?: { relevance: number; quality: number; description: string } }[] = [];
+            // Build image metadata and save filtered files
+            const imageMetadata: { id: number; filename: string; source: string; interest?: string }[] = [];
             for (const capture of bestCaptures) {
                 const filename = `${capture.id}.jpg`;
                 const imagePath = path.join(imagesDir, filename);
                 await fs.promises.writeFile(imagePath, capture.screenshot);
 
-                // Find the tag for this capture
-                const captureTag = tags.find(t => t.imageId === capture.id);
-
                 imageMetadata.push({
                     id: capture.id,
                     filename,
                     source: capture.source,
-                    interest: capture.interest,
-                    tag: captureTag ? {
-                        relevance: captureTag.relevance,
-                        quality: captureTag.quality,
-                        description: captureTag.description
-                    } : undefined
+                    interest: capture.interest
                 });
             }
 
-            console.log(`🖼️ Baker saved ${imageMetadata.length} selected images to ${imagesDir}`);
+            console.log(`🖼️ Baker saved ${imageMetadata.length} filtered images to ${imagesDir}`);
 
             // 9. Save analysis JSON with image metadata
             const analysisWithImages = {
@@ -998,8 +1068,8 @@ export class SchedulerService {
                 analysisStatus: 'pending_delivery'
             });
 
-            console.log(`🥐 Baker (Screenshot-First) complete. Digest saved, awaiting delivery at ${scheduledTime}`);
-            console.log(`✅ Screenshot-First Pipeline Complete. Captures: ${session.captureCount}`);
+            console.log(`🥐 Baker (Three-Agent Pipeline) complete. Digest saved, awaiting delivery at ${scheduledTime}`);
+            console.log(`✅ Three-Agent Pipeline Complete. Raw: ${session.rawScreenshotCount}, Filtered: ${bakerFilterStats.kept}`);
             // NO mainWindow.webContents.send() here - SILENT!
 
         } catch (error: any) {

@@ -36,7 +36,7 @@ interface TextContent {
     text: string;
 }
 
-export class BatchDigestGenerator {
+export class DigestGeneration {
     private apiKey: string;
     private usageService: UsageService;
 
@@ -308,7 +308,13 @@ VI. EXAMPLES
         dayName: string,
         dateStr: string
     ): AnalysisObject {
-        const parsed = JSON.parse(content);
+        // Strip markdown code fencing if present (```json ... ```)
+        let cleaned = content.trim();
+        const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (codeBlockMatch) {
+            cleaned = codeBlockMatch[1].trim();
+        }
+        const parsed = JSON.parse(cleaned);
 
         // Validate structure
         if (!parsed.title || !parsed.sections || !Array.isArray(parsed.sections)) {

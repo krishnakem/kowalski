@@ -214,10 +214,11 @@ export interface CapturedVideo {
  * Result of a browsing session using screenshot-first approach.
  */
 export interface BrowsingSession {
-    captures: CapturedPost[];     // All captured screenshots
+    captures: CapturedPost[];     // Keep for backward compat (may be empty now)
     videos: CapturedVideo[];      // All recorded video clips
     sessionDuration: number;      // Total milliseconds
-    captureCount: number;         // Number of screenshots taken
+    rawScreenshotCount: number;   // Raw screenshots saved to disk by navigator
+    captureCount: number;         // DEPRECATED: kept for compat, will be 0
     videoCount: number;           // Number of videos recorded
     scrapedAt: string;            // ISO timestamp
 }

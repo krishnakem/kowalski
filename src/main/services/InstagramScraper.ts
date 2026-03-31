@@ -3,11 +3,11 @@
  *
  * Manages the session lifecycle: page creation, login verification,
  * session memory, and capture collection. Delegates all browsing
- * decisions to VisionAgent (pure vision-based LLM navigation).
+ * decisions to Scroller (pure vision-based LLM navigation).
  *
  * Cost layers:
  * - Physics (GhostMouse, HumanScroll) — $0
- * - Navigation (VisionAgent → LLM) — ~$0.001/decision
+ * - Navigation (Scroller → LLM) — ~$0.001/decision
  * - Post-processing (digest, analysis) — varies
  */
 
@@ -16,7 +16,7 @@ import { GhostMouse } from './GhostMouse.js';
 import { HumanScroll } from './HumanScroll.js';
 import { UsageService } from './UsageService.js';
 import { ScreenshotCollector } from './ScreenshotCollector.js';
-import { VisionAgent } from './VisionAgent.js';
+import { Scroller } from './Scroller.js';
 import { SessionMemory } from './SessionMemory.js';
 import * as path from 'path';
 import { BrowsingSession } from '../../types/instagram.js';
@@ -37,7 +37,7 @@ export class InstagramScraper {
     private page!: Page;
 
     private sessionMemory: SessionMemory = new SessionMemory();
-    private activeVisionAgent: VisionAgent | null = null;
+    private activeScroller: Scroller | null = null;
 
     constructor(context: BrowserContext, apiKey: string, debugMode: boolean = false) {
         this.context = context;
@@ -48,8 +48,8 @@ export class InstagramScraper {
 
     /** Stop the active browsing session externally (e.g. Cmd+Shift+K). */
     stop(): void {
-        if (this.activeVisionAgent) {
-            this.activeVisionAgent.stop();
+        if (this.activeScroller) {
+            this.activeScroller.stop();
         }
     }
 
@@ -58,13 +58,14 @@ export class InstagramScraper {
      */
     async browseAndCapture(
         targetMinutes: number,
-        userInterests: string[]
+        userInterests: string[],
+        config?: Partial<NavigationLoopConfig>
     ): Promise<BrowsingSession> {
-        return this.browseWithAINavigation(targetMinutes, userInterests);
+        return this.browseWithAINavigation(targetMinutes, userInterests, config);
     }
 
     /**
-     * Browse Instagram using VisionAgent (pure vision-based LLM navigation).
+     * Browse Instagram using Scroller (pure vision-based LLM navigation).
      */
     async browseWithAINavigation(
         targetMinutes: number,
@@ -93,7 +94,7 @@ export class InstagramScraper {
             saveToDirectory: path.join(__dirname, '../../debug-screenshots')
         });
 
-        let visionAgent: VisionAgent | undefined;
+        let visionAgent: Scroller | undefined;
 
         try {
             // 1. Navigate to Instagram (skip if already there from validateSession)
@@ -148,50 +149,51 @@ export class InstagramScraper {
             this.screenshotCollector.appendLogRaw(`**Mode:** Vision-only (no accessibility tree)`);
             this.screenshotCollector.appendLogRaw(`\n---\n`);
 
-            // 5. Run VisionAgent
-            visionAgent = new VisionAgent(
+            // 5. Run Scroller
+            visionAgent = new Scroller(
                 this.page, this.ghost, this.scroll, this.screenshotCollector,
                 {
                     apiKey: this.apiKey,
                     maxDurationMs: config?.maxDurationMs || targetDurationMs,
                     userInterests,
                     debugMode: this.debugMode,
-                    sessionMemoryDigest
+                    sessionMemoryDigest,
+                    rawDir: config?.rawDir
                 }
             );
-            this.activeVisionAgent = visionAgent;
+            this.activeScroller = visionAgent;
 
             const result = await visionAgent.run();
 
             // 6. Write session summary to log
             this.screenshotCollector.appendLogRaw(`\n---\n\n## Summary`);
             this.screenshotCollector.appendLogRaw(`- **Decisions:** ${result.decisionCount}`);
-            this.screenshotCollector.appendLogRaw(`- **Captures:** ${result.captureCount}`);
+            this.screenshotCollector.appendLogRaw(`- **Raw Screenshots:** ${result.rawScreenshotCount}`);
             // this.screenshotCollector.appendLogRaw(`- **Video recordings:** ${result.recordCount}`);  // VIDEO RECORDING DISABLED
             this.screenshotCollector.appendLogRaw(`- **Duration:** ${((Date.now() - startTime) / 1000 / 60).toFixed(1)} minutes`);
             this.screenshotCollector.flushSessionLog();
 
             // 7. Save cross-session memory
-            const capturesPerInterest = Math.round(result.captureCount / Math.max(userInterests.length, 1));
+            const screenshotsPerInterest = Math.round(result.rawScreenshotCount / Math.max(userInterests.length, 1));
             const sessionSummary: SessionSummary = {
                 id: `session-${startTime}`,
                 timestamp: startTime,
                 durationMs: Date.now() - startTime,
                 interestResults: userInterests.map(interest => ({
                     interest,
-                    captureCount: capturesPerInterest,
+                    captureCount: screenshotsPerInterest,
                     searchTimeMs: 0,
-                    quality: capturesPerInterest >= 5 ? 'high' as const
-                        : capturesPerInterest >= 2 ? 'medium' as const
+                    quality: screenshotsPerInterest >= 5 ? 'high' as const
+                        : screenshotsPerInterest >= 2 ? 'medium' as const
                         : 'low' as const
                 })),
                 phaseBreakdown: [{
                     phase: 'feed',
                     durationMs: Date.now() - startTime,
-                    capturesProduced: result.captureCount
+                    capturesProduced: result.rawScreenshotCount
                 }],
                 stagnationEvents: [],
-                totalCaptures: result.captureCount,
+                totalCaptures: result.rawScreenshotCount,
                 totalActions: result.decisionCount,
                 uniqueContentRatio: 1.0
             };
@@ -203,26 +205,26 @@ export class InstagramScraper {
                 throw error;
             }
         } finally {
-            this.activeVisionAgent = null;
+            this.activeScroller = null;
 
             // Log summary
             console.log(`\n📊 Session Summary:`);
             if (visionAgent) {
                 console.log(`   - Decisions: ${visionAgent.getDecisionCount()}`);
+                console.log(`   - Raw screenshots: ${visionAgent.getRawScreenshotCount()}`);
             }
-            console.log(`   - Captures: ${this.screenshotCollector.getCaptureCount()}`);
-            // console.log(`   - Video recordings: ${this.screenshotCollector.getVideoCount()}`);  // VIDEO RECORDING DISABLED
 
             this.screenshotCollector.logSummary();
             await this.page.close();
         }
 
         return {
-            captures: this.screenshotCollector.getCaptures(),
-            videos: [],  // VIDEO RECORDING DISABLED
+            captures: [],  // No longer populated here — filter agent handles this
+            videos: [],
             sessionDuration: Date.now() - startTime,
-            captureCount: this.screenshotCollector.getCaptureCount(),
-            videoCount: 0,  // VIDEO RECORDING DISABLED
+            rawScreenshotCount: visionAgent?.getRawScreenshotCount() || 0,
+            captureCount: 0,  // Deprecated
+            videoCount: 0,
             scrapedAt: new Date().toISOString()
         };
     }

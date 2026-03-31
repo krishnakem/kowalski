@@ -3795,7 +3795,7 @@ var require_gifframe = __commonJS({
 var require_gifutil = __commonJS({
   "node_modules/gifwrap/src/gifutil.js"(exports2) {
     "use strict";
-    var fs9 = require("fs");
+    var fs10 = require("fs");
     var ImageQ = require_image_q();
     var BitmapImage2 = require_bitmapimage();
     var { GifFrame: GifFrame2 } = require_gifframe();
@@ -3910,14 +3910,14 @@ var require_gifutil = __commonJS({
       jimpImage.bitmap.data = bitmapImageToShare.bitmap.data;
       return jimpImage;
     };
-    exports2.write = function(path9, frames, spec, encoder) {
+    exports2.write = function(path10, frames, spec, encoder) {
       encoder = encoder || defaultCodec;
-      const matches = path9.match(/\.[a-zA-Z]+$/);
+      const matches = path10.match(/\.[a-zA-Z]+$/);
       if (matches !== null && INVALID_SUFFIXES.includes(matches[0].toLowerCase())) {
-        throw new Error(`GIF '${path9}' has an unexpected suffix`);
+        throw new Error(`GIF '${path10}' has an unexpected suffix`);
       }
       return encoder.encodeGif(frames, spec).then((gif2) => {
-        return _writeBinary(path9, gif2.buffer).then(() => {
+        return _writeBinary(path10, gif2.buffer).then(() => {
           return gif2;
         });
       });
@@ -3989,9 +3989,9 @@ var require_gifutil = __commonJS({
         }
       }
     }
-    function _readBinary(path9) {
+    function _readBinary(path10) {
       return new Promise((resolve2, reject2) => {
-        fs9.readFile(path9, (err, buffer) => {
+        fs10.readFile(path10, (err, buffer) => {
           if (err) {
             return reject2(err);
           }
@@ -3999,9 +3999,9 @@ var require_gifutil = __commonJS({
         });
       });
     }
-    function _writeBinary(path9, buffer) {
+    function _writeBinary(path10, buffer) {
       return new Promise((resolve2, reject2) => {
-        fs9.writeFile(path9, buffer, (err) => {
+        fs10.writeFile(path10, buffer, (err) => {
           if (err) {
             return reject2(err);
           }
@@ -5980,9 +5980,9 @@ var require_decoder = __commonJS({
         return a < 0 ? 0 : a > 255 ? 255 : a;
       }
       constructor.prototype = {
-        load: function load(path9) {
+        load: function load(path10) {
           var xhr = new XMLHttpRequest();
-          xhr.open("GET", path9, true);
+          xhr.open("GET", path10, true);
           xhr.responseType = "arraybuffer";
           xhr.onload = (function() {
             var data = new Uint8Array(xhr.response || xhr.mozResponseArrayBuffer);
@@ -18899,11 +18899,11 @@ var require_Mime = __commonJS({
         }
       }
     };
-    Mime.prototype.getType = function(path9) {
-      path9 = String(path9);
-      let last = path9.replace(/^.*[/\\]/, "").toLowerCase();
+    Mime.prototype.getType = function(path10) {
+      path10 = String(path10);
+      let last = path10.replace(/^.*[/\\]/, "").toLowerCase();
       let ext = last.replace(/^.*\./, "").toLowerCase();
-      let hasPath = last.length < path9.length;
+      let hasPath = last.length < path10.length;
       let hasDot = ext.length < last.length - 1;
       return (hasDot || !hasPath) && this._types[ext] || null;
     };
@@ -28936,7 +28936,7 @@ var Bezier = class _Bezier {
       }
       return s;
     }).reverse();
-    const fs9 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils2.makeline(bs, fs9), le = utils2.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
+    const fs10 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils2.makeline(bs, fs10), le = utils2.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
     return new PolyBezier(segments);
   }
   outlineshapes(d1, d2, curveIntersectionThreshold) {
@@ -32262,8 +32262,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path9, errorMaps, issueData } = params;
-  const fullPath = [...path9, ...issueData.path || []];
+  const { data, path: path10, errorMaps, issueData } = params;
+  const fullPath = [...path10, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -32379,11 +32379,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path9, key) {
+  constructor(parent, value, path10, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path9;
+    this._path = path10;
     this._key = key;
   }
   get path() {
@@ -37941,9 +37941,9 @@ function createJimp({ plugins: pluginsArg, formats: formatsArg } = {}) {
      * await image.write("test/output.png");
      * ```
      */
-    async write(path9, options) {
-      const mimeType = import_lite.default.getType(path9);
-      await writeFile(path9, await this.getBuffer(mimeType, options));
+    async write(path10, options) {
+      const mimeType = import_lite.default.getType(path10);
+      await writeFile(path10, await this.getBuffer(mimeType, options));
     }
     /**
      * Clone the image into a new Jimp instance.
@@ -42953,7 +42953,7 @@ var ScreenshotCollector = class {
   }
 };
 
-// src/main/services/VisionAgent.ts
+// src/main/services/Scroller.ts
 var import_fs5 = __toESM(require("fs"), 1);
 var import_path3 = __toESM(require("path"), 1);
 
@@ -43162,11 +43162,11 @@ Always include this field. When you switch activities (e.g. from feed to search)
 `;
 
 // src/main/prompts/specialist-agent.md
-var specialist_agent_default = `You are a specialist agent for Instagram content capture. You MUST respond with ONLY a valid JSON object \u2014 no prose, no explanation, no markdown. Every response must be a single JSON object starting with { and ending with }.
+var specialist_agent_default = `You are a specialist agent for Instagram content navigation. You MUST respond with ONLY a valid JSON object \u2014 no prose, no explanation, no markdown. Every response must be a single JSON object starting with { and ending with }.
 
 You are called in two situations:
 
-1. CAPTURE MODE: The navigator agent has reached a post modal or story viewer and needs you to capture the content.
+1. CAPTURE MODE: The navigator agent has reached a post modal or story viewer. Your job is to navigate through all the content (carousel slides, story frames) so that screenshots are captured automatically on each turn.
 2. RESCUE MODE: The navigator agent is stuck and needs you to figure out what's on screen and recover.
 
 ELEMENT LABELS
@@ -43180,30 +43180,23 @@ ACTIONS (pick one per turn):
   scroll(dir)      Scroll "up" or "down".
   press(key)       Press a key: Escape, Enter, ArrowRight, ArrowLeft.
   hover(n)         Move mouse to element [n] without clicking.
-  capture(x1, y1, x2, y2)  Capture a cropped region. (x1,y1) = top-left, (x2,y2) = bottom-right in screenshot pixel coordinates. The screenshot is {{SCREENSHOT_WIDTH}}x{{SCREENSHOT_HEIGHT}} pixels.
   wait(seconds)    Wait 1-5 seconds.
   done             You are finished. Return control to the navigator.
 
 CAPTURE MODE
-When called for a capture, you will see a screenshot of a post modal, story viewer, or search result post. Your job:
+When called for a capture, you will see a screenshot of a post modal, story viewer, or search result post. Screenshots are saved automatically every turn \u2014 your job is just to navigate through all the content:
 
 1. VERIFY you are in a capture-ready state (post modal with dark overlay, or story viewer with dark background).
-2. If viewing a STORY: click the pause button first, then capture the center story content. Exclude dark overlay and side previews.
-3. If viewing a POST MODAL: capture the LEFT side only (image + caption). Exclude the comments panel on the right.
-4. After capturing, check for CAROUSEL indicators (right arrow on the post image, dot indicators below). If it's a carousel:
+2. If viewing a STORY: click the pause button first (so the screenshot is clean), then wait 1 second.
+3. Check for CAROUSEL indicators (right arrow on the post image, dot indicators below). If it's a carousel:
    - Use hover(n) on the post image to reveal the arrow
-   - Click the right arrow to advance
-   - Capture each slide
+   - Click the right arrow to advance to the next slide
+   - Wait 1 second (so the slide loads and a screenshot is taken)
    - Repeat until no more right arrow appears
-5. If viewing STORIES: after capturing the current story, click the right arrow to advance to the next story. Pause it, capture it, repeat until you reach the last story or the story viewer closes.
-6. When you've captured everything in the current post/story sequence, use done.
+4. If viewing STORIES: after the current story is paused and a turn has passed (screenshot taken), click the right arrow to advance to the next story. Pause it, wait. Repeat until you reach the last story or the story viewer closes.
+5. When you've navigated through everything in the current post/story sequence, use done.
 
-Always provide accurate crop coordinates. For post modals, crop to just the left panel. For stories, crop to just the center story content.
-
-CAPTURE COORDINATES GUIDE
-- POST MODAL: The post image and caption are on the LEFT side of the modal. Typical crop: left edge of the image to just past the caption, excluding the comments panel on the right. The modal is usually centered on screen.
-- STORY: The story content is displayed large in the CENTER of the screen on a dark background. Crop to just the story content \u2014 exclude the dark bars on the sides, the small story previews, and the navigation arrows.
-- Always use screenshot pixel coordinates. The screenshot is {{SCREENSHOT_WIDTH}}x{{SCREENSHOT_HEIGHT}} pixels.
+The key insight: you do NOT need to explicitly capture anything. Every turn takes a screenshot automatically. Your job is to make sure the screen shows the right content on each turn.
 
 RESCUE MODE
 When called for rescue, the navigator is stuck. Look at the screenshot and figure out:
@@ -43222,27 +43215,17 @@ SAFETY \u2014 HARD RULES
 
 OUTPUT FORMAT (JSON):
 {
-  "thinking": "Post modal is open showing a landscape photo. I'll capture the left side with the image and caption.",
-  "action": "capture",
-  "x": 100,
-  "y": 50,
-  "x2": 600,
-  "y2": 800,
-  "source": "feed",
-  "memory": "Captured feed post. Checking for carousel arrows."
+  "thinking": "Post modal is open showing a landscape photo. I see carousel dots \u2014 I'll hover to reveal the arrow and advance.",
+  "action": "hover",
+  "element": 5,
+  "memory": "Post modal open. Carousel detected, hovering to reveal right arrow."
 }
-
-The "source" field is required on every capture. Set it to:
-- "feed" \u2014 a post from the home feed
-- "story" \u2014 a story frame
-- "carousel" \u2014 an additional carousel slide
-- "search" \u2014 a post from search results or account profile
 
 When using done, include a "result" field describing what you accomplished and what the navigator should do next:
 {
-  "thinking": "Captured 3 carousel slides, no more right arrow. Done with this post.",
+  "thinking": "Navigated through 3 carousel slides and the story sequence. All content has been shown.",
   "action": "done",
-  "result": "Captured 3 carousel slides from feed post. Navigator should press Escape to close modal and continue browsing."
+  "result": "Navigated 3 carousel slides from feed post. Navigator should press Escape to close modal and continue browsing."
 }
 
 For rescue done:
@@ -43518,9 +43501,9 @@ function drawDigit(data, imgW, imgH, bitmap, startX, startY, r, g, b) {
   }
 }
 
-// src/main/services/VisionAgent.ts
+// src/main/services/Scroller.ts
 var SCREENSHOT_WIDTH = 1280;
-var VisionAgent = class {
+var Scroller = class {
   page;
   ghost;
   scroll;
@@ -43543,8 +43526,10 @@ var VisionAgent = class {
   decisionCount = 0;
   lastTokenUsage = null;
   // Session state
-  captureCount = 0;
   startTime = 0;
+  // Raw screenshot dump for three-agent pipeline
+  rawDir = "";
+  rawCount = 0;
   // Reference example images organized by phase folder (Posts, Search, Stories)
   referenceImagesByPhase = null;
   sentPhases = /* @__PURE__ */ new Set();
@@ -43586,6 +43571,16 @@ var VisionAgent = class {
     console.log(`
 \u{1F441}\uFE0F  VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
     this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
+    if (this.config.rawDir) {
+      this.rawDir = this.config.rawDir;
+      if (!import_fs5.default.existsSync(this.rawDir)) import_fs5.default.mkdirSync(this.rawDir, { recursive: true });
+    } else {
+      const sessionOutputDir = this.collector.getOutputDir();
+      if (sessionOutputDir) {
+        this.rawDir = import_path3.default.join(sessionOutputDir, "raw");
+        if (!import_fs5.default.existsSync(this.rawDir)) import_fs5.default.mkdirSync(this.rawDir, { recursive: true });
+      }
+    }
     while (true) {
       if (this.stopped) {
         console.log("\u{1F6D1} VisionAgent: stopped by user");
@@ -43604,6 +43599,7 @@ var VisionAgent = class {
         await this.delay(500);
         continue;
       }
+      this.saveRawScreenshot(rawScreenshot);
       const { buffer: screenshot, elements } = await labelElements(
         this.page,
         rawScreenshot,
@@ -43691,12 +43687,19 @@ var VisionAgent = class {
         this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
       }
     }
+    if (this.rawDir) {
+      import_fs5.default.writeFileSync(import_path3.default.join(this.rawDir, "done.marker"), JSON.stringify({
+        totalScreenshots: this.rawCount,
+        totalDecisions: this.decisionCount,
+        timestamp: Date.now()
+      }));
+    }
     console.log(`
-\u{1F441}\uFE0F  VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions
+\u{1F441}\uFE0F  VisionAgent finished: ${this.rawCount} raw screenshots, ${this.decisionCount} decisions
 `);
-    this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent finished: ${this.captureCount} captures, ${this.decisionCount} decisions`);
+    this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent finished: ${this.rawCount} raw screenshots, ${this.decisionCount} decisions`);
     return {
-      captureCount: this.captureCount,
+      rawScreenshotCount: this.rawCount,
       decisionCount: this.decisionCount,
       actionHistory: [...this.actionHistory]
     };
@@ -43720,6 +43723,7 @@ var VisionAgent = class {
         await this.delay(500);
         continue;
       }
+      this.saveRawScreenshot(rawScreenshot);
       const { buffer: screenshot, elements } = await labelElements(
         this.page,
         rawScreenshot,
@@ -43806,15 +43810,24 @@ var VisionAgent = class {
     }
   }
   // -----------------------------------------------------------------------
-  // Coordinate Scaling
+  // Raw Screenshot Dump (Three-Agent Pipeline)
   // -----------------------------------------------------------------------
-  scaleToViewport(x2, y2) {
-    const scaledX = x2 / this.screenshotWidth * this.viewportWidth;
-    const scaledY = y2 / this.screenshotHeight * this.viewportHeight;
-    return {
-      x: Math.max(0, Math.min(this.viewportWidth, scaledX)),
-      y: Math.max(0, Math.min(this.viewportHeight, scaledY))
-    };
+  /**
+   * Save a raw screenshot to the raw/ directory for the filter agent.
+   * Every navigation screenshot gets saved — no filtering, no dedup.
+   * The filter agent (Agent 2) handles quality decisions.
+   */
+  saveRawScreenshot(buffer) {
+    if (!this.rawDir) return;
+    this.rawCount++;
+    const padded = this.rawCount.toString().padStart(3, "0");
+    import_fs5.default.writeFileSync(import_path3.default.join(this.rawDir, `${padded}.jpg`), buffer);
+    import_fs5.default.writeFileSync(import_path3.default.join(this.rawDir, `${padded}.json`), JSON.stringify({
+      turn: this.decisionCount,
+      phase: this.lastDeclaredPhase || "unknown",
+      timestamp: Date.now(),
+      agent: this.activeModel
+    }));
   }
   // -----------------------------------------------------------------------
   // Action Execution
@@ -43825,8 +43838,6 @@ var VisionAgent = class {
         return this.executeClick(decision);
       case "scroll":
         return this.executeScroll(decision);
-      case "capture":
-        return this.executeCapture(decision);
       case "type":
         return this.executeType(decision);
       case "press":
@@ -43868,44 +43879,6 @@ var VisionAgent = class {
     console.log(`  \u{1F4DC} scrolled ${direction} ${Math.abs(result.actualDelta)}px`);
     this.collector.appendLog(`\u{1F4DC} scrolled ${direction} ${Math.abs(result.actualDelta)}px`);
     return `scrolled ${direction} ${Math.abs(result.actualDelta)}px`;
-  }
-  async executeCapture(d) {
-    const source = this.inferCaptureSource(d);
-    let clip;
-    if (d.x !== void 0 && d.y !== void 0 && d.x2 !== void 0 && d.y2 !== void 0) {
-      const topLeft = this.scaleToViewport(d.x, d.y);
-      const bottomRight = this.scaleToViewport(d.x2, d.y2);
-      const width = bottomRight.x - topLeft.x;
-      const height = bottomRight.y - topLeft.y;
-      if (width > 50 && height > 50) {
-        clip = { x: topLeft.x, y: topLeft.y, width, height };
-        console.log(`  \u{1F4F7} capture: crop screenshot(${d.x},${d.y})\u2192(${d.x2},${d.y2}) \u2192 viewport clip(${Math.round(topLeft.x)},${Math.round(topLeft.y)},${Math.round(width)}x${Math.round(height)})`);
-        this.collector.appendLog(`\u{1F4F7} capture: crop screenshot(${d.x},${d.y})\u2192(${d.x2},${d.y2}) \u2192 viewport clip(${Math.round(topLeft.x)},${Math.round(topLeft.y)},${Math.round(width)}x${Math.round(height)})`);
-      } else {
-        console.log(`  \u{1F4F7} capture: crop region too small (${Math.round(width)}x${Math.round(height)}), using full viewport`);
-        this.collector.appendLog(`\u{1F4F7} capture: crop region too small (${Math.round(width)}x${Math.round(height)}), using full viewport`);
-      }
-    } else {
-      console.log(`  \u{1F4F7} capture: no crop coordinates, using full viewport`);
-      this.collector.appendLog(`\u{1F4F7} capture: no crop coordinates, using full viewport`);
-    }
-    console.log(`  \u{1F4F7} capture: source=${source}`);
-    this.collector.appendLog(`\u{1F4F7} capture: source=${source}`);
-    const captured = await this.collector.captureCurrentPost(
-      source,
-      void 0,
-      clip
-    );
-    if (captured) {
-      this.captureCount++;
-      const cropInfo = clip ? ` [cropped ${Math.round(clip.width)}x${Math.round(clip.height)}]` : "";
-      console.log(`  \u{1F4F7} \u2705 captured #${this.captureCount} (source=${source})${cropInfo}`);
-      this.collector.appendLog(`\u{1F4F7} \u2705 captured #${this.captureCount} (source=${source})${cropInfo}`);
-      return `captured #${this.captureCount} (source=${source})${cropInfo}`;
-    }
-    console.log(`  \u{1F4F7} \u274C capture rejected (duplicate)`);
-    this.collector.appendLog(`\u{1F4F7} \u274C capture rejected (duplicate)`);
-    return `capture rejected \u2014 duplicate content. Move on to the next post.`;
   }
   async executeType(d) {
     if (!d.text) return "no text provided";
@@ -44017,19 +43990,6 @@ var VisionAgent = class {
     }
   }
   // -----------------------------------------------------------------------
-  // Vision-Based Source Inference
-  // -----------------------------------------------------------------------
-  inferCaptureSource(d) {
-    if (d.source) return d.source;
-    if (d.phase === "stories") return "story";
-    if (d.phase === "search") return "search";
-    if (this.actionHistory.length > 0) {
-      const last = this.actionHistory[this.actionHistory.length - 1];
-      if (last.action === "press(ArrowRight)" || last.action === "[specialist] press(ArrowRight)") return "carousel";
-    }
-    return "feed";
-  }
-  // -----------------------------------------------------------------------
   // Safety Guardrail — Input Context Detection
   // -----------------------------------------------------------------------
   async getFocusedInputContext() {
@@ -44130,7 +44090,8 @@ var VisionAgent = class {
     if (isSpecialist) {
       requestBody.thinking = { type: "enabled", budget_tokens: 1e4 };
     }
-    for (let attempt = 0; attempt < 2; attempt++) {
+    const maxRetries = 4;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -44146,6 +44107,16 @@ var VisionAgent = class {
           const errText = await response.text();
           console.warn(`  \u26A0\uFE0F LLM API error (${response.status}): ${errText.slice(0, 200)}`);
           this.collector.appendLog(`  \u26A0\uFE0F LLM API error (${response.status}): ${errText.slice(0, 200)}`);
+          if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
+            const baseDelay = response.status === 429 ? 1e4 : 5e3;
+            const backoff = Math.min(baseDelay * Math.pow(2, attempt), 6e4);
+            const jitter = backoff * 0.25 * (Math.random() * 2 - 1);
+            const delay = Math.round(backoff + jitter);
+            console.log(`  \u23F3 Retrying (${attempt + 1}/${maxRetries - 1}) after ${(delay / 1e3).toFixed(1)}s backoff...`);
+            this.collector.appendLog(`  \u23F3 Retrying (${attempt + 1}/${maxRetries - 1}) after ${(delay / 1e3).toFixed(1)}s backoff...`);
+            await this.delay(delay);
+            continue;
+          }
           break;
         }
         const data = await response.json();
@@ -44163,9 +44134,9 @@ var VisionAgent = class {
         const textBlock = contentBlocks?.find((b) => b.type === "text");
         const content = textBlock?.text;
         if (!content || typeof content !== "string") {
-          console.warn(`  \u26A0\uFE0F Empty LLM response (attempt ${attempt + 1})`);
-          this.collector.appendLog(`  \u26A0\uFE0F Empty LLM response (attempt ${attempt + 1})`);
-          if (attempt === 0) {
+          console.warn(`  \u26A0\uFE0F Empty LLM response (attempt ${attempt + 1}/${maxRetries})`);
+          this.collector.appendLog(`  \u26A0\uFE0F Empty LLM response (attempt ${attempt + 1}/${maxRetries})`);
+          if (attempt < maxRetries - 1) {
             await this.delay(500);
             continue;
           }
@@ -44174,9 +44145,9 @@ var VisionAgent = class {
         const parsed = this.parseJsonResponse(content);
         return parsed;
       } catch (err) {
-        console.warn(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}):`, err);
-        this.collector.appendLog(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}): ${err}`);
-        if (attempt === 0) {
+        console.warn(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}/${maxRetries}):`, err);
+        this.collector.appendLog(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}/${maxRetries}): ${err}`);
+        if (attempt < maxRetries - 1) {
           await this.delay(500);
           continue;
         }
@@ -44281,7 +44252,7 @@ var VisionAgent = class {
     if (this.originalPage && this.page !== this.originalPage) {
       parts.push(`TAB: You are in a NEW TAB (opened via newtab). Use closetab to return to the main tab when done here. Do NOT navigate away \u2014 use closetab.`);
     }
-    parts.push(`CAPTURES: ${this.captureCount} screenshots taken`);
+    parts.push(`SCREENSHOTS: ${this.rawCount} raw screenshots saved (filter runs async)`);
     if (this.config.userInterests.length > 0) {
       parts.push(`INTERESTS TO SEARCH: ${this.config.userInterests.join(", ")}`);
     }
@@ -44305,14 +44276,8 @@ YOUR LAST ACTION: ${JSON.stringify({ action: this.lastAction.action, element: th
         parts.push(`${i + 1}. ${entry.action} \u2192 ${entry.result}`);
       });
     }
-    if (this.captureCount > 0) {
-      const breakdown = this.collector.getSourceBreakdown();
-      const breakdownParts = [];
-      if (breakdown.feed > 0) breakdownParts.push(`${breakdown.feed} feed`);
-      if (breakdown.story > 0) breakdownParts.push(`${breakdown.story} story`);
-      if (breakdown.search > 0) breakdownParts.push(`${breakdown.search} search`);
-      if (breakdown.carousel > 0) breakdownParts.push(`${breakdown.carousel} carousel`);
-      parts.push(`CAPTURE BREAKDOWN: ${breakdownParts.join(", ")}`);
+    if (this.rawCount > 0) {
+      parts.push(`RAW SCREENSHOTS: ${this.rawCount} saved so far`);
     }
     if (this.config.sessionMemoryDigest) {
       parts.push(`
@@ -44379,29 +44344,6 @@ ${this.lastMemory}`);
           }
         }
       }
-      if (decision.x2 !== void 0 && decision.y2 !== void 0 && decision.x !== void 0 && decision.y !== void 0 && decision.action === "capture") {
-        const x1 = Math.round(decision.x);
-        const y1 = Math.round(decision.y);
-        const x2 = Math.round(decision.x2);
-        const y2 = Math.round(decision.y2);
-        const thickness = 2;
-        for (let x3 = x1; x3 <= x2; x3++) {
-          for (let dt = 0; dt < thickness; dt++) {
-            if (x3 >= 0 && x3 < image2.width) {
-              if (y1 + dt >= 0 && y1 + dt < image2.height) image2.setPixelColor(RED, x3, y1 + dt);
-              if (y2 - dt >= 0 && y2 - dt < image2.height) image2.setPixelColor(RED, x3, y2 - dt);
-            }
-          }
-        }
-        for (let y3 = y1; y3 <= y2; y3++) {
-          for (let dt = 0; dt < thickness; dt++) {
-            if (y3 >= 0 && y3 < image2.height) {
-              if (x1 + dt >= 0 && x1 + dt < image2.width) image2.setPixelColor(RED, x1 + dt, y3);
-              if (x2 - dt >= 0 && x2 - dt < image2.width) image2.setPixelColor(RED, x2 - dt, y3);
-            }
-          }
-        }
-      }
       const buffer = await image2.getBuffer("image/jpeg", { quality: 85 });
       const agentTag = this.activeModel === "specialist" ? "spec_" : "";
       const filename = `turn_${String(this.decisionCount).padStart(3, "0")}_${agentTag}${decision.action}.jpg`;
@@ -44439,8 +44381,6 @@ ${this.lastMemory}`);
         return `click([${d.element}])`;
       case "scroll":
         return `scroll(${d.direction || "down"})`;
-      case "capture":
-        return d.x2 !== void 0 ? `capture(${d.x},${d.y},${d.x2},${d.y2})` : "capture";
       case "type":
         return `type("${(d.text || "").slice(0, 20)}")`;
       case "press":
@@ -44464,8 +44404,8 @@ ${this.lastMemory}`);
     }
   }
   // Public getters for InstagramScraper session summary
-  getCaptureCount() {
-    return this.captureCount;
+  getRawScreenshotCount() {
+    return this.rawCount;
   }
   getRecordCount() {
     return 0;
@@ -44610,7 +44550,6 @@ var SessionMemory = class {
 
 // src/main/services/InstagramScraper.ts
 var path6 = __toESM(require("path"), 1);
-var os = __toESM(require("os"), 1);
 var InstagramScraper = class {
   context;
   apiKey;
@@ -44622,7 +44561,7 @@ var InstagramScraper = class {
   screenshotCollector;
   page;
   sessionMemory = new SessionMemory();
-  activeVisionAgent = null;
+  activeScroller = null;
   constructor(context, apiKey, debugMode = false) {
     this.context = context;
     this.apiKey = apiKey;
@@ -44631,18 +44570,18 @@ var InstagramScraper = class {
   }
   /** Stop the active browsing session externally (e.g. Cmd+Shift+K). */
   stop() {
-    if (this.activeVisionAgent) {
-      this.activeVisionAgent.stop();
+    if (this.activeScroller) {
+      this.activeScroller.stop();
     }
   }
   /**
    * Main entry point — browse Instagram and return captured screenshots.
    */
-  async browseAndCapture(targetMinutes, userInterests) {
-    return this.browseWithAINavigation(targetMinutes, userInterests);
+  async browseAndCapture(targetMinutes, userInterests, config) {
+    return this.browseWithAINavigation(targetMinutes, userInterests, config);
   }
   /**
-   * Browse Instagram using VisionAgent (pure vision-based LLM navigation).
+   * Browse Instagram using Scroller (pure vision-based LLM navigation).
    */
   async browseWithAINavigation(targetMinutes, userInterests, config) {
     const startTime = Date.now();
@@ -44657,7 +44596,7 @@ var InstagramScraper = class {
       maxCaptures: estimatedMaxCaptures,
       jpegQuality: 85,
       minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.1),
-      saveToDirectory: path6.join(os.homedir(), "Documents", "debug-screenshots")
+      saveToDirectory: path6.join(__dirname, "../../debug-screenshots")
     });
     let visionAgent;
     try {
@@ -44701,7 +44640,7 @@ var InstagramScraper = class {
       this.screenshotCollector.appendLogRaw(`
 ---
 `);
-      visionAgent = new VisionAgent(
+      visionAgent = new Scroller(
         this.page,
         this.ghost,
         this.scroll,
@@ -44711,37 +44650,38 @@ var InstagramScraper = class {
           maxDurationMs: config?.maxDurationMs || targetDurationMs,
           userInterests,
           debugMode: this.debugMode,
-          sessionMemoryDigest
+          sessionMemoryDigest,
+          rawDir: config?.rawDir
         }
       );
-      this.activeVisionAgent = visionAgent;
+      this.activeScroller = visionAgent;
       const result = await visionAgent.run();
       this.screenshotCollector.appendLogRaw(`
 ---
 
 ## Summary`);
       this.screenshotCollector.appendLogRaw(`- **Decisions:** ${result.decisionCount}`);
-      this.screenshotCollector.appendLogRaw(`- **Captures:** ${result.captureCount}`);
+      this.screenshotCollector.appendLogRaw(`- **Raw Screenshots:** ${result.rawScreenshotCount}`);
       this.screenshotCollector.appendLogRaw(`- **Duration:** ${((Date.now() - startTime) / 1e3 / 60).toFixed(1)} minutes`);
       this.screenshotCollector.flushSessionLog();
-      const capturesPerInterest = Math.round(result.captureCount / Math.max(userInterests.length, 1));
+      const screenshotsPerInterest = Math.round(result.rawScreenshotCount / Math.max(userInterests.length, 1));
       const sessionSummary = {
         id: `session-${startTime}`,
         timestamp: startTime,
         durationMs: Date.now() - startTime,
         interestResults: userInterests.map((interest) => ({
           interest,
-          captureCount: capturesPerInterest,
+          captureCount: screenshotsPerInterest,
           searchTimeMs: 0,
-          quality: capturesPerInterest >= 5 ? "high" : capturesPerInterest >= 2 ? "medium" : "low"
+          quality: screenshotsPerInterest >= 5 ? "high" : screenshotsPerInterest >= 2 ? "medium" : "low"
         })),
         phaseBreakdown: [{
           phase: "feed",
           durationMs: Date.now() - startTime,
-          capturesProduced: result.captureCount
+          capturesProduced: result.rawScreenshotCount
         }],
         stagnationEvents: [],
-        totalCaptures: result.captureCount,
+        totalCaptures: result.rawScreenshotCount,
         totalActions: result.decisionCount,
         uniqueContentRatio: 1
       };
@@ -44752,24 +44692,25 @@ var InstagramScraper = class {
         throw error;
       }
     } finally {
-      this.activeVisionAgent = null;
+      this.activeScroller = null;
       console.log(`
 \u{1F4CA} Session Summary:`);
       if (visionAgent) {
         console.log(`   - Decisions: ${visionAgent.getDecisionCount()}`);
+        console.log(`   - Raw screenshots: ${visionAgent.getRawScreenshotCount()}`);
       }
-      console.log(`   - Captures: ${this.screenshotCollector.getCaptureCount()}`);
       this.screenshotCollector.logSummary();
       await this.page.close();
     }
     return {
-      captures: this.screenshotCollector.getCaptures(),
+      captures: [],
+      // No longer populated here — filter agent handles this
       videos: [],
-      // VIDEO RECORDING DISABLED
       sessionDuration: Date.now() - startTime,
-      captureCount: this.screenshotCollector.getCaptureCount(),
+      rawScreenshotCount: visionAgent?.getRawScreenshotCount() || 0,
+      captureCount: 0,
+      // Deprecated
       videoCount: 0,
-      // VIDEO RECORDING DISABLED
       scrapedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
   }
@@ -44782,8 +44723,8 @@ var InstagramScraper = class {
   }
 };
 
-// src/main/services/BatchDigestGenerator.ts
-var BatchDigestGenerator = class {
+// src/main/services/DigestGeneration.ts
+var DigestGeneration = class {
   apiKey;
   usageService;
   constructor(apiKey) {
@@ -45013,7 +44954,12 @@ VI. EXAMPLES
    * Parse the LLM response into a structured AnalysisObject.
    */
   parseDigestResponse(content, config, dayName, dateStr) {
-    const parsed = JSON.parse(content);
+    let cleaned = content.trim();
+    const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      cleaned = codeBlockMatch[1].trim();
+    }
+    const parsed = JSON.parse(cleaned);
     if (!parsed.title || !parsed.sections || !Array.isArray(parsed.sections)) {
       throw new Error("Invalid response structure: missing title or sections");
     }
@@ -45038,220 +44984,179 @@ VI. EXAMPLES
   }
 };
 
-// src/main/services/ImageTagger.ts
-var ImageTagger = class {
+// src/main/services/Filterer.ts
+var fs7 = __toESM(require("fs"), 1);
+var path7 = __toESM(require("path"), 1);
+var Filterer = class {
+  rawDir;
+  filteredDir;
   apiKey;
-  userInterests;
+  interests;
+  processed = /* @__PURE__ */ new Set();
+  running = false;
+  kept = 0;
+  rejected = 0;
+  tokensUsed = 0;
   usageService;
-  constructor(apiKey, userInterests) {
+  constructor(rawDir, filteredDir, apiKey, interests) {
+    this.rawDir = rawDir;
+    this.filteredDir = filteredDir;
     this.apiKey = apiKey;
-    this.userInterests = userInterests;
+    this.interests = interests;
     this.usageService = UsageService.getInstance();
+    if (!fs7.existsSync(this.filteredDir)) {
+      fs7.mkdirSync(this.filteredDir, { recursive: true });
+    }
   }
   /**
-   * Batch-tag all captured images in a single API call.
-   * Uses ModelConfig.tagging model.
-   *
-   * @param captures - Array of captured screenshots to tag
-   * @returns TaggingResult with tags for each image and token usage
+   * Start the async filter loop. Polls raw/ for new screenshots every 2 seconds.
+   * Resolves when the Navigator writes done.marker and all remaining files are processed.
    */
-  async tagBatch(captures) {
-    if (captures.length === 0) {
-      console.log("\u{1F3F7}\uFE0F No images to tag");
-      return { tags: [], tokensUsed: 0 };
-    }
-    console.log(`\u{1F3F7}\uFE0F Tagging ${captures.length} images with ${ModelConfig.tagging}...`);
-    const imageContents = captures.map((capture) => ({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: "image/jpeg",
-        data: capture.screenshot.toString("base64")
+  async start() {
+    this.running = true;
+    console.log(`\u{1F50D} ScreenshotFilter: watching ${this.rawDir}`);
+    while (this.running) {
+      const files = fs7.readdirSync(this.rawDir).filter((f) => f.endsWith(".jpg") && !this.processed.has(f)).sort();
+      for (const file of files) {
+        if (!this.running) break;
+        await this.evaluateScreenshot(file);
+        this.processed.add(file);
       }
+      if (fs7.existsSync(path7.join(this.rawDir, "done.marker"))) {
+        const remaining = fs7.readdirSync(this.rawDir).filter((f) => f.endsWith(".jpg") && !this.processed.has(f)).sort();
+        for (const file of remaining) {
+          await this.evaluateScreenshot(file);
+          this.processed.add(file);
+        }
+        this.running = false;
+        break;
+      }
+      await new Promise((resolve2) => setTimeout(resolve2, 2e3));
+    }
+    fs7.writeFileSync(path7.join(this.filteredDir, "done.marker"), JSON.stringify({
+      processed: this.processed.size,
+      kept: this.kept,
+      rejected: this.rejected,
+      tokensUsed: this.tokensUsed,
+      timestamp: Date.now()
     }));
-    const prompt = this.buildTaggingPrompt(captures.length);
-    const messageContent = [
-      { type: "text", text: prompt },
-      ...imageContents
-    ];
+    console.log(`\u{1F50D} ScreenshotFilter: done. ${this.kept} kept, ${this.rejected} rejected out of ${this.processed.size} processed.`);
+    return {
+      processed: this.processed.size,
+      kept: this.kept,
+      rejected: this.rejected,
+      tokensUsed: this.tokensUsed
+    };
+  }
+  /** Stop the filter loop early (e.g. user pressed Cmd+Shift+K). */
+  stop() {
+    this.running = false;
+  }
+  /**
+   * Evaluate a single screenshot using LLM vision.
+   * If it contains real content, copy it (and its sidecar JSON) to filtered/.
+   */
+  async evaluateScreenshot(filename) {
+    const filepath = path7.join(this.rawDir, filename);
+    const buffer = fs7.readFileSync(filepath);
+    const base64 = buffer.toString("base64");
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.apiKey,
-          "anthropic-version": "2023-06-01"
-        },
-        body: JSON.stringify({
-          model: ModelConfig.tagging,
-          messages: [{
-            role: "user",
-            content: messageContent
-          }],
-          max_tokens: 4096
-        })
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error("\u274C Tagging API error:", errorData);
-        throw new Error("TAGGING_FAILED");
+      const result = await this.callFilterLLM(base64);
+      if (result.keep) {
+        fs7.copyFileSync(filepath, path7.join(this.filteredDir, filename));
+        const jsonFile = filename.replace(".jpg", ".json");
+        const jsonPath = path7.join(this.rawDir, jsonFile);
+        if (fs7.existsSync(jsonPath)) {
+          const sidecar = JSON.parse(fs7.readFileSync(jsonPath, "utf-8"));
+          sidecar.filterReason = result.reason;
+          fs7.writeFileSync(
+            path7.join(this.filteredDir, jsonFile),
+            JSON.stringify(sidecar)
+          );
+        }
+        this.kept++;
+        console.log(`  \u{1F50D} \u2705 ${filename}: KEEP \u2014 ${result.reason}`);
+      } else {
+        this.rejected++;
+        console.log(`  \u{1F50D} \u274C ${filename}: REJECT \u2014 ${result.reason}`);
       }
-      const data = await response.json();
-      const tokensUsed = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
-      if (data.usage) {
-        await this.usageService.incrementUsage(data.usage);
-        console.log(`\u{1F4B0} Tagging cost tracked: ${tokensUsed} tokens`);
-      }
-      const contentBlocks = data.content;
-      const content = contentBlocks?.filter((b) => b.type === "text").map((b) => b.text).join("") || "";
-      if (!content) {
-        throw new Error("TAGGING_FAILED: No content in response");
-      }
-      const tags = this.parseTaggingResponse(content, captures.length);
-      const adCount = tags.filter((t2) => t2.isAd).length;
-      const blankCount = tags.filter((t2) => t2.isBlank).length;
-      const validCount = tags.filter((t2) => !t2.isAd && !t2.isBlank).length;
-      console.log(`\u{1F3F7}\uFE0F Tagged ${tags.length} images:`);
-      console.log(`   Ads: ${adCount}, Blank: ${blankCount}, Valid: ${validCount}`);
-      return { tags, tokensUsed };
     } catch (error) {
-      console.error("\u274C Tagging failed:", error.message);
-      return { tags: [], tokensUsed: 0 };
+      console.warn(`  \u{1F50D} \u26A0\uFE0F ${filename}: filter error, keeping by default \u2014`, error);
+      fs7.copyFileSync(filepath, path7.join(this.filteredDir, filename));
+      const jsonFile = filename.replace(".jpg", ".json");
+      const jsonPath = path7.join(this.rawDir, jsonFile);
+      if (fs7.existsSync(jsonPath)) {
+        fs7.copyFileSync(jsonPath, path7.join(this.filteredDir, jsonFile));
+      }
+      this.kept++;
     }
   }
   /**
-   * Select the best N images based on tags.
-   * Filters out ads and blank images, then sorts by relevance + quality.
-   *
-   * @param captures - Original captured screenshots
-   * @param tags - Tags from tagBatch()
-   * @param count - Maximum number of images to select (default 25)
-   * @returns Selected captures in original chronological order
+   * Call the LLM to decide if a screenshot contains real content.
+   * Uses the tagging model for speed and low cost.
    */
-  selectBest(captures, tags, count = 25) {
-    if (tags.length === 0) {
-      console.log(`\u{1F3F7}\uFE0F No tags available, using first ${count} captures`);
-      return captures.slice(0, count);
-    }
-    const validTags = tags.filter((t2) => !t2.isBlank);
-    if (validTags.length === 0) {
-      console.warn("\u{1F3F7}\uFE0F All images filtered (ads/blank), using original captures");
-      return captures.slice(0, count);
-    }
-    const sorted = [...validTags].sort((a, b) => {
-      const scoreA = a.relevance * 1.5 + a.quality;
-      const scoreB = b.relevance * 1.5 + b.quality;
-      return scoreB - scoreA;
+  async callFilterLLM(base64Image) {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: ModelConfig.tagging,
+        max_tokens: 100,
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/jpeg",
+                data: base64Image
+              }
+            },
+            {
+              type: "text",
+              text: `You are filtering Instagram browsing screenshots for a digest.
+
+Does this screenshot contain actual Instagram content worth summarizing?
+
+YES if: a post is clearly visible (image with caption), a story frame is showing full-screen, a post modal is open (dark overlay with content centered), a search result post is open, carousel content is displayed, a profile page with visible posts.
+
+NO if: this is mid-navigation (home feed scrolling with no post focused), a loading/spinner screen, a search grid showing only tiny thumbnails, a settings/menu page, a login or error screen, mostly UI chrome (sidebar, top bar) with no content, a transitional state between pages, a duplicate of content that looks nearly identical to something you'd expect was just captured (same post, slightly different scroll).
+
+User interests for context: ${this.interests.join(", ")}
+
+Respond with ONLY a JSON object:
+{"keep": true, "reason": "Post modal open showing a landscape photo with caption"}
+or
+{"keep": false, "reason": "Home feed mid-scroll, no post focused"}`
+            }
+          ]
+        }]
+      })
     });
-    const selectedIds = new Set(sorted.slice(0, count).map((t2) => t2.imageId));
-    const selected = captures.filter((c2) => selectedIds.has(c2.id));
-    console.log(`\u{1F3F7}\uFE0F Selected ${selected.length} best images from ${captures.length} total`);
-    const topTags = sorted.slice(0, 5);
-    console.log(`\u{1F3F7}\uFE0F Top selections:`);
-    for (const tag of topTags) {
-      console.log(`   #${tag.imageId}: relevance=${tag.relevance}, quality=${tag.quality} - ${tag.description.substring(0, 40)}...`);
+    const data = await response.json();
+    if (data.usage) {
+      this.tokensUsed += (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
+      this.usageService.incrementUsage({
+        input_tokens: data.usage.input_tokens || 0,
+        output_tokens: data.usage.output_tokens || 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0
+      });
     }
-    return selected;
-  }
-  /**
-   * Build the tagging prompt for the tagging model.
-   */
-  buildTaggingPrompt(imageCount) {
-    const interests = this.userInterests.length > 0 ? this.userInterests.join(", ") : "general news and updates";
-    return `You are analyzing ${imageCount} Instagram screenshots. For each image (numbered 1-${imageCount} in order), provide a brief tag.
-
-USER INTERESTS: ${interests}
-
-For each image, determine:
-1. isAd: Is this sponsored content, an ad, or promotional material? (true/false)
-2. isBlank: Is this a loading screen, blank, or unreadable? (true/false)
-3. relevance: How relevant is this to the user's interests? (0-10, where 10 = directly matches interests)
-4. quality: How clear and informative is this screenshot? (0-10, where 10 = perfect quality, readable text)
-5. description: One brief sentence describing what's shown (max 50 chars)
-
-DETECTION RULES:
-
-Mark isAd=true for:
-- Posts with "Sponsored" label visible
-- Posts with "Paid partnership" label
-- Product ads with "Shop Now", "Learn More" buttons
-- Brand accounts with pricing/promotions
-- Influencer sponsored content with disclaimers
-
-Mark isBlank=true for:
-- Loading spinners or skeleton UI
-- Mostly empty/white screens
-- Text too small or blurry to read
-- Transition screens between content
-- Error states
-
-SCORING GUIDE:
-
-relevance 8-10: Directly matches user interests (e.g., sports team they follow, local news)
-relevance 5-7: Generally newsworthy or broadly interesting
-relevance 2-4: Personal/lifestyle content, generic posts
-relevance 0-1: Off-topic, irrelevant to most users
-
-quality 8-10: Clear image, readable text, complete post visible
-quality 5-7: Acceptable quality, some text readable
-quality 2-4: Partial content visible, some blur
-quality 0-1: Unreadable, severely cropped, or corrupted
-
-Return JSON with this exact format:
-{
-    "tags": [
-        {"imageId": 1, "isAd": false, "isBlank": false, "relevance": 8, "quality": 9, "description": "Cal Football recruiting news"},
-        {"imageId": 2, "isAd": true, "isBlank": false, "relevance": 0, "quality": 7, "description": "Sponsored product ad"},
-        {"imageId": 3, "isAd": false, "isBlank": true, "relevance": 0, "quality": 0, "description": "Loading screen"}
-    ]
-}
-
-IMPORTANT: You must return a tag for EVERY image from 1 to ${imageCount}. Do not skip any.`;
-  }
-  /**
-   * Parse the LLM response into ImageTag array.
-   * Handles missing tags by filling with defaults.
-   */
-  parseTaggingResponse(content, expectedCount) {
+    const text = data.content?.[0]?.text || "";
     try {
-      const parsed = JSON.parse(content);
-      const rawTags = parsed.tags || [];
-      const tagMap = /* @__PURE__ */ new Map();
-      for (const tag of rawTags) {
-        if (typeof tag.imageId === "number") {
-          tagMap.set(tag.imageId, tag);
-        }
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
       }
-      const result = [];
-      for (let i = 1; i <= expectedCount; i++) {
-        const existing = tagMap.get(i);
-        if (existing) {
-          result.push({
-            imageId: i,
-            isAd: Boolean(existing.isAd),
-            isBlank: Boolean(existing.isBlank),
-            relevance: Math.max(0, Math.min(10, Number(existing.relevance) || 0)),
-            quality: Math.max(0, Math.min(10, Number(existing.quality) || 0)),
-            description: String(existing.description || "No description")
-          });
-        } else {
-          console.warn(`\u{1F3F7}\uFE0F Missing tag for image #${i}, using default`);
-          result.push({
-            imageId: i,
-            isAd: false,
-            isBlank: false,
-            // Don't exclude, just give low score
-            relevance: 3,
-            quality: 3,
-            description: "Tag missing from LLM response"
-          });
-        }
-      }
-      return result;
-    } catch (e) {
-      console.error("\u274C Failed to parse tagging response:", e);
-      return [];
+    } catch {
     }
+    return { keep: true, reason: "Failed to parse filter response, keeping by default" };
   }
 };
 
@@ -45266,8 +45171,9 @@ var SchedulerService = class _SchedulerService {
   lastWakeTime = /* @__PURE__ */ new Date();
   // Track when app started/woke
   suspensionBlockerId = null;
-  // Active debug run scraper (for Cmd+Shift+K stop)
+  // Active debug run scraper and filter (for Cmd+Shift+K stop)
   activeDebugScraper = null;
+  activeFilter = null;
   constructor() {
   }
   static getInstance() {
@@ -45704,7 +45610,11 @@ var SchedulerService = class _SchedulerService {
     if (this.activeDebugScraper) {
       console.log("\u{1F6D1} Stopping debug run (Cmd+Shift+K)...");
       this.activeDebugScraper.stop();
-    } else {
+    }
+    if (this.activeFilter) {
+      this.activeFilter.stop();
+    }
+    if (!this.activeDebugScraper && !this.activeFilter) {
       console.log("\u{1F6D1} No active debug run to stop");
     }
   }
@@ -45741,29 +45651,63 @@ var SchedulerService = class _SchedulerService {
       if (!sessionCheck.valid) {
         throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
       }
+      const debugScreenshotsDir = import_path5.default.join(__dirname, "../../debug-screenshots");
+      const sessionTimestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const sessionDir = import_path5.default.join(debugScreenshotsDir, `session_${sessionTimestamp}`);
+      const rawDir = import_path5.default.join(sessionDir, "raw");
+      const filteredDir = import_path5.default.join(sessionDir, "filtered");
+      import_fs7.default.mkdirSync(rawDir, { recursive: true });
+      import_fs7.default.mkdirSync(filteredDir, { recursive: true });
+      console.log("\u{1F9EA} Starting screenshot filter agent (Agent 2)...");
+      const filter = new Filterer(rawDir, filteredDir, apiKey, settings.interests || []);
+      this.activeFilter = filter;
+      const filterPromise = filter.start();
       console.log("\u{1F9EA} Browsing Instagram (90 min max, stop with Cmd+Shift+K)...");
       const scraper = new InstagramScraper(context, apiKey, true);
       this.activeDebugScraper = scraper;
       const session2 = await scraper.browseAndCapture(
         MAX_DURATION_MS / 6e4,
-        // Convert to minutes (24h safety net)
-        settings.interests || []
+        settings.interests || [],
+        { rawDir }
       );
       this.activeDebugScraper = null;
-      console.log(`\u{1F9EA} Browsing complete: ${session2.captureCount} screenshots captured`);
+      console.log(`\u{1F9EA} Browsing complete: ${session2.rawScreenshotCount} raw screenshots saved`);
       await browserManager.close();
       context = null;
-      if (session2.captureCount < 3) {
-        console.warn(`\u{1F9EA} Very few captures (${session2.captureCount}), digest quality may be low`);
+      console.log("\u{1F9EA} Waiting for filter agent to finish...");
+      const filterStats = await filterPromise;
+      this.activeFilter = null;
+      console.log(`\u{1F9EA} Filter complete: ${filterStats.kept} kept, ${filterStats.rejected} rejected, ${filterStats.tokensUsed} tokens`);
+      if (filterStats.kept < 3) {
+        console.warn(`\u{1F9EA} Very few filtered captures (${filterStats.kept}), digest quality may be low`);
       }
-      console.log("\u{1F9EA} Tagging captured images for smart selection...");
-      const tagger = new ImageTagger(apiKey, settings.interests || []);
-      const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session2.captures);
-      const selectCount = Math.min(50, session2.captureCount);
-      const bestCaptures = tagger.selectBest(session2.captures, tags, selectCount);
-      console.log(`\u{1F9EA} Tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
-      console.log("\u{1F9EA} Generating digest from selected screenshots...");
-      const digestGenerator = new BatchDigestGenerator(apiKey);
+      console.log("\u{1F9EA} Loading filtered screenshots...");
+      const filteredFiles = import_fs7.default.readdirSync(filteredDir).filter((f) => f.endsWith(".jpg")).sort();
+      const bestCaptures = filteredFiles.map((filename, index) => {
+        const screenshot = import_fs7.default.readFileSync(import_path5.default.join(filteredDir, filename));
+        let source = "feed";
+        const jsonFile = filename.replace(".jpg", ".json");
+        const jsonPath = import_path5.default.join(filteredDir, jsonFile);
+        if (import_fs7.default.existsSync(jsonPath)) {
+          try {
+            const meta = JSON.parse(import_fs7.default.readFileSync(jsonPath, "utf-8"));
+            if (meta.phase === "Stories") source = "story";
+            else if (meta.phase === "Search") source = "search";
+          } catch {
+          }
+        }
+        return {
+          id: index + 1,
+          screenshot,
+          source,
+          interest: void 0,
+          timestamp: Date.now(),
+          scrollPosition: 0
+        };
+      });
+      console.log(`\u{1F9EA} Loaded ${bestCaptures.length} filtered screenshots`);
+      console.log("\u{1F9EA} Generating digest from filtered screenshots...");
+      const digestGenerator = new DigestGeneration(apiKey);
       const analysis = await digestGenerator.generateDigest(bestCaptures, {
         userName: settings.userName || "User",
         interests: settings.interests || [],
@@ -45774,26 +45718,19 @@ var SchedulerService = class _SchedulerService {
       const recordDir = import_path5.default.join(userDataPath, "analysis_records");
       const imagesDir = import_path5.default.join(recordDir, recordId, "images");
       await import_fs7.default.promises.mkdir(imagesDir, { recursive: true });
-      const selectedIds = new Set(bestCaptures.map((c2) => c2.id));
       const imageMetadata = [];
       for (const capture of bestCaptures) {
         const filename = `${capture.id}.jpg`;
         const imagePath = import_path5.default.join(imagesDir, filename);
         await import_fs7.default.promises.writeFile(imagePath, capture.screenshot);
-        const captureTag = tags.find((t2) => t2.imageId === capture.id);
         imageMetadata.push({
           id: capture.id,
           filename,
           source: capture.source,
-          interest: capture.interest,
-          tag: captureTag ? {
-            relevance: captureTag.relevance,
-            quality: captureTag.quality,
-            description: captureTag.description
-          } : void 0
+          interest: capture.interest
         });
       }
-      console.log(`\u{1F5BC}\uFE0F Saved ${imageMetadata.length} selected images to ${imagesDir}`);
+      console.log(`\u{1F5BC}\uFE0F Saved ${imageMetadata.length} filtered images to ${imagesDir}`);
       const analysisWithImages = {
         ...analysis,
         images: imageMetadata
@@ -45830,7 +45767,7 @@ var SchedulerService = class _SchedulerService {
         this.mainWindow.webContents.send("analysis-ready", metadataRecord);
         this.mainWindow.webContents.send("debug-run-complete", {});
       }
-      console.log(`\u{1F9EA} Debug Run (Screenshot-First) Complete! Captures: ${session2.captureCount}`);
+      console.log(`\u{1F9EA} Debug Run (Three-Agent Pipeline) Complete! Raw: ${session2.rawScreenshotCount}, Filtered: ${filterStats.kept}`);
     } catch (error) {
       console.error("\u{1F9EA} Debug Run Failed:", error.message);
       this.activeDebugScraper = null;
@@ -45873,27 +45810,60 @@ var SchedulerService = class _SchedulerService {
       if (!sessionCheck.valid) {
         throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
       }
-      console.log("\u{1F4F1} Baker browsing Instagram (Screenshot-First mode)...");
+      const bakerScreenshotsDir = import_path5.default.join(__dirname, "../../debug-screenshots");
+      const bakerSessionTimestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const bakerSessionDir = import_path5.default.join(bakerScreenshotsDir, `session_${bakerSessionTimestamp}`);
+      const bakerRawDir = import_path5.default.join(bakerSessionDir, "raw");
+      const bakerFilteredDir = import_path5.default.join(bakerSessionDir, "filtered");
+      import_fs7.default.mkdirSync(bakerRawDir, { recursive: true });
+      import_fs7.default.mkdirSync(bakerFilteredDir, { recursive: true });
+      console.log("\u{1F50D} Baker starting screenshot filter agent (Agent 2)...");
+      const bakerFilter = new Filterer(bakerRawDir, bakerFilteredDir, apiKey, settings.interests || []);
+      const bakerFilterPromise = bakerFilter.start();
+      console.log("\u{1F4F1} Baker browsing Instagram (Three-Agent Pipeline)...");
       const scraper = new InstagramScraper(context, apiKey);
       const session2 = await scraper.browseAndCapture(
         90,
-        // Normal mode: 90 minutes (range: 60-150 min)
-        settings.interests || []
+        // Normal mode: 90 minutes
+        settings.interests || [],
+        { rawDir: bakerRawDir }
       );
-      console.log(`\u{1F4F8} Baker browsing complete: ${session2.captureCount} screenshots captured`);
+      console.log(`\u{1F4F8} Baker browsing complete: ${session2.rawScreenshotCount} raw screenshots saved`);
       await browserManager.close();
       context = null;
-      if (session2.captureCount < 3) {
-        console.warn(`\u26A0\uFE0F Baker: Very few captures (${session2.captureCount}), digest quality may be low`);
+      console.log("\u{1F50D} Baker waiting for filter agent to finish...");
+      const bakerFilterStats = await bakerFilterPromise;
+      console.log(`\u{1F50D} Baker filter complete: ${bakerFilterStats.kept} kept, ${bakerFilterStats.rejected} rejected, ${bakerFilterStats.tokensUsed} tokens`);
+      if (bakerFilterStats.kept < 3) {
+        console.warn(`\u26A0\uFE0F Baker: Very few filtered captures (${bakerFilterStats.kept}), digest quality may be low`);
       }
-      console.log("\u{1F3F7}\uFE0F Baker tagging captured images for smart selection...");
-      const tagger = new ImageTagger(apiKey, settings.interests || []);
-      const { tags, tokensUsed: taggingTokens } = await tagger.tagBatch(session2.captures);
-      const selectCount = Math.min(50, session2.captureCount);
-      const bestCaptures = tagger.selectBest(session2.captures, tags, selectCount);
-      console.log(`\u{1F3F7}\uFE0F Baker tagging used ${taggingTokens} tokens, selected ${bestCaptures.length} images`);
-      console.log("\u{1F916} Baker generating digest from selected screenshots...");
-      const digestGenerator = new BatchDigestGenerator(apiKey);
+      console.log("\u{1F3F7}\uFE0F Baker loading filtered screenshots...");
+      const bakerFilteredFiles = import_fs7.default.readdirSync(bakerFilteredDir).filter((f) => f.endsWith(".jpg")).sort();
+      const bestCaptures = bakerFilteredFiles.map((filename, index) => {
+        const screenshot = import_fs7.default.readFileSync(import_path5.default.join(bakerFilteredDir, filename));
+        let source = "feed";
+        const jsonFile = filename.replace(".jpg", ".json");
+        const jsonPath = import_path5.default.join(bakerFilteredDir, jsonFile);
+        if (import_fs7.default.existsSync(jsonPath)) {
+          try {
+            const meta = JSON.parse(import_fs7.default.readFileSync(jsonPath, "utf-8"));
+            if (meta.phase === "Stories") source = "story";
+            else if (meta.phase === "Search") source = "search";
+          } catch {
+          }
+        }
+        return {
+          id: index + 1,
+          screenshot,
+          source,
+          interest: void 0,
+          timestamp: Date.now(),
+          scrollPosition: 0
+        };
+      });
+      console.log(`\u{1F3F7}\uFE0F Baker loaded ${bestCaptures.length} filtered screenshots`);
+      console.log("\u{1F916} Baker generating digest from filtered screenshots...");
+      const digestGenerator = new DigestGeneration(apiKey);
       const analysis = await digestGenerator.generateDigest(bestCaptures, {
         userName: settings.userName || "User",
         interests: settings.interests || [],
@@ -45909,20 +45879,14 @@ var SchedulerService = class _SchedulerService {
         const filename = `${capture.id}.jpg`;
         const imagePath = import_path5.default.join(imagesDir, filename);
         await import_fs7.default.promises.writeFile(imagePath, capture.screenshot);
-        const captureTag = tags.find((t2) => t2.imageId === capture.id);
         imageMetadata.push({
           id: capture.id,
           filename,
           source: capture.source,
-          interest: capture.interest,
-          tag: captureTag ? {
-            relevance: captureTag.relevance,
-            quality: captureTag.quality,
-            description: captureTag.description
-          } : void 0
+          interest: capture.interest
         });
       }
-      console.log(`\u{1F5BC}\uFE0F Baker saved ${imageMetadata.length} selected images to ${imagesDir}`);
+      console.log(`\u{1F5BC}\uFE0F Baker saved ${imageMetadata.length} filtered images to ${imagesDir}`);
       const analysisWithImages = {
         ...analysis,
         images: imageMetadata
@@ -45954,8 +45918,8 @@ var SchedulerService = class _SchedulerService {
         lastBakeDate: now.toISOString(),
         analysisStatus: "pending_delivery"
       });
-      console.log(`\u{1F950} Baker (Screenshot-First) complete. Digest saved, awaiting delivery at ${scheduledTime}`);
-      console.log(`\u2705 Screenshot-First Pipeline Complete. Captures: ${session2.captureCount}`);
+      console.log(`\u{1F950} Baker (Three-Agent Pipeline) complete. Digest saved, awaiting delivery at ${scheduledTime}`);
+      console.log(`\u2705 Three-Agent Pipeline Complete. Raw: ${session2.rawScreenshotCount}, Filtered: ${bakerFilterStats.kept}`);
     } catch (error) {
       console.error("\u274C Baker (Screenshot-First) pipeline failed:", error.message);
       if (context) {
