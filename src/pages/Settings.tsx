@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { PixelSun, PixelMoon, PixelKey, PixelLightbulb, PixelUser } from "@/components/icons/PixelIcons";
+import { PixelKey, PixelUser } from "@/components/icons/PixelIcons";
 import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { ease, duration, spring, stagger } from "@/lib/animations";
@@ -70,25 +70,11 @@ const Settings = memo(() => {
     return "Not set";
   };
 
-  const getScheduleSummary = () => {
-    if (settings.digestFrequency === 1) {
-      return `Once daily at ${settings.morningTime}`;
-    }
-    return `Twice daily`;
-  };
-
   const getApiSummary = () => {
     if (settings.apiKey) {
       return "Key configured";
     }
     return "No API key set";
-  };
-
-  const getInterestsSummary = () => {
-    const count = settings.interests.length;
-    if (count === 0) return "No topics";
-    if (count === 1) return "1 topic";
-    return `${count} topics`;
   };
 
   const cards = [
@@ -99,29 +85,10 @@ const Settings = memo(() => {
       path: "/settings/personal",
     },
     {
-      title: "Schedule",
-      summary: getScheduleSummary(),
-      icon: settings.digestFrequency === 1 ? (
-        <PixelSun size={40} color="charcoal" />
-      ) : (
-        <div className="flex items-center gap-1">
-          <PixelSun size={32} color="charcoal" />
-          <PixelMoon size={32} color="charcoal" />
-        </div>
-      ),
-      path: "/settings/schedule",
-    },
-    {
       title: "API & Usage",
       summary: getApiSummary(),
       icon: <PixelKey size={40} color="charcoal" />,
       path: "/settings/api",
-    },
-    {
-      title: "Interests",
-      summary: getInterestsSummary(),
-      icon: <PixelLightbulb size={40} color="charcoal" />,
-      path: "/settings/interests",
     },
   ];
 

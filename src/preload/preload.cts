@@ -21,8 +21,6 @@ contextBridge.exposeInMainWorld('api', {
         get: () => ipcRenderer.invoke('settings:get'),
         set: (value: any) => ipcRenderer.invoke('settings:set', value),
         patch: (updates: any) => ipcRenderer.invoke('settings:patch', updates),
-        getActiveSchedule: () => ipcRenderer.invoke('settings:get-active-schedule'),
-        getWakeTime: () => ipcRenderer.invoke('settings:get-wake-time'),
         setSecure: (apiKey: string) => ipcRenderer.invoke('settings:set-secure', { apiKey }),
         checkKeyStatus: () => ipcRenderer.invoke('settings:check-key-status'),
         getSecureKey: () => ipcRenderer.invoke('settings:get-secure'),
@@ -30,16 +28,8 @@ contextBridge.exposeInMainWorld('api', {
         onAnalysisReady: (callback: (analysis: any) => void) => {
             const subscription = (_event: any, analysis: any) => callback(analysis);
             ipcRenderer.on('analysis-ready', subscription);
-            // Return unsubscribe function
-            // Return unsubscribe function
             return () => ipcRenderer.removeListener('analysis-ready', subscription);
         },
-        onScheduleUpdated: (callback: (schedule: any) => void) => {
-            const subscription = (_event: any, schedule: any) => callback(schedule);
-            ipcRenderer.on('schedule-updated', subscription);
-            return () => ipcRenderer.removeListener('schedule-updated', subscription);
-        },
-        // New error event listeners for Instagram automation
         onAnalysisError: (callback: (error: { message: string; canRetry: boolean; nextRetry: string | null }) => void) => {
             const subscription = (_event: any, error: any) => callback(error);
             ipcRenderer.on('analysis-error', subscription);
@@ -60,17 +50,21 @@ contextBridge.exposeInMainWorld('api', {
             ipcRenderer.on('analysis-insufficient-content', subscription);
             return () => ipcRenderer.removeListener('analysis-insufficient-content', subscription);
         },
-        // Debug run timer events (Cmd+Shift+H)
-        onDebugRunStarted: (callback: (info: { durationMs: number; startTime: number }) => void) => {
+        onRunStarted: (callback: (info: { durationMs: number; startTime: number }) => void) => {
             const subscription = (_event: any, info: any) => callback(info);
-            ipcRenderer.on('debug-run-started', subscription);
-            return () => ipcRenderer.removeListener('debug-run-started', subscription);
+            ipcRenderer.on('run-started', subscription);
+            return () => ipcRenderer.removeListener('run-started', subscription);
         },
-        onDebugRunComplete: (callback: () => void) => {
+        onRunComplete: (callback: () => void) => {
             const subscription = () => callback();
-            ipcRenderer.on('debug-run-complete', subscription);
-            return () => ipcRenderer.removeListener('debug-run-complete', subscription);
+            ipcRenderer.on('run-complete', subscription);
+            return () => ipcRenderer.removeListener('run-complete', subscription);
         }
+    },
+    run: {
+        start: () => ipcRenderer.invoke('run:start'),
+        stop: () => ipcRenderer.invoke('run:stop'),
+        getStatus: () => ipcRenderer.invoke('run:status'),
     },
     analyses: {
         get: () => ipcRenderer.invoke('analyses:get'),

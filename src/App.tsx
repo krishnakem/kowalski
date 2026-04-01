@@ -8,18 +8,15 @@ import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { lazy, Suspense, useEffect } from "react";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
-import { DebugRunTimer } from "@/components/ui/DebugRunTimer";
+import { RunTimer } from "@/components/ui/RunTimer";
 
 // Lazy-loaded routes for better initial bundle size
-// Lazy-loaded routes (Keep settings lazy as they are less critical)
 // Direct imports (Critical Paths)
 import AnalysisArchive from "./pages/AnalysisArchive";
 import GazetteScreen from "./components/screens/GazetteScreen";
 
 const Settings = lazy(() => import("./pages/Settings"));
-const ScheduleSettings = lazy(() => import("./pages/settings/ScheduleSettings"));
 const ApiSettings = lazy(() => import("./pages/settings/ApiSettings"));
-const InterestsSettings = lazy(() => import("./pages/settings/InterestsSettings"));
 const PersonalSettings = lazy(() => import("./pages/settings/PersonalSettings"));
 
 const queryClient = new QueryClient();
@@ -38,7 +35,7 @@ const AppRoutes = () => {
   // Global Listener: Force Navigation when Analysis is Ready
   useEffect(() => {
     const unsubscribe = window.api.settings.onAnalysisReady((newAnalysis: any) => {
-      console.log("🚀 Forced navigation to Analysis Ready screen (Global Listener).", newAnalysis?.id);
+      console.log("Forced navigation to Analysis Ready screen (Global Listener).", newAnalysis?.id);
 
       // GUARD: Ignore if user hasn't completed onboarding
       if (!settings.hasOnboarded) {
@@ -67,9 +64,7 @@ const AppRoutes = () => {
         <Route path="/onboarding" element={<Index />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/personal" element={<PersonalSettings />} />
-        <Route path="/settings/schedule" element={<ScheduleSettings />} />
         <Route path="/settings/api" element={<ApiSettings />} />
-        <Route path="/settings/interests" element={<InterestsSettings />} /> {/* Added missing route */}
         <Route path="/archive/:id" element={<GazetteScreen />} />
         <Route path="/archive" element={<AnalysisArchive />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
@@ -84,7 +79,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <DebugRunTimer />
+      <RunTimer />
       <ErrorBoundary>
         <SettingsProvider>
           <BrowserRouter>

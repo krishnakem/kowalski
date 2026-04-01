@@ -69,8 +69,10 @@ export class ScreenshotCollector {
         // Set up output directory for debugging if specified
         // Creates a session-specific subfolder for each browsing session
         if (this.config.saveToDirectory) {
-            const sessionTimestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            this.outputDir = path.join(this.config.saveToDirectory, `session_${sessionTimestamp}`);
+            const now = new Date();
+            const pad = (n: number) => n.toString().padStart(2, '0');
+            const dateTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+            this.outputDir = path.join(this.config.saveToDirectory, `run_${dateTime}`);
             this.ensureOutputDir();
             console.log(`📸 Debug screenshots will be saved to: ${this.outputDir}`);
         }
@@ -81,12 +83,21 @@ export class ScreenshotCollector {
         return this.outputDir;
     }
 
-    /** Get the nav/ subdirectory for debug screenshots (used by VisionAgent). */
+    /** Get the nav/ subdirectory for debug screenshots (used by Scroller — legacy). */
     getNavDir(): string | null {
         if (!this.outputDir) return null;
         const navDir = path.join(this.outputDir, 'nav');
         if (!fs.existsSync(navDir)) fs.mkdirSync(navDir, { recursive: true });
         return navDir;
+    }
+
+    /** Get per-agent debug directory (e.g. run_<date>/stories/ or run_<date>/feed/). */
+    getAgentDebugDir(agentName: string): string | null {
+        if (!this.outputDir) return null;
+        const phaseName = agentName.replace(/Agent$/i, '').toLowerCase();
+        const agentDir = path.join(this.outputDir, phaseName);
+        if (!fs.existsSync(agentDir)) fs.mkdirSync(agentDir, { recursive: true });
+        return agentDir;
     }
 
     /** Get the digest/ subdirectory for content captures. */
@@ -154,8 +165,8 @@ export class ScreenshotCollector {
      *   2. Scroll delta: feed-only, minimum 100px since last capture
      *   3. Perceptual hash: 8x8 greyscale image similarity (primary dedup)
      *
-     * @param source - Where this content came from (LLM-declared: feed, story, search, carousel)
-     * @param interest - For search results, which interest triggered this capture
+     * @param source - Where this content came from (LLM-declared: feed, story, carousel)
+     * @param interest - Unused, kept for interface compatibility
      * @param clip - Optional viewport crop region from LLM coordinates
      * @returns true if captured, false if skipped (max reached or duplicate)
      */
@@ -260,7 +271,6 @@ export class ScreenshotCollector {
         const breakdown: Record<CaptureSource, number> = {
             feed: 0,
             story: 0,
-            search: 0,
             profile: 0,
             carousel: 0
         };
@@ -424,7 +434,7 @@ export class ScreenshotCollector {
 
         console.log(`\n📸 Screenshot Collection Summary:`);
         console.log(`   Total: ${this.captures.length} captures`);
-        console.log(`   Feed: ${breakdown.feed}, Stories: ${breakdown.story}, Search: ${breakdown.search}`);
+        console.log(`   Feed: ${breakdown.feed}, Stories: ${breakdown.story}`);
         console.log(`   Memory: ${memoryMB}MB`);
         console.log('');
     }

@@ -9,11 +9,7 @@ export type AnalysisStatus = "idle" | "working" | "ready";
 
 export interface SettingsData {
     userName: string;
-    digestFrequency: 1 | 2;
-    morningTime: string;
-    eveningTime: string;
     apiKey: string;
-    interests: string[];
     hasOnboarded: boolean;
     analysisStatus: AnalysisStatus;
     lastAnalysisDate?: string;
@@ -22,11 +18,7 @@ export interface SettingsData {
 
 export const DEFAULT_SETTINGS: SettingsData = {
     userName: "",
-    digestFrequency: 1,
-    morningTime: "8:00 AM",
-    eveningTime: "6:00 PM",
     apiKey: "",
-    interests: [],
     hasOnboarded: false,
     analysisStatus: "idle",
     location: "Cupertino",
@@ -35,11 +27,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
 // Zod schema for validation and coercion
 const settingsSchema = z.object({
     userName: z.string().catch(""),
-    digestFrequency: z.coerce.number().pipe(z.union([z.literal(1), z.literal(2)])).catch(1),
-    morningTime: z.string().catch("8:00 AM"),
-    eveningTime: z.string().catch("6:00 PM"),
     apiKey: z.string().catch(""),
-    interests: z.array(z.string()).catch([]),
     hasOnboarded: z.boolean().catch(false),
     analysisStatus: z.enum(["idle", "working", "ready"]).catch("idle"),
     lastAnalysisDate: z.string().optional(),

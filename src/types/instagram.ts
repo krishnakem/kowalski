@@ -144,7 +144,6 @@ export interface ContentDensity {
  */
 export interface GeneratorConfig {
     userName: string;
-    interests: string[];
     location: string;
     scheduledTime: string;
 }
@@ -182,7 +181,7 @@ export interface AutomationError {
 /**
  * Source type for captured content.
  */
-export type CaptureSource = 'feed' | 'story' | 'search' | 'profile' | 'carousel';
+export type CaptureSource = 'feed' | 'story' | 'profile' | 'carousel';
 
 /**
  * A single captured screenshot during browsing.
@@ -191,7 +190,6 @@ export interface CapturedPost {
     id: number;
     screenshot: Buffer;           // Raw JPEG image data
     source: CaptureSource;
-    interest?: string;            // For search results - which interest triggered this
     timestamp: number;            // Unix timestamp of capture
     scrollPosition: number;       // Y scroll position for deduplication
 }
@@ -205,7 +203,6 @@ export interface CapturedVideo {
     frameCount: number;           // Total frames collected before sampling
     durationSeconds: number;      // Actual recording duration
     source: CaptureSource;
-    interest?: string;
     timestamp: number;
     scrollPosition: number;
 }
@@ -228,7 +225,6 @@ export interface BrowsingSession {
  */
 export interface DigestConfig {
     userName: string;
-    interests: string[];
     location?: string;
 }
 

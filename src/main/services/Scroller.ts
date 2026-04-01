@@ -540,6 +540,11 @@ export class Scroller {
             ? -Math.round(this.viewportHeight * 0.4)
             : Math.round(this.viewportHeight * 0.4);
 
+        // Position mouse in the feed area so wheel events land on scrollable content
+        const feedX = this.viewportWidth * (0.35 + Math.random() * 0.30);
+        const feedY = this.viewportHeight * (0.25 + Math.random() * 0.50);
+        await this.page.mouse.move(feedX, feedY);
+
         console.log(`  📜 scroll: direction=${direction}, baseDistance=${baseDistance}px`);
         this.collector.appendLog(`📜 scroll: direction=${direction}, baseDistance=${baseDistance}px`);
         const result = await this.scroll.scrollWithIntent({ baseDistance });
@@ -1198,7 +1203,7 @@ export class Scroller {
         }
     }
 
-    // Public getters for InstagramScraper session summary
+    // Public getters for Kowalski session summary
     getRawScreenshotCount(): number { return this.rawCount; }
     getRecordCount(): number { return 0; }
     getDecisionCount(): number { return this.decisionCount; }

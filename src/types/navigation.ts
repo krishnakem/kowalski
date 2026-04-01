@@ -7,7 +7,7 @@
 /**
  * High-level phases of the Instagram browsing session.
  */
-export type BrowsingPhase = 'search' | 'stories' | 'feed' | 'complete';
+export type BrowsingPhase = 'stories' | 'feed' | 'complete';
 
 /**
  * Configuration for the navigation loop.

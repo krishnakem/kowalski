@@ -18,7 +18,8 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 
 import { SecureKeyManager } from './services/SecureKeyManager.js';
 import { UsageService } from './services/UsageService.js';
-import { SchedulerService } from './services/SchedulerService.js';
+import { RunManager } from './services/RunManager.js';
+import { SessionMemory } from './services/SessionMemory.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,13 +27,6 @@ const __dirname = path.dirname(__filename);
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
-// Ensure app launches on login (background daemon)
-if (!app.getLoginItemSettings().openAtLogin) {
-  app.setLoginItemSettings({
-    openAtLogin: true,
-    openAsHidden: false // Optional: could be true if we want silent start
-  });
-}
 
 // Disable macOS window restoration prompt after force-quit
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
@@ -91,8 +85,8 @@ const createWindow = () => {
     app.dock?.setIcon(iconPath);
   }
 
-  // Share window ref with Scheduler
-  SchedulerService.getInstance().setMainWindow(mainWindow);
+  // Share window ref with RunManager
+  RunManager.getInstance().setMainWindow(mainWindow);
 
   // Prevent title from being updated by the renderer (React)
 
@@ -137,8 +131,8 @@ const createWindow = () => {
       mainWindow?.hide();
       return false;
     }
-    // Clear reference in Scheduler to be safe
-    SchedulerService.getInstance().setMainWindow(null);
+    // Clear reference in RunManager to be safe
+    RunManager.getInstance().setMainWindow(null);
   });
   // -------------------------
 };
@@ -211,24 +205,25 @@ app.on('ready', () => {
     UsageService.getInstance().initialize().catch(err => {
       console.error('UsageService init failed:', err);
     });
-
-    // Initialize Scheduler
-    SchedulerService.getInstance().initialize().catch(err => {
-      console.error('SchedulerService init failed:', err);
-    });
   }, 2000);
 
-  // === DEBUG SHORTCUTS ===
-  // Cmd+Shift+H: Start debug run (runs until LLM done or manually stopped)
+  // === SHORTCUTS ===
+  // Cmd+Shift+H: Start run
   globalShortcut.register('CommandOrControl+Shift+H', () => {
-    console.log('🧪 Debug Run Triggered (Cmd+Shift+H)');
-    SchedulerService.getInstance().triggerDebugRun();
+    console.log('🚀 Run Triggered (Cmd+Shift+H)');
+    RunManager.getInstance().startRun();
   });
 
-  // Cmd+Shift+K: Stop active debug run
+  // Cmd+Shift+K: Stop active run
   globalShortcut.register('CommandOrControl+Shift+K', () => {
-    console.log('🛑 Stop Shortcut Triggered (Cmd+Shift+K)');
-    SchedulerService.getInstance().stopDebugRun();
+    console.log('🛑 Stop Triggered (Cmd+Shift+K)');
+    RunManager.getInstance().stopRun();
+  });
+
+  // Cmd+Shift+R: Reset session memory
+  globalShortcut.register('CommandOrControl+Shift+R', () => {
+    console.log('🧠 Reset Session Memory Triggered (Cmd+Shift+R)');
+    new SessionMemory().resetMemory();
   });
 
   // MIGRATION: Ensure storage directory exists
@@ -250,7 +245,7 @@ app.on('ready', () => {
 app.on('before-quit', () => {
   isQuitting = true;
   globalShortcut.unregisterAll();
-  SchedulerService.getInstance().stop();
+  RunManager.getInstance().stopRun();
 });
 
 // DIRECT GUEST ATTACHMENT: The Nuclear Option
@@ -303,7 +298,6 @@ function setupIPCHandlers() {
       store.clear();
       store.delete('analyses');
       store.delete('settings');
-      store.delete('activeSchedule');
       console.log('✅ Cleared electron-store');
     } catch (e) {
       console.error('❌ Failed to clear electron-store:', e);
@@ -338,38 +332,6 @@ function setupIPCHandlers() {
     const { default: Store } = await import('electron-store');
     const store: any = new Store();
     store.set('settings', newSettings);
-
-    // If resetting (hasOnboarded = false), also clear the activeSchedule snapshot
-    if (newSettings.hasOnboarded === false) {
-      store.delete('activeSchedule');
-      console.log('🧹 Cleared activeSchedule during reset');
-    } else if (newSettings.hasOnboarded === true) {
-      // HOT-PATCH: Update active schedule if it exists for TODAY
-      // This ensures user sees the new time immediately.
-      const activeSchedule = store.get('activeSchedule');
-      if (activeSchedule) {
-        // We only patch if the schedule is NOT "past" (i.e. activeDate is today or future)
-        // Actually, simpler: Just patch the "Time Policy" values.
-        // We do NOT change the activeDate.
-
-        // Only patch if we have valid values to patch
-        const updatedSchedule = {
-          ...activeSchedule,
-          morningTime: newSettings.morningTime,
-          eveningTime: newSettings.eveningTime,
-          digestFrequency: newSettings.digestFrequency
-        };
-
-        store.set('activeSchedule', updatedSchedule);
-
-        // Notify any listeners (like AgentActiveScreen)
-        const windows = BrowserWindow.getAllWindows();
-        windows.forEach(win => {
-          win.webContents.send('schedule-updated', updatedSchedule);
-        });
-        console.log('🔥 Hot-Patched Daily Snapshot with new User Settings:', updatedSchedule);
-      }
-    }
     return true;
   });
 
@@ -379,26 +341,6 @@ function setupIPCHandlers() {
     const current = (store.get('settings') as object) || {};
     const merged = { ...current, ...updates };
     store.set('settings', merged);
-
-    // HOT-PATCH for Patch ops too
-    // This catches updates that might come from partial saves or specific setting tweaks
-    if (('morningTime' in updates || 'eveningTime' in updates || 'digestFrequency' in updates)) {
-      const activeSchedule = store.get('activeSchedule');
-      if (activeSchedule) {
-        const updatedSchedule = {
-          ...activeSchedule,
-          morningTime: merged.morningTime,
-          eveningTime: merged.eveningTime,
-          digestFrequency: merged.digestFrequency
-        };
-        store.set('activeSchedule', updatedSchedule);
-        BrowserWindow.getAllWindows().forEach(win => {
-          win.webContents.send('schedule-updated', updatedSchedule);
-        });
-        console.log('🔥 Hot-Patched Daily Snapshot (via Patch):', updatedSchedule);
-      }
-    }
-
     return merged;
   });
 
@@ -432,14 +374,17 @@ function setupIPCHandlers() {
     }
   });
 
-  ipcMain.handle('settings:get-active-schedule', async () => {
-    const { default: Store } = await import('electron-store');
-    const store: any = new Store();
-    return store.get('activeSchedule') || null;
+  // --- Run Handlers ---
+  ipcMain.handle('run:start', async () => {
+    await RunManager.getInstance().startRun();
   });
 
-  ipcMain.handle('settings:get-wake-time', async () => {
-    return SchedulerService.getInstance().getLastWakeTime();
+  ipcMain.handle('run:stop', async () => {
+    RunManager.getInstance().stopRun();
+  });
+
+  ipcMain.handle('run:status', () => {
+    return RunManager.getInstance().getStatus();
   });
 
   // --- Secure Storage Handlers ---

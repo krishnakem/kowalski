@@ -21,8 +21,6 @@ import_electron.contextBridge.exposeInMainWorld("api", {
     get: () => import_electron.ipcRenderer.invoke("settings:get"),
     set: (value) => import_electron.ipcRenderer.invoke("settings:set", value),
     patch: (updates) => import_electron.ipcRenderer.invoke("settings:patch", updates),
-    getActiveSchedule: () => import_electron.ipcRenderer.invoke("settings:get-active-schedule"),
-    getWakeTime: () => import_electron.ipcRenderer.invoke("settings:get-wake-time"),
     setSecure: (apiKey) => import_electron.ipcRenderer.invoke("settings:set-secure", { apiKey }),
     checkKeyStatus: () => import_electron.ipcRenderer.invoke("settings:check-key-status"),
     getSecureKey: () => import_electron.ipcRenderer.invoke("settings:get-secure"),
@@ -32,12 +30,6 @@ import_electron.contextBridge.exposeInMainWorld("api", {
       import_electron.ipcRenderer.on("analysis-ready", subscription);
       return () => import_electron.ipcRenderer.removeListener("analysis-ready", subscription);
     },
-    onScheduleUpdated: (callback) => {
-      const subscription = (_event, schedule) => callback(schedule);
-      import_electron.ipcRenderer.on("schedule-updated", subscription);
-      return () => import_electron.ipcRenderer.removeListener("schedule-updated", subscription);
-    },
-    // New error event listeners for Instagram automation
     onAnalysisError: (callback) => {
       const subscription = (_event, error) => callback(error);
       import_electron.ipcRenderer.on("analysis-error", subscription);
@@ -58,17 +50,21 @@ import_electron.contextBridge.exposeInMainWorld("api", {
       import_electron.ipcRenderer.on("analysis-insufficient-content", subscription);
       return () => import_electron.ipcRenderer.removeListener("analysis-insufficient-content", subscription);
     },
-    // Debug run timer events (Cmd+Shift+H)
-    onDebugRunStarted: (callback) => {
+    onRunStarted: (callback) => {
       const subscription = (_event, info) => callback(info);
-      import_electron.ipcRenderer.on("debug-run-started", subscription);
-      return () => import_electron.ipcRenderer.removeListener("debug-run-started", subscription);
+      import_electron.ipcRenderer.on("run-started", subscription);
+      return () => import_electron.ipcRenderer.removeListener("run-started", subscription);
     },
-    onDebugRunComplete: (callback) => {
+    onRunComplete: (callback) => {
       const subscription = () => callback();
-      import_electron.ipcRenderer.on("debug-run-complete", subscription);
-      return () => import_electron.ipcRenderer.removeListener("debug-run-complete", subscription);
+      import_electron.ipcRenderer.on("run-complete", subscription);
+      return () => import_electron.ipcRenderer.removeListener("run-complete", subscription);
     }
+  },
+  run: {
+    start: () => import_electron.ipcRenderer.invoke("run:start"),
+    stop: () => import_electron.ipcRenderer.invoke("run:stop"),
+    getStatus: () => import_electron.ipcRenderer.invoke("run:status")
   },
   analyses: {
     get: () => import_electron.ipcRenderer.invoke("analyses:get"),

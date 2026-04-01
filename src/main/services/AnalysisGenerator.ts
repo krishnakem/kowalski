@@ -31,7 +31,7 @@ export class AnalysisGenerator {
 
     /**
      * Generate a newspaper-style analysis from browsed Instagram content.
-     * This is the MAIN entry point called by SchedulerService.
+     * This is the MAIN entry point called by RunManager.
      *
      * @throws Error if generation fails (no fallback - transparent failure)
      */
@@ -68,22 +68,16 @@ export class AnalysisGenerator {
         for (const post of session.feedContent) {
             const caption = post.caption || '';
 
-            // Extract source tag and interest from caption prefix
+            // Extract source tag from caption prefix
             let source = 'feed';
-            let interest: string | undefined;
             let cleanCaption = caption;
 
             // Parse content tags
-            const searchMatch = caption.match(/\[SEARCH: ([^\]]+)\]/);
             const carouselMatch = caption.match(/\[CAROUSEL: ([^\]]+)\]/);
             const profileMatch = caption.match(/\[PROFILE: ([^\]]+)\]/);
             const highlightMatch = caption.match(/\[HIGHLIGHT: ([^\]]+)\]/);
 
-            if (searchMatch) {
-                source = 'search';
-                interest = searchMatch[1];
-                cleanCaption = caption.replace(/\[SEARCH: [^\]]+\]\s*/, '');
-            } else if (carouselMatch) {
+            if (carouselMatch) {
                 source = 'carousel';
                 cleanCaption = caption.replace(/\[CAROUSEL: [^\]]+\]\s*/, '');
             } else if (profileMatch) {
@@ -104,13 +98,8 @@ Handle: @${post.username}
 Caption: ${truncatedCaption || '[No caption]'}
 Image: ${truncatedImage || '[No description]'}
 Content Type: ${post.isVideoContent ? 'video' : 'image'}
-Source: ${source}`;
-
-            if (interest) {
-                postBlock += `\nInterest: ${interest}`;
-            }
-
-            postBlock += '\n--- POST END ---';
+Source: ${source}
+--- POST END ---`;
             posts.push(postBlock);
         }
 
@@ -130,14 +119,12 @@ Source: story
         }
 
         // Count sources for summary
-        const searchCount = posts.filter(p => p.includes('Source: search')).length;
         const feedCount = posts.filter(p => p.includes('Source: feed')).length;
         const storyCount = posts.filter(p => p.includes('Source: story')).length;
-        const otherCount = posts.length - searchCount - feedCount - storyCount;
+        const otherCount = posts.length - feedCount - storyCount;
 
         // Format with summary header
         return `CONTENT DATA (${posts.length} posts total):
-- Search results: ${searchCount}
 - Feed posts: ${feedCount}
 - Stories: ${storyCount}
 - Other (carousel/profile/highlight): ${otherCount}
@@ -178,11 +165,6 @@ ${posts.join('\n\n')}`;
         const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
         const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-        // Format interests for emphasis
-        const interestsList = config.interests.length > 0
-            ? config.interests.map(i => `"${i}"`).join(', ')
-            : 'General news and trends';
-
         const prompt = `You are a HIGH-DENSITY RESEARCH JOURNALIST and STRATEGIC INTELLIGENCE ANALYST creating a personalized briefing for ${config.userName}.
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -214,7 +196,7 @@ NO HALLUCINATIONS:
 II. ANALYSIS DEPTH (THE "SO WHAT?" PROTOCOL)
 ═══════════════════════════════════════════════════════════════════════════════
 
-For HIGH-VALUE posts (search results, breaking news, user interests), apply 3-level analysis:
+For HIGH-VALUE posts (breaking news, notable updates), apply 3-level analysis:
 
 Level 1 - THE EVENT: What's literally in the pixels/caption
 Level 2 - THE TREND: What 2026 theme does this connect to?
@@ -233,7 +215,7 @@ III. NEGATIVE CONSTRAINTS (DO NOT)
 ❌ Do NOT use filler phrases: "The photo shows," "The caption says," "Interestingly,"
 ❌ Do NOT summarize 5 posts into 1 bland bullet
 ❌ Do NOT generate market analysis for student intro posts
-❌ Do NOT report on generic ads (unless directly relevant to ${interestsList})
+❌ Do NOT report on generic ads
 ❌ Do NOT invent emotional narrative ("celebrating team spirit," "embracing the journey")
 ❌ Do NOT mix handles across bullet points
 
@@ -243,7 +225,6 @@ IV. USER PROFILE
 
 Name: ${config.userName}
 Location: ${config.location || 'Not specified'}
-Priority Interests: ${interestsList}
 Date: ${dayName}, ${dateStr}
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -264,10 +245,6 @@ SECTION STRUCTURE:
 # [Compelling Title Based on Top Story]
 ### [Key Strategic Insight] — ${dayName}, ${dateStr}${config.location ? `, ${config.location}` : ''}
 
-## 🎯 Strategic Interests: ${interestsList}
-[4-6 bullets from search results and interest-matching posts]
-[Apply full "So What?" Protocol - Levels 1-3]
-
 ## 🌍 Global Intelligence
 [3-4 bullets from general newsworthy content]
 [Cross-reference with current events where verifiable]
@@ -277,9 +254,8 @@ SECTION STRUCTURE:
 [Level 1 only - just the facts]
 
 PRIORITY RULES:
-- Posts with Source: search are HIGH PRIORITY (match user interests)
+- Breaking news and time-sensitive content = HIGH PRIORITY
 - Posts with Source: story are ephemeral (lower priority unless newsworthy)
-- Posts with Interest: field should be featured prominently
 
 EXAMPLES:
 

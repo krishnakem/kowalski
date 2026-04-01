@@ -74,6 +74,19 @@ export class SessionMemory {
     }
 
     /**
+     * Reset session memory — delete the file and clear in-memory state.
+     */
+    async resetMemory(): Promise<void> {
+        this.summaries = [];
+        try {
+            await fs.promises.unlink(this.storagePath);
+            console.log('🧠 Session memory reset');
+        } catch {
+            // File didn't exist — that's fine
+        }
+    }
+
+    /**
      * Generate a compact LLM-ready digest from recent sessions.
      * Returns ~150 tokens summarizing patterns and lessons learned.
      */
@@ -82,17 +95,6 @@ export class SessionMemory {
         if (recent.length === 0) return '';
 
         const lines: string[] = [`SESSION MEMORY (last ${recent.length} sessions):`];
-
-        // Interest productivity ranking
-        const interestStats = this.getInterestStats(recent);
-        if (interestStats.length > 0) {
-            const ranked = interestStats
-                .sort((a, b) => b.avgCaptures - a.avgCaptures)
-                .slice(0, 5)
-                .map(s => `"${s.interest}" avg ${s.avgCaptures.toFixed(1)} captures (${s.quality})`)
-                .join(', ');
-            lines.push(`- Interest productivity: ${ranked}`);
-        }
 
         // Phase effectiveness
         const phaseStats = this.getPhaseStats(recent);
@@ -115,32 +117,6 @@ export class SessionMemory {
         lines.push(`- Avg session: ${avgCaptures.toFixed(1)} captures in ${avgActions.toFixed(0)} actions`);
 
         return lines.join('\n');
-    }
-
-    private getInterestStats(summaries: SessionSummary[]): Array<{
-        interest: string;
-        avgCaptures: number;
-        quality: 'LOW' | 'MEDIUM' | 'HIGH';
-    }> {
-        const interestMap = new Map<string, { totalCaptures: number; count: number }>();
-
-        for (const session of summaries) {
-            for (const result of session.interestResults) {
-                const existing = interestMap.get(result.interest) || { totalCaptures: 0, count: 0 };
-                existing.totalCaptures += result.captureCount;
-                existing.count++;
-                interestMap.set(result.interest, existing);
-            }
-        }
-
-        return Array.from(interestMap.entries()).map(([interest, data]) => {
-            const avg = data.totalCaptures / data.count;
-            return {
-                interest,
-                avgCaptures: avg,
-                quality: avg >= 5 ? 'HIGH' as const : avg >= 2 ? 'MEDIUM' as const : 'LOW' as const
-            };
-        });
     }
 
     private getPhaseStats(summaries: SessionSummary[]): Array<{

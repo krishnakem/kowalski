@@ -1,30 +1,31 @@
 /**
- * InstagramScraper - Orchestration Layer
+ * Kowalski - Orchestration Layer
  *
  * Manages the session lifecycle: page creation, login verification,
- * session memory, and capture collection. Delegates all browsing
- * decisions to Scroller (pure vision-based LLM navigation).
+ * session memory, and capture collection. No LLM calls — pure coordination.
  *
- * Cost layers:
- * - Physics (GhostMouse, HumanScroll) — $0
- * - Navigation (Scroller → LLM) — ~$0.001/decision
- * - Post-processing (digest, analysis) — varies
+ * Phase 1: StoriesAgent (Haiku) — bounded stories browsing
+ * Phase 2: FeedAgent (Sonnet) — feed browsing with remaining time budget
+ * Phase 3: Digest generation (handled downstream by RunManager)
  */
 
 import { BrowserContext, Page } from 'playwright';
+import { app } from 'electron';
 import { GhostMouse } from './GhostMouse.js';
 import { HumanScroll } from './HumanScroll.js';
 import { UsageService } from './UsageService.js';
 import { ScreenshotCollector } from './ScreenshotCollector.js';
-import { Scroller } from './Scroller.js';
+import { StoriesAgent } from './StoriesAgent.js';
+import { FeedAgent } from './FeedAgent.js';
 import { SessionMemory } from './SessionMemory.js';
 import * as path from 'path';
 import { BrowsingSession } from '../../types/instagram.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
 import type { NavigationLoopConfig } from '../../types/navigation.js';
 import type { SessionSummary } from '../../types/session-memory.js';
+import type { BaseVisionAgent } from './BaseVisionAgent.js';
 
-export class InstagramScraper {
+export class Kowalski {
     private context: BrowserContext;
     private apiKey: string;
     private usageService: UsageService;
@@ -37,7 +38,7 @@ export class InstagramScraper {
     private page!: Page;
 
     private sessionMemory: SessionMemory = new SessionMemory();
-    private activeScroller: Scroller | null = null;
+    private activeAgent: BaseVisionAgent | null = null;
 
     constructor(context: BrowserContext, apiKey: string, debugMode: boolean = false) {
         this.context = context;
@@ -46,10 +47,10 @@ export class InstagramScraper {
         this.debugMode = debugMode;
     }
 
-    /** Stop the active browsing session externally (e.g. Cmd+Shift+K). */
+    /** Stop the active browsing agent externally (e.g. Cmd+Shift+K). */
     stop(): void {
-        if (this.activeScroller) {
-            this.activeScroller.stop();
+        if (this.activeAgent) {
+            this.activeAgent.stop();
         }
     }
 
@@ -58,25 +59,22 @@ export class InstagramScraper {
      */
     async browseAndCapture(
         targetMinutes: number,
-        userInterests: string[],
         config?: Partial<NavigationLoopConfig>
     ): Promise<BrowsingSession> {
-        return this.browseWithAINavigation(targetMinutes, userInterests, config);
+        return this.browseWithAINavigation(targetMinutes, config);
     }
 
     /**
-     * Browse Instagram using Scroller (pure vision-based LLM navigation).
+     * Browse Instagram using phased agents (StoriesAgent → FeedAgent).
      */
     async browseWithAINavigation(
         targetMinutes: number,
-        userInterests: string[],
         config?: Partial<NavigationLoopConfig>
     ): Promise<BrowsingSession> {
         const startTime = Date.now();
         const targetDurationMs = targetMinutes * 60 * 1000;
 
-        // Reuse the existing page if it's already on Instagram (e.g. from validateSession),
-        // otherwise create a new one. This avoids opening a duplicate tab.
+        // Reuse the existing page if it's already on Instagram
         const existingPages = this.context.pages();
         const instagramPage = existingPages.find(p => p.url().includes('instagram.com'));
         this.page = instagramPage || await this.context.newPage();
@@ -91,10 +89,11 @@ export class InstagramScraper {
             maxCaptures: estimatedMaxCaptures,
             jpegQuality: 85,
             minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.10),
-            saveToDirectory: path.join(__dirname, '../../debug-screenshots')
+            saveToDirectory: path.join(app.getPath('downloads'), 'kowalski-debug')
         });
 
-        let visionAgent: Scroller | undefined;
+        let totalRawScreenshots = 0;
+        let totalDecisions = 0;
 
         try {
             // 1. Navigate to Instagram (skip if already there from validateSession)
@@ -117,15 +116,13 @@ export class InstagramScraper {
                 throw new Error('SESSION_EXPIRED');
             }
 
-            // Natural mouse settle — move cursor away from sidebar with human-like motion
+            // Natural mouse settle
             const vp = this.page.viewportSize();
             if (vp) {
-                // First move: somewhere in the upper-center area
                 await this.ghost.hover(
                     { x: vp.width * (0.35 + Math.random() * 0.3), y: vp.height * (0.2 + Math.random() * 0.3) },
                     300 + Math.random() * 400
                 );
-                // Second move: settle into the feed area
                 await this.ghost.hover(
                     { x: vp.width * (0.4 + Math.random() * 0.2), y: vp.height * (0.4 + Math.random() * 0.3) },
                     200 + Math.random() * 300
@@ -133,7 +130,7 @@ export class InstagramScraper {
             }
 
             console.log('\n👁️  ═══════════════════════════════════════');
-            console.log('👁️  VISION AGENT MODE ACTIVE');
+            console.log('👁️  MULTI-AGENT PIPELINE ACTIVE');
             console.log('👁️  ═══════════════════════════════════════\n');
 
             // 3. Load cross-session memory
@@ -144,57 +141,100 @@ export class InstagramScraper {
             this.screenshotCollector.appendLogRaw(`# Session Log`);
             this.screenshotCollector.appendLogRaw(`**Started:** ${new Date().toISOString()}`);
             this.screenshotCollector.appendLogRaw(`**Budget:** ${targetMinutes} minutes`);
-            this.screenshotCollector.appendLogRaw(`**Interests:** ${userInterests.join(', ')}`);
-            this.screenshotCollector.appendLogRaw(`**Navigation Model:** ${ModelConfig.navigation}`);
-            this.screenshotCollector.appendLogRaw(`**Mode:** Vision-only (no accessibility tree)`);
+            this.screenshotCollector.appendLogRaw(`**Stories Model:** ${ModelConfig.stories}`);
+            this.screenshotCollector.appendLogRaw(`**Feed Model:** ${ModelConfig.navigation}`);
+            this.screenshotCollector.appendLogRaw(`**Mode:** Multi-agent (StoriesAgent → FeedAgent)`);
             this.screenshotCollector.appendLogRaw(`\n---\n`);
 
-            // 5. Run Scroller
-            visionAgent = new Scroller(
+            // Determine raw directories
+            const baseRawDir = config?.rawDir;
+            const storiesRawDir = baseRawDir ? path.join(baseRawDir, 'stories') : undefined;
+            const feedRawDir = baseRawDir ? path.join(baseRawDir, 'feed') : undefined;
+
+            // ═══════════════════════════════════════════
+            // Phase 1: Stories (Haiku — bounded, cheap)
+            // ═══════════════════════════════════════════
+            const storiesMaxMs = Math.min(3 * 60 * 1000, targetDurationMs * 0.15);
+            console.log(`\n📖 Phase 1: Stories (budget: ${(storiesMaxMs / 1000 / 60).toFixed(1)} min, model: ${ModelConfig.stories})`);
+            this.screenshotCollector.appendLogRaw(`\n## Phase 1: Stories\n`);
+
+            const storiesAgent = new StoriesAgent(
                 this.page, this.ghost, this.scroll, this.screenshotCollector,
                 {
                     apiKey: this.apiKey,
-                    maxDurationMs: config?.maxDurationMs || targetDurationMs,
-                    userInterests,
+                    maxDurationMs: storiesMaxMs,
                     debugMode: this.debugMode,
                     sessionMemoryDigest,
-                    rawDir: config?.rawDir
+                    rawDir: storiesRawDir,
                 }
             );
-            this.activeScroller = visionAgent;
+            this.activeAgent = storiesAgent;
+            const storiesResult = await storiesAgent.run();
 
-            const result = await visionAgent.run();
+            totalRawScreenshots += storiesResult.rawScreenshotCount;
+            totalDecisions += storiesResult.decisionCount;
+
+            console.log(`📖 Stories phase complete: ${storiesResult.rawScreenshotCount} screenshots, ${storiesResult.decisionCount} decisions`);
+
+            // ═══════════════════════════════════════════
+            // Phase 2: Feed (Sonnet — remaining budget)
+            // ═══════════════════════════════════════════
+            const storiesElapsed = Date.now() - startTime;
+            const feedMaxMs = targetDurationMs - storiesElapsed;
+
+            if (feedMaxMs > 30000) { // Only run feed if >30s remaining
+                console.log(`\n📰 Phase 2: Feed (budget: ${(feedMaxMs / 1000 / 60).toFixed(1)} min, model: ${ModelConfig.navigation})`);
+                this.screenshotCollector.appendLogRaw(`\n## Phase 2: Feed\n`);
+
+                const feedAgent = new FeedAgent(
+                    this.page, this.ghost, this.scroll, this.screenshotCollector,
+                    {
+                        apiKey: this.apiKey,
+                        maxDurationMs: feedMaxMs,
+                        debugMode: this.debugMode,
+                        sessionMemoryDigest,
+                        rawDir: feedRawDir,
+                    }
+                );
+                this.activeAgent = feedAgent;
+                const feedResult = await feedAgent.run();
+
+                totalRawScreenshots += feedResult.rawScreenshotCount;
+                totalDecisions += feedResult.decisionCount;
+
+                console.log(`📰 Feed phase complete: ${feedResult.rawScreenshotCount} screenshots, ${feedResult.decisionCount} decisions`);
+            } else {
+                console.log('📰 Skipping feed phase — insufficient time remaining');
+            }
 
             // 6. Write session summary to log
             this.screenshotCollector.appendLogRaw(`\n---\n\n## Summary`);
-            this.screenshotCollector.appendLogRaw(`- **Decisions:** ${result.decisionCount}`);
-            this.screenshotCollector.appendLogRaw(`- **Raw Screenshots:** ${result.rawScreenshotCount}`);
-            // this.screenshotCollector.appendLogRaw(`- **Video recordings:** ${result.recordCount}`);  // VIDEO RECORDING DISABLED
+            this.screenshotCollector.appendLogRaw(`- **Total Decisions:** ${totalDecisions}`);
+            this.screenshotCollector.appendLogRaw(`- **Total Raw Screenshots:** ${totalRawScreenshots}`);
             this.screenshotCollector.appendLogRaw(`- **Duration:** ${((Date.now() - startTime) / 1000 / 60).toFixed(1)} minutes`);
             this.screenshotCollector.flushSessionLog();
 
             // 7. Save cross-session memory
-            const screenshotsPerInterest = Math.round(result.rawScreenshotCount / Math.max(userInterests.length, 1));
             const sessionSummary: SessionSummary = {
                 id: `session-${startTime}`,
                 timestamp: startTime,
                 durationMs: Date.now() - startTime,
-                interestResults: userInterests.map(interest => ({
-                    interest,
-                    captureCount: screenshotsPerInterest,
-                    searchTimeMs: 0,
-                    quality: screenshotsPerInterest >= 5 ? 'high' as const
-                        : screenshotsPerInterest >= 2 ? 'medium' as const
-                        : 'low' as const
-                })),
-                phaseBreakdown: [{
-                    phase: 'feed',
-                    durationMs: Date.now() - startTime,
-                    capturesProduced: result.rawScreenshotCount
-                }],
+                interestResults: [],
+                phaseBreakdown: [
+                    {
+                        phase: 'stories',
+                        durationMs: storiesElapsed,
+                        capturesProduced: storiesResult.rawScreenshotCount
+                    },
+                    {
+                        phase: 'feed',
+                        durationMs: Date.now() - startTime - storiesElapsed,
+                        capturesProduced: totalRawScreenshots - storiesResult.rawScreenshotCount
+                    }
+                ],
                 stagnationEvents: [],
-                totalCaptures: result.rawScreenshotCount,
-                totalActions: result.decisionCount,
+                totalCaptures: totalRawScreenshots,
+                totalActions: totalDecisions,
                 uniqueContentRatio: 1.0
             };
             await this.sessionMemory.saveSession(sessionSummary);
@@ -205,14 +245,12 @@ export class InstagramScraper {
                 throw error;
             }
         } finally {
-            this.activeScroller = null;
+            this.activeAgent = null;
 
             // Log summary
             console.log(`\n📊 Session Summary:`);
-            if (visionAgent) {
-                console.log(`   - Decisions: ${visionAgent.getDecisionCount()}`);
-                console.log(`   - Raw screenshots: ${visionAgent.getRawScreenshotCount()}`);
-            }
+            console.log(`   - Total decisions: ${totalDecisions}`);
+            console.log(`   - Total raw screenshots: ${totalRawScreenshots}`);
 
             this.screenshotCollector.logSummary();
             await this.page.close();
@@ -222,8 +260,8 @@ export class InstagramScraper {
             captures: [],  // No longer populated here — filter agent handles this
             videos: [],
             sessionDuration: Date.now() - startTime,
-            rawScreenshotCount: visionAgent?.getRawScreenshotCount() || 0,
-            captureCount: 0,  // Deprecated
+            rawScreenshotCount: totalRawScreenshots,
+            captureCount: 0,
             videoCount: 0,
             scrapedAt: new Date().toISOString()
         };

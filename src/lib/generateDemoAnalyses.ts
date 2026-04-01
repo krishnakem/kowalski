@@ -39,22 +39,7 @@ const pickRandom = <T>(arr: T[], count: number): T[] => {
   return shuffled.slice(0, count);
 };
 
-const parseTime = (timeStr: string): { hours: number; minutes: number } => {
-  const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-  if (!match) return { hours: 8, minutes: 0 };
-
-  let hours = parseInt(match[1], 10);
-  const minutes = parseInt(match[2], 10);
-  const period = match[3].toUpperCase();
-
-  if (period === "PM" && hours !== 12) hours += 12;
-  if (period === "AM" && hours === 12) hours = 0;
-
-  return { hours, minutes };
-};
-
 const generateAnalysis = (date: Date, location: string): AnalysisObject => {
-  // Generate Sections
   const circleUpdates = pickRandom(circleUpdatePool, 3);
   const worldUpdates = pickRandom(worldUpdatePool, 3);
 
@@ -94,24 +79,11 @@ export const generateScheduledDemoAnalyses = (
   const now = new Date();
   const location = settings.location || "Cupertino";
 
-  const morningTime = parseTime(settings.morningTime);
-  const eveningTime = parseTime(settings.eveningTime);
-
   for (let daysAgo = 1; daysAgo <= daysBack; daysAgo++) {
     const date = new Date(now);
     date.setDate(date.getDate() - daysAgo);
-
-    // Morning analysis
-    const morningDate = new Date(date);
-    morningDate.setHours(morningTime.hours, morningTime.minutes, 0, 0);
-    analyses.push(generateAnalysis(morningDate, location));
-
-    // Evening analysis (only if twice daily)
-    if (settings.digestFrequency === 2) {
-      const eveningDate = new Date(date);
-      eveningDate.setHours(eveningTime.hours, eveningTime.minutes, 0, 0);
-      analyses.push(generateAnalysis(eveningDate, location));
-    }
+    date.setHours(8, 0, 0, 0);
+    analyses.push(generateAnalysis(date, location));
   }
 
   return analyses;

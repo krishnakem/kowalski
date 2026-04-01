@@ -5,7 +5,10 @@
  * Dual-agent architecture: Sonnet navigates, Opus captures and rescues.
  */
 export const ModelConfig = {
-    // Navigation — fast model, handles scrolling, clicking, dismissing popups
+    // Stories navigation — cheap model, tight mechanical loop (click avatar, advance, escape)
+    stories: process.env.KOWALSKI_STORIES_MODEL || 'claude-haiku-4-5-20241022',
+
+    // Feed navigation — fast model, handles scrolling, clicking, dismissing popups
     navigation: process.env.KOWALSKI_NAV_MODEL || 'claude-sonnet-4-6',
 
     // Specialist — powerful model, handles captures, carousels, stuck recovery

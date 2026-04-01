@@ -31,7 +31,6 @@ export class Filterer {
     private rawDir: string;
     private filteredDir: string;
     private apiKey: string;
-    private interests: string[];
     private processed = new Set<string>();
     private running = false;
     private kept = 0;
@@ -39,11 +38,10 @@ export class Filterer {
     private tokensUsed = 0;
     private usageService: UsageService;
 
-    constructor(rawDir: string, filteredDir: string, apiKey: string, interests: string[]) {
+    constructor(rawDir: string, filteredDir: string, apiKey: string) {
         this.rawDir = rawDir;
         this.filteredDir = filteredDir;
         this.apiKey = apiKey;
-        this.interests = interests;
         this.usageService = UsageService.getInstance();
 
         if (!fs.existsSync(this.filteredDir)) {
@@ -166,75 +164,104 @@ export class Filterer {
      * Uses the tagging model for speed and low cost.
      */
     private async callFilterLLM(base64Image: string): Promise<FilterResult> {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': this.apiKey,
-                'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-                model: ModelConfig.tagging,
-                max_tokens: 100,
-                messages: [{
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'image',
-                            source: {
-                                type: 'base64',
-                                media_type: 'image/jpeg',
-                                data: base64Image
-                            }
-                        },
-                        {
-                            type: 'text',
-                            text: `You are filtering Instagram browsing screenshots for a digest.
+        const maxRetries = 4;
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': this.apiKey,
+                        'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                        model: ModelConfig.tagging,
+                        max_tokens: 100,
+                        messages: [{
+                            role: 'user',
+                            content: [
+                                {
+                                    type: 'image',
+                                    source: {
+                                        type: 'base64',
+                                        media_type: 'image/jpeg',
+                                        data: base64Image
+                                    }
+                                },
+                                {
+                                    type: 'text',
+                                    text: `You are filtering Instagram browsing screenshots for a digest.
 
 Does this screenshot contain actual Instagram content worth summarizing?
 
-YES if: a post is clearly visible (image with caption), a story frame is showing full-screen, a post modal is open (dark overlay with content centered), a search result post is open, carousel content is displayed, a profile page with visible posts.
+YES if: a post is clearly visible (image with caption), a story frame is showing full-screen, a post modal is open (dark overlay with content centered), carousel content is displayed, a profile page with visible posts.
 
 NO if: this is mid-navigation (home feed scrolling with no post focused), a loading/spinner screen, a search grid showing only tiny thumbnails, a settings/menu page, a login or error screen, mostly UI chrome (sidebar, top bar) with no content, a transitional state between pages, a duplicate of content that looks nearly identical to something you'd expect was just captured (same post, slightly different scroll).
-
-User interests for context: ${this.interests.join(', ')}
 
 Respond with ONLY a JSON object:
 {"keep": true, "reason": "Post modal open showing a landscape photo with caption"}
 or
 {"keep": false, "reason": "Home feed mid-scroll, no post focused"}`
-                        }
-                    ]
-                }]
-            })
-        });
+                                }
+                            ]
+                        }]
+                    })
+                });
 
-        const data = await response.json() as any;
+                // Retry on overload (529) or rate limit (429) with exponential backoff
+                if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
+                    const baseDelay = response.status === 429 ? 10000 : 5000;
+                    const backoff = Math.min(baseDelay * Math.pow(2, attempt), 60000);
+                    const jitter = backoff * 0.25 * (Math.random() * 2 - 1);
+                    const delay = Math.round(backoff + jitter);
+                    console.warn(`  🔍 ⏳ Filter LLM ${response.status} (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1000).toFixed(1)}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
 
-        // Track token usage
-        if (data.usage) {
-            this.tokensUsed += (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
-            this.usageService.incrementUsage({
-                input_tokens: data.usage.input_tokens || 0,
-                output_tokens: data.usage.output_tokens || 0,
-                cache_creation_input_tokens: 0,
-                cache_read_input_tokens: 0
-            });
-        }
+                if (!response.ok) {
+                    console.warn(`  🔍 ⚠️ Filter LLM error (${response.status})`);
+                    return { keep: true, reason: `Filter LLM error (${response.status}), keeping by default` };
+                }
 
-        // Parse response
-        const text = data.content?.[0]?.text || '';
-        try {
-            // Extract JSON from response (handle markdown code blocks)
-            const jsonMatch = text.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                return JSON.parse(jsonMatch[0]) as FilterResult;
+                const data = await response.json() as any;
+
+                // Track token usage
+                if (data.usage) {
+                    this.tokensUsed += (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
+                    this.usageService.incrementUsage({
+                        input_tokens: data.usage.input_tokens || 0,
+                        output_tokens: data.usage.output_tokens || 0,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0
+                    });
+                }
+
+                // Parse response
+                const text = data.content?.[0]?.text || '';
+                try {
+                    const jsonMatch = text.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        return JSON.parse(jsonMatch[0]) as FilterResult;
+                    }
+                } catch {
+                    // Fall through
+                }
+
+                return { keep: true, reason: 'Failed to parse filter response, keeping by default' };
+            } catch (err) {
+                if (attempt < maxRetries - 1) {
+                    const delay = 5000 * Math.pow(2, attempt);
+                    console.warn(`  🔍 ⏳ Filter LLM network error (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1000).toFixed(1)}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                throw err;
             }
-        } catch {
-            // Fall through
         }
 
-        // Default: keep (fail open)
-        return { keep: true, reason: 'Failed to parse filter response, keeping by default' };
+        // All retries exhausted — fail open
+        return { keep: true, reason: 'Filter LLM retries exhausted, keeping by default' };
     }
 }

@@ -90,30 +90,52 @@ export class DigestGeneration {
             ...imageContents
         ];
 
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': this.apiKey,
-                'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-                model: ModelConfig.digest,
-                messages: [{
-                    role: 'user',
-                    content: messageContent
-                }],
-                max_tokens: 16384
-            })
-        });
+        const maxRetries = 4;
+        let data: any;
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            console.error('❌ Digest generation API error:', errorData);
-            throw new Error('DIGEST_GENERATION_FAILED');
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': this.apiKey,
+                    'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                    model: ModelConfig.digest,
+                    messages: [{
+                        role: 'user',
+                        content: messageContent
+                    }],
+                    max_tokens: 16384
+                })
+            });
+
+            // Retry on overload (529) or rate limit (429) with exponential backoff
+            if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
+                const baseDelay = response.status === 429 ? 10000 : 5000;
+                const backoff = Math.min(baseDelay * Math.pow(2, attempt), 60000);
+                const jitter = backoff * 0.25 * (Math.random() * 2 - 1);
+                const delay = Math.round(backoff + jitter);
+                console.warn(`  ⏳ Digest LLM ${response.status} (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1000).toFixed(1)}s...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                console.error('❌ Digest generation API error:', errorData);
+                throw new Error('DIGEST_GENERATION_FAILED');
+            }
+
+            data = await response.json();
+            break;
         }
 
-        const data = await response.json();
+        if (!data) {
+            console.error('❌ Digest generation: all retries exhausted');
+            throw new Error('DIGEST_GENERATION_FAILED');
+        }
 
         // Track usage
         if (data.usage) {
@@ -146,23 +168,11 @@ export class DigestGeneration {
         dateStr: string,
         captures: CapturedPost[]
     ): string {
-        const interestsList = config.interests.length > 0
-            ? config.interests.map(i => `"${i}"`).join(', ')
-            : 'General news and trends';
-
         // Build source summary
         const feedCount = captures.filter(c => c.source === 'feed').length;
         const storyCount = captures.filter(c => c.source === 'story').length;
-        const searchCount = captures.filter(c => c.source === 'search').length;
         const profileCount = captures.filter(c => c.source === 'profile').length;
         const carouselCount = captures.filter(c => c.source === 'carousel').length;
-
-        // Extract interests from search captures
-        const searchInterests = [...new Set(
-            captures
-                .filter(c => c.source === 'search' && c.interest)
-                .map(c => c.interest)
-        )];
 
         return `You are a STRATEGIC INTELLIGENCE ANALYST creating a personalized morning briefing for ${config.userName}.
 
@@ -173,7 +183,6 @@ I. YOUR TASK
 You are viewing ${captures.length} Instagram screenshots captured during a browsing session.
 - Feed posts: ${feedCount}
 - Stories: ${storyCount}
-- Search results: ${searchCount}${searchInterests.length > 0 ? ` (searched: ${searchInterests.join(', ')})` : ''}
 - Profile views: ${profileCount}
 - Carousel slides: ${carouselCount}
 
@@ -184,7 +193,6 @@ II. USER PROFILE
 ═══════════════════════════════════════════════════════════════════════════════
 
 Name: ${config.userName}
-Priority Interests: ${interestsList}
 Location: ${config.location || 'Not specified'}
 Date: ${dayName}, ${dateStr}
 
@@ -192,11 +200,11 @@ Date: ${dayName}, ${dateStr}
 III. AD & SPONSORED CONTENT FILTERING
 ═══════════════════════════════════════════════════════════════════════════════
 
-Skip ads and sponsored posts UNLESS they are relevant to the user's interests (${interestsList}).
+Skip ads and sponsored posts unless they contain genuinely newsworthy content.
 Skip screenshots that are mostly blank, loading, or unclear.
 
 INCLUDE (even if commercial):
-- Content from brands or organizations relevant to user interests
+- Content from brands or organizations with newsworthy updates
 - News organization updates (even with subscription CTAs)
 - Personal accounts sharing genuine experiences
 - Entertainment/sports content (games, shows, events)
@@ -220,7 +228,6 @@ IV. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
    - Level 1 only: Just the facts, one sentence
 
 3. **PRIORITIZATION**:
-   - Search results matching "${interestsList}" = HIGH PRIORITY (feature prominently)
    - Breaking news / time-sensitive content = HIGH PRIORITY
    - Stories from friends/followed accounts = HIGH (personal relevance)
    - Generic lifestyle posts = LOW (brief mention or skip)

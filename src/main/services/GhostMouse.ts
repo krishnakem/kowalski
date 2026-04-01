@@ -1,34 +1,19 @@
 /**
- * GhostMouse - Human-like Mouse Movement Simulation
+ * GhostMouse - Direct Mouse Control
  *
- * Generates realistic mouse movements using Bezier curves with:
- * - Variable velocity (acceleration/deceleration)
- * - Natural curve trajectories (humans don't move in straight lines)
- * - Overshoot and micro-corrections
- * - Randomized click positions (never exactly center)
+ * Wraps Playwright mouse API with a consistent interface.
+ * All movement physics (Bezier curves, jitter, overshoot) have been removed.
+ * Uses direct page.mouse.move() and page.mouse.click() calls.
  *
- * Cost: $0 (pure physics simulation, no API calls)
+ * Cost: $0 (no API calls)
  */
 
-import { Bezier } from 'bezier-js';
 import { Page } from 'playwright';
-import { Point, MovementConfig, BoundingBox } from '../../types/instagram.js';
-
-/**
- * Control points for a cubic Bezier curve.
- */
-interface BezierControlPoints {
-    start: Point;
-    cp1: Point;
-    cp2: Point;
-    end: Point;
-}
+import { Point, BoundingBox } from '../../types/instagram.js';
 
 export class GhostMouse {
     private page: Page;
     private currentPosition: Point = { x: 0, y: 0 };
-    // Cached viewport width for proportional calculations
-    private _viewportWidth: number = 0;
 
     constructor(page: Page) {
         this.page = page;
@@ -39,488 +24,80 @@ export class GhostMouse {
         this.page = page;
     }
 
-    /** Get viewport width, cached per session for proportional calculations. */
-    private async getViewportWidth(): Promise<number> {
-        if (this._viewportWidth > 0) return this._viewportWidth;
-        this._viewportWidth = await this.page.evaluate(() => window.innerWidth).catch(() => 1080);
-        return this._viewportWidth;
-    }
-
     /**
-     * Move mouse to target with human-like Bezier curve trajectory.
-     * Includes variable velocity (acceleration/deceleration).
+     * Move mouse to target point.
      */
-    async moveTo(target: Point, config: MovementConfig = {}): Promise<void> {
-        const vw = await this.getViewportWidth();
-        const {
-            minSpeed = 2,
-            maxSpeed = 8,
-            overshootProbability = 0.15,
-            jitterAmount = Math.max(1, Math.round(vw * 0.002))
-        } = config;
-
-        // Calculate movement distance for physics-based overshoot
-        const movementDistance = Math.hypot(
-            target.x - this.currentPosition.x,
-            target.y - this.currentPosition.y
-        );
-
-        // 1. Generate control points for Bezier curve
-        const controlPoints = this.generateBezierControlPoints(
-            this.currentPosition,
-            target
-        );
-
-        // 2. Create Bezier curve
-        const curve = new Bezier(
-            controlPoints.start.x, controlPoints.start.y,
-            controlPoints.cp1.x, controlPoints.cp1.y,
-            controlPoints.cp2.x, controlPoints.cp2.y,
-            controlPoints.end.x, controlPoints.end.y
-        );
-
-        // 3. Calculate points along curve with variable velocity
-        const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
-
-        // 4. Execute movement with micro-jitter
-
-        for (let i = 0; i < points.length; i++) {
-            const jitteredPoint = this.addJitter(points[i], jitterAmount);
-            await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
-
-            // Fast timing — LLM response time (2-5s) is the natural pacing
-            await this.microDelay(5, 15);
-        }
-
-        // 5. Optional overshoot and correction (with distance-based physics)
-        if (Math.random() < overshootProbability) {
-            await this.overshootAndCorrect(target, movementDistance);
-        }
-
+    async moveTo(target: Point): Promise<void> {
+        await this.page.mouse.move(target.x, target.y);
         this.currentPosition = target;
     }
 
     /**
-     * Generate Bezier control points that create natural curve.
-     * Humans don't move in straight lines - they curve slightly.
-     */
-    private generateBezierControlPoints(start: Point, end: Point): BezierControlPoints {
-        const distance = Math.hypot(end.x - start.x, end.y - start.y);
-
-        // Control points offset perpendicular to the line
-        const angle = Math.atan2(end.y - start.y, end.x - start.x);
-        const perpAngle = angle + Math.PI / 2;
-
-        // Randomize curve intensity
-        const curveIntensity = distance * (0.1 + Math.random() * 0.2);
-        const curveDirection = Math.random() > 0.5 ? 1 : -1;
-
-        return {
-            start,
-            cp1: {
-                x: start.x + (end.x - start.x) * 0.25 + Math.cos(perpAngle) * curveIntensity * curveDirection,
-                y: start.y + (end.y - start.y) * 0.25 + Math.sin(perpAngle) * curveIntensity * curveDirection
-            },
-            cp2: {
-                x: start.x + (end.x - start.x) * 0.75 + Math.cos(perpAngle) * curveIntensity * curveDirection * 0.5,
-                y: start.y + (end.y - start.y) * 0.75 + Math.sin(perpAngle) * curveIntensity * curveDirection * 0.5
-            },
-            end
-        };
-    }
-
-    /**
-     * Generate points with easing (slow start, fast middle, slow end).
-     * Mimics human acceleration/deceleration pattern.
-     *
-     * Uses the cinematic easing curve from animations.ts for consistency
-     * with the app's visual language.
-     */
-    private generateVariableVelocityPoints(
-        curve: Bezier,
-        minSpeed: number,
-        maxSpeed: number
-    ): Point[] {
-        const points: Point[] = [];
-        const curveLength = curve.length();
-        let t = 0;
-
-        while (t <= 1) {
-            const point = curve.get(t);
-            points.push({ x: point.x, y: point.y });
-
-            // Easing function: ease-in-out (slow-fast-slow)
-            // Uses adapted cinematic curve from animations.ts
-            const easing = this.easeInOutCinematic(t);
-            const speed = minSpeed + (maxSpeed - minSpeed) * (1 - Math.abs(easing - 0.5) * 2);
-
-            // Convert speed to t increment
-            const increment = speed / curveLength;
-            t += Math.max(increment, 0.01);  // Minimum increment to prevent infinite loop
-        }
-
-        return points;
-    }
-
-    /**
-     * Easing function adapted from animations.ts cinematic curve.
-     * [0.22, 1, 0.36, 1] converted to a function.
-     *
-     * This creates the characteristic "slow start, fast middle, slow end"
-     * that makes mouse movements feel natural.
-     */
-    private easeInOutCinematic(t: number): number {
-        // Approximate the cinematic bezier [0.22, 1, 0.36, 1]
-        // Using ease-in-out quad as a close approximation
-        return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    }
-
-    /**
-     * Add random micro-jitter to a point with layered noise.
-     * Humans have small involuntary hand movements at multiple frequencies.
-     *
-     * Layer 1: Base jitter (primary hand tremor)
-     * Layer 2: Micro-tremor (higher frequency, smaller amplitude neurological noise)
-     *
-     * This two-layer approach defeats bot detection that looks for
-     * geometrically perfect Bezier curves.
-     */
-    private addJitter(point: Point, amount: number): Point {
-        // Layer 1: Base jitter (primary hand tremor)
-        const baseJitter = {
-            x: (Math.random() - 0.5) * amount,
-            y: (Math.random() - 0.5) * amount
-        };
-
-        // Layer 2: Micro-tremor (higher frequency, ~30% of base amplitude)
-        // Simulates fine motor control imperfection
-        const tremor = {
-            x: (Math.random() - 0.5) * (amount * 0.3),
-            y: (Math.random() - 0.5) * (amount * 0.3)
-        };
-
-        return {
-            x: point.x + baseJitter.x + tremor.x,
-            y: point.y + baseJitter.y + tremor.y
-        };
-    }
-
-    /**
-     * Simulate human overshoot: move past target, then correct.
-     * This happens when moving quickly - we slightly overshoot, then adjust.
-     *
-     * Physics-based: Faster movements = more overshoot (human momentum).
-     *
-     * IMPORTANT: Correction movement uses a micro-curve, NOT a straight line.
-     * Straight-line correction is a bot signal (humans don't move perfectly).
-     *
-     * @param target - The intended target point
-     * @param movementDistance - Distance traveled to reach target (affects overshoot magnitude)
-     */
-    private async overshootAndCorrect(target: Point, movementDistance: number = 100): Promise<void> {
-        // Physics-based overshoot: faster/longer movements = more overshoot
-        // Proportional to viewport width (was hardcoded 5-30px)
-        const vw = await this.getViewportWidth();
-        const baseOvershoot = Math.min(vw * 0.028, Math.max(vw * 0.005, movementDistance * 0.08));
-        // Add randomization: ±50% of base overshoot
-        const overshootAmount = baseOvershoot * (0.5 + Math.random());
-
-        // Random direction for overshoot (full 360°)
-        const overshootAngle = Math.random() * Math.PI * 2;
-        const overshoot: Point = {
-            x: target.x + Math.cos(overshootAngle) * overshootAmount,
-            y: target.y + Math.sin(overshootAngle) * overshootAmount
-        };
-
-        await this.page.mouse.move(overshoot.x, overshoot.y);
-
-        await this.microDelay(20, 60);  // Brief overshoot pause
-
-        // Use micro-curve for correction instead of straight line
-        // Humans don't move in perfect straight lines, even for small corrections
-        const correctionOffset = vw * 0.007;
-        const midpoint: Point = {
-            x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * correctionOffset,
-            y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * correctionOffset
-        };
-
-        // Move through midpoint with slight curve
-        await this.page.mouse.move(midpoint.x, midpoint.y);
-
-        await this.microDelay(5, 15);  // Brief correction pause
-        await this.page.mouse.move(target.x, target.y);
-
-    }
-
-    /**
-     * Human-like click with pre-click hover and post-click pause.
+     * Click at a target point.
      */
     async click(target: Point): Promise<void> {
-        await this.moveTo(target);
-        await this.microDelay(30, 80);   // Pre-click hover
-        await this.page.mouse.down();
-        await this.microDelay(40, 90);   // Hold duration
-        await this.page.mouse.up();
-        await this.microDelay(50, 120);  // Post-click pause
+        await this.page.mouse.click(target.x, target.y);
+        this.currentPosition = target;
+    }
+
+    /**
+     * Click at specific coordinates.
+     * Used by VisionAgent where coordinates come from LLM vision.
+     */
+    async clickPoint(x: number, y: number): Promise<void> {
+        await this.page.mouse.click(x, y);
+        this.currentPosition = { x, y };
     }
 
     /**
      * Hover over a target for a duration without clicking.
-     * Used to verify element actionability before clicking (e.g., carousel buttons).
-     *
-     * @param target - Point to hover over
-     * @param durationMs - How long to hover (in milliseconds)
      */
     async hover(target: Point, durationMs: number = 1000): Promise<void> {
-        await this.moveTo(target);
-        // Add slight jitter during hover (humans don't hold perfectly still)
-        const jitterDuration = durationMs * 0.8;  // 80% of duration with micro-movements
-        const jitterInterval = 150;  // Check/jitter every 150ms
-        let elapsed = 0;
-
-        while (elapsed < jitterDuration) {
-            await this.microDelay(jitterInterval * 0.8, jitterInterval * 1.2);
-            // Tiny micro-movements during hover (proportional to viewport)
-            const hoverJitter = (await this.getViewportWidth()) * 0.003;
-            const microMove = {
-                x: target.x + (Math.random() - 0.5) * hoverJitter,
-                y: target.y + (Math.random() - 0.5) * hoverJitter
-            };
-            await this.page.mouse.move(microMove.x, microMove.y);
-            elapsed += jitterInterval;
-        }
-
-        // Settle back to target for final 20%
         await this.page.mouse.move(target.x, target.y);
-        await this.microDelay(durationMs * 0.15, durationMs * 0.25);
+        this.currentPosition = target;
+        if (durationMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, durationMs));
+        }
     }
 
     /**
-     * Hover over an element with randomized offset within its bounds.
-     *
-     * @param boundingBox - Element's bounding box
-     * @param durationMs - How long to hover
-     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
+     * Click the center of an element's bounding box.
      */
-    async hoverElement(
-        boundingBox: BoundingBox,
-        durationMs: number = 1000,
-        centerBias?: number
-    ): Promise<void> {
-        // Use randomized center bias if not explicitly specified
-        const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
-        const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
-        const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
-
-        let hoverPoint: Point = {
-            x: boundingBox.x + offsetX,
-            y: boundingBox.y + offsetY
-        };
-
-        // Ensure we're within the element (proportional safety margin)
-        const marginX = Math.max(2, boundingBox.width * 0.05);
-        const marginY = Math.max(2, boundingBox.height * 0.05);
-        hoverPoint.x = Math.max(
-            boundingBox.x + marginX,
-            Math.min(hoverPoint.x, boundingBox.x + boundingBox.width - marginX)
-        );
-        hoverPoint.y = Math.max(
-            boundingBox.y + marginY,
-            Math.min(hoverPoint.y, boundingBox.y + boundingBox.height - marginY)
-        );
-
-        await this.hover(hoverPoint, durationMs);
+    async clickElement(boundingBox: BoundingBox): Promise<void> {
+        const cx = boundingBox.x + boundingBox.width / 2;
+        const cy = boundingBox.y + boundingBox.height / 2;
+        await this.page.mouse.click(cx, cy);
+        this.currentPosition = { x: cx, y: cy };
     }
 
     /**
-     * Click an element with randomized offset within its bounds.
-     * Humans NEVER click exactly in the center of buttons.
-     *
-     * @param boundingBox - Element's bounding box
-     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
+     * Hover over the center of an element's bounding box.
      */
-    async clickElement(
-        boundingBox: BoundingBox,
-        centerBias?: number  // Randomized 0.2-0.4 if not specified
-    ): Promise<void> {
-        // Generate random offset with randomized center bias
-        // Using gaussian-like distribution: more likely near center, but not exact
-        const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
-        const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
-        const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
-
-        // Calculate click point (offset from top-left corner)
-        let clickPoint: Point = {
-            x: boundingBox.x + offsetX,
-            y: boundingBox.y + offsetY
-        };
-
-        // Ensure we're still within the element (proportional safety margin)
-        const marginX = Math.max(2, boundingBox.width * 0.05);
-        const marginY = Math.max(2, boundingBox.height * 0.05);
-        clickPoint.x = Math.max(
-            boundingBox.x + marginX,
-            Math.min(clickPoint.x, boundingBox.x + boundingBox.width - marginX)
-        );
-        clickPoint.y = Math.max(
-            boundingBox.y + marginY,
-            Math.min(clickPoint.y, boundingBox.y + boundingBox.height - marginY)
-        );
-
-        await this.click(clickPoint);
+    async hoverElement(boundingBox: BoundingBox, durationMs: number = 1000): Promise<void> {
+        const cx = boundingBox.x + boundingBox.width / 2;
+        const cy = boundingBox.y + boundingBox.height / 2;
+        await this.hover({ x: cx, y: cy }, durationMs);
     }
 
     /**
-     * Click at a specific point with small gaussian jitter.
-     * Used by VisionAgent where coordinates come from LLM vision
-     * (no bounding box available — just an x,y target on the viewport).
-     *
-     * Treats the point as center of an implicit small target area.
-     * Applies gaussian offset to simulate natural pointing imprecision.
+     * Click at a target point (role parameter ignored — kept for API compat).
      */
-    async clickPoint(x: number, y: number): Promise<void> {
-        const vw = await this.getViewportWidth();
-        const jitterRadius = Math.max(3, Math.round(vw * 0.009)); // ~10px on 1080vw
-        const offsetX = this.gaussianRandom(0.5) * jitterRadius - jitterRadius / 2;
-        const offsetY = this.gaussianRandom(0.5) * jitterRadius - jitterRadius / 2;
-        await this.click({ x: x + offsetX, y: y + offsetY });
+    async clickWithRole(target: Point, _role?: string): Promise<void> {
+        await this.click(target);
     }
 
     /**
-     * Get a randomized center bias value (0.2-0.4 range).
-     * Avoids using fixed 0.3 which creates detectable patterns.
+     * Click the center of an element (role parameter ignored — kept for API compat).
      */
-    private getRandomizedCenterBias(): number {
-        return 0.2 + Math.random() * 0.2;  // 0.2-0.4 range
+    async clickElementWithRole(boundingBox: BoundingBox, _role?: string): Promise<void> {
+        await this.clickElement(boundingBox);
     }
 
     /**
-     * Generate a random number between 0 and 1 with gaussian-like distribution.
-     * centerBias: 0.0 = uniform distribution, 1.0 = always 0.5 (center)
-     *
-     * This mimics human click patterns: usually near center, but with natural variation.
+     * Get hover duration for a role. Returns a fixed small value.
+     * Kept for API compatibility.
      */
-    private gaussianRandom(centerBias?: number): number {
-        // Use randomized default if not specified
-        const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
-        // Box-Muller transform for gaussian distribution
-        const u1 = Math.random();
-        const u2 = Math.random();
-        const gaussian = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-
-        // Normalize to 0-1 range (gaussian has ~99.7% within +/-3 std dev)
-        const normalized = (gaussian / 6) + 0.5;  // Center at 0.5
-
-        // Clamp to valid range with margin
-        const clamped = Math.max(0.1, Math.min(0.9, normalized));
-
-        // Blend between uniform and gaussian based on effectiveBias
-        const uniform = 0.1 + Math.random() * 0.8;  // Uniform with margin
-        return clamped * effectiveBias + uniform * (1 - effectiveBias);
+    getHoverDurationForRole(_role: string): number {
+        return 100;
     }
-
-    /**
-     * Small random delay for human-like timing variation.
-     */
-    private microDelay(min: number, max: number): Promise<void> {
-        const delay = min + Math.random() * (max - min);
-        return new Promise(resolve => setTimeout(resolve, delay));
-    }
-
-    // =========================================================================
-    // Gaze-Lag Execution System (Human-like "Look, then Move")
-    // =========================================================================
-
-    /**
-     * Randomized value within a range - NO fixed values allowed.
-     */
-    private randomInRange(min: number, max: number): number {
-        return min + Math.random() * (max - min);
-    }
-
-    /**
-     * Get element-specific hover duration based on role.
-     * Different element types require different amounts of visual processing.
-     *
-     * @param role - The accessibility role of the element
-     * @returns Randomized hover duration in milliseconds
-     */
-    getHoverDurationForRole(role: string): number {
-        const roleLower = role.toLowerCase();
-
-        const ranges: Record<string, [number, number]> = {
-            button: [50, 150],       // Large, easy targets
-            link: [150, 300],        // Precision required
-            textbox: [200, 400],     // Cognitive preparation for typing
-            searchbox: [200, 400],   // Same as textbox
-            combobox: [180, 350],    // Dropdown interaction
-            image: [100, 250],       // Visual inspection
-            img: [100, 250],         // Same as image
-            menuitem: [120, 280],    // Menu navigation
-            tab: [100, 220],         // Tab switching
-            checkbox: [80, 180],     // Quick toggle
-            radio: [80, 180],        // Quick selection
-        };
-
-        const [min, max] = ranges[roleLower] || [100, 300];  // Default range
-        return this.randomInRange(min, max);
-    }
-
-    /**
-     * Human-like click with element-specific timing.
-     * Varies pre-click hover based on element role.
-     *
-     * @param target - Point to click
-     * @param role - Accessibility role for timing adjustment
-     */
-    async clickWithRole(target: Point, role: string = 'button'): Promise<void> {
-        await this.moveTo(target);
-
-        // Element-specific pre-click hover duration
-        const hoverDuration = this.getHoverDurationForRole(role);
-        await new Promise(r => setTimeout(r, hoverDuration));
-
-        await this.page.mouse.down();
-        await this.microDelay(40, 90);
-        await this.page.mouse.up();
-        await this.microDelay(50, 120);
-    }
-
-    /**
-     * Click an element with gaze-aware role-specific timing.
-     *
-     * @param boundingBox - Element's bounding box
-     * @param role - Accessibility role for timing adjustment
-     * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
-     */
-    async clickElementWithRole(
-        boundingBox: BoundingBox,
-        role: string = 'button',
-        centerBias?: number
-    ): Promise<void> {
-        // Generate random offset with randomized center bias
-        const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
-        const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
-        const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
-
-        let clickPoint: Point = {
-            x: boundingBox.x + offsetX,
-            y: boundingBox.y + offsetY
-        };
-
-        // Proportional safety margin
-        const marginX = Math.max(2, boundingBox.width * 0.05);
-        const marginY = Math.max(2, boundingBox.height * 0.05);
-        clickPoint.x = Math.max(
-            boundingBox.x + marginX,
-            Math.min(clickPoint.x, boundingBox.x + boundingBox.width - marginX)
-        );
-        clickPoint.y = Math.max(
-            boundingBox.y + marginY,
-            Math.min(clickPoint.y, boundingBox.y + boundingBox.height - marginY)
-        );
-
-        await this.clickWithRole(clickPoint, role);
-    }
-
 }

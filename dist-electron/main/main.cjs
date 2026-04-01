@@ -1094,18 +1094,18 @@ var require_image_q = __commonJS({
       return sorted;
     }
     function rgb2hsl2(r, g, b) {
-      const min2 = min32(r, g, b);
-      const max2 = max32(r, g, b);
-      const delta = max2 - min2;
-      const l = (min2 + max2) / 510;
+      const min = min32(r, g, b);
+      const max = max32(r, g, b);
+      const delta = max - min;
+      const l = (min + max) / 510;
       let s = 0;
       if (l > 0 && l < 1)
-        s = delta / (l < 0.5 ? max2 + min2 : 510 - max2 - min2);
+        s = delta / (l < 0.5 ? max + min : 510 - max - min);
       let h = 0;
       if (delta > 0) {
-        if (max2 === r) {
+        if (max === r) {
           h = (g - b) / delta;
-        } else if (max2 === g) {
+        } else if (max === g) {
           h = 2 + (b - r) / delta;
         } else {
           h = 4 + (r - g) / delta;
@@ -1744,15 +1744,15 @@ var require_image_q = __commonJS({
         const b = i32 >>> 16 & 255;
         const hg = r === g && g === b ? 0 : 1 + hueGroup2(rgb2hsl2(r, g, b).h, this._numGroups);
         const gr = this._stats[hg];
-        const min2 = this._minCols;
+        const min = this._minCols;
         gr.num++;
-        if (gr.num > min2) {
+        if (gr.num > min) {
           return;
         }
-        if (gr.num === min2) {
+        if (gr.num === min) {
           this._groupsFull++;
         }
-        if (gr.num <= min2) {
+        if (gr.num <= min) {
           this._stats[hg].cols.push(i32);
         }
       }
@@ -4896,13 +4896,13 @@ var require_encoder = __commonJS({
           99
         ];
         for (var i = 0; i < 64; i++) {
-          var t2 = ffloor((YQT[i] * sf + 50) / 100);
-          if (t2 < 1) {
-            t2 = 1;
-          } else if (t2 > 255) {
-            t2 = 255;
+          var t = ffloor((YQT[i] * sf + 50) / 100);
+          if (t < 1) {
+            t = 1;
+          } else if (t > 255) {
+            t = 255;
           }
-          YTable[ZigZag[i]] = t2;
+          YTable[ZigZag[i]] = t;
         }
         var UVQT = [
           17,
@@ -5638,8 +5638,8 @@ var require_decoder = __commonJS({
           return n2 + (-1 << length) + 1;
         }
         function decodeBaseline(component2, zz) {
-          var t2 = decodeHuffman(component2.huffmanTableDC);
-          var diff2 = t2 === 0 ? 0 : receiveAndExtend(t2);
+          var t = decodeHuffman(component2.huffmanTableDC);
+          var diff2 = t === 0 ? 0 : receiveAndExtend(t);
           zz[0] = component2.pred += diff2;
           var k2 = 1;
           while (k2 < 64) {
@@ -5658,8 +5658,8 @@ var require_decoder = __commonJS({
           }
         }
         function decodeDCFirst(component2, zz) {
-          var t2 = decodeHuffman(component2.huffmanTableDC);
-          var diff2 = t2 === 0 ? 0 : receiveAndExtend(t2) << successive;
+          var t = decodeHuffman(component2.huffmanTableDC);
+          var diff2 = t === 0 ? 0 : receiveAndExtend(t) << successive;
           zz[0] = component2.pred += diff2;
         }
         function decodeDCSuccessive(component2, zz) {
@@ -5838,7 +5838,7 @@ var require_decoder = __commonJS({
         var R = new Int32Array(64), r = new Uint8Array(64);
         function quantizeAndInverse(zz, dataOut, dataIn) {
           var qt = component.quantizationTable;
-          var v0, v1, v2, v3, v4, v5, v6, v7, t2;
+          var v0, v1, v2, v3, v4, v5, v6, v7, t;
           var p = dataIn;
           var i2;
           for (i2 = 0; i2 < 64; i2++)
@@ -5846,15 +5846,15 @@ var require_decoder = __commonJS({
           for (i2 = 0; i2 < 8; ++i2) {
             var row = 8 * i2;
             if (p[1 + row] == 0 && p[2 + row] == 0 && p[3 + row] == 0 && p[4 + row] == 0 && p[5 + row] == 0 && p[6 + row] == 0 && p[7 + row] == 0) {
-              t2 = dctSqrt2 * p[0 + row] + 512 >> 10;
-              p[0 + row] = t2;
-              p[1 + row] = t2;
-              p[2 + row] = t2;
-              p[3 + row] = t2;
-              p[4 + row] = t2;
-              p[5 + row] = t2;
-              p[6 + row] = t2;
-              p[7 + row] = t2;
+              t = dctSqrt2 * p[0 + row] + 512 >> 10;
+              p[0 + row] = t;
+              p[1 + row] = t;
+              p[2 + row] = t;
+              p[3 + row] = t;
+              p[4 + row] = t;
+              p[5 + row] = t;
+              p[6 + row] = t;
+              p[7 + row] = t;
               continue;
             }
             v0 = dctSqrt2 * p[0 + row] + 128 >> 8;
@@ -5865,30 +5865,30 @@ var require_decoder = __commonJS({
             v7 = dctSqrt1d2 * (p[1 + row] + p[7 + row]) + 128 >> 8;
             v5 = p[3 + row] << 4;
             v6 = p[5 + row] << 4;
-            t2 = v0 - v1 + 1 >> 1;
+            t = v0 - v1 + 1 >> 1;
             v0 = v0 + v1 + 1 >> 1;
-            v1 = t2;
-            t2 = v2 * dctSin6 + v3 * dctCos6 + 128 >> 8;
+            v1 = t;
+            t = v2 * dctSin6 + v3 * dctCos6 + 128 >> 8;
             v2 = v2 * dctCos6 - v3 * dctSin6 + 128 >> 8;
-            v3 = t2;
-            t2 = v4 - v6 + 1 >> 1;
+            v3 = t;
+            t = v4 - v6 + 1 >> 1;
             v4 = v4 + v6 + 1 >> 1;
-            v6 = t2;
-            t2 = v7 + v5 + 1 >> 1;
+            v6 = t;
+            t = v7 + v5 + 1 >> 1;
             v5 = v7 - v5 + 1 >> 1;
-            v7 = t2;
-            t2 = v0 - v3 + 1 >> 1;
+            v7 = t;
+            t = v0 - v3 + 1 >> 1;
             v0 = v0 + v3 + 1 >> 1;
-            v3 = t2;
-            t2 = v1 - v2 + 1 >> 1;
+            v3 = t;
+            t = v1 - v2 + 1 >> 1;
             v1 = v1 + v2 + 1 >> 1;
-            v2 = t2;
-            t2 = v4 * dctSin3 + v7 * dctCos3 + 2048 >> 12;
+            v2 = t;
+            t = v4 * dctSin3 + v7 * dctCos3 + 2048 >> 12;
             v4 = v4 * dctCos3 - v7 * dctSin3 + 2048 >> 12;
-            v7 = t2;
-            t2 = v5 * dctSin1 + v6 * dctCos1 + 2048 >> 12;
+            v7 = t;
+            t = v5 * dctSin1 + v6 * dctCos1 + 2048 >> 12;
             v5 = v5 * dctCos1 - v6 * dctSin1 + 2048 >> 12;
-            v6 = t2;
+            v6 = t;
             p[0 + row] = v0 + v7;
             p[7 + row] = v0 - v7;
             p[1 + row] = v1 + v6;
@@ -5901,15 +5901,15 @@ var require_decoder = __commonJS({
           for (i2 = 0; i2 < 8; ++i2) {
             var col = i2;
             if (p[1 * 8 + col] == 0 && p[2 * 8 + col] == 0 && p[3 * 8 + col] == 0 && p[4 * 8 + col] == 0 && p[5 * 8 + col] == 0 && p[6 * 8 + col] == 0 && p[7 * 8 + col] == 0) {
-              t2 = dctSqrt2 * dataIn[i2 + 0] + 8192 >> 14;
-              p[0 * 8 + col] = t2;
-              p[1 * 8 + col] = t2;
-              p[2 * 8 + col] = t2;
-              p[3 * 8 + col] = t2;
-              p[4 * 8 + col] = t2;
-              p[5 * 8 + col] = t2;
-              p[6 * 8 + col] = t2;
-              p[7 * 8 + col] = t2;
+              t = dctSqrt2 * dataIn[i2 + 0] + 8192 >> 14;
+              p[0 * 8 + col] = t;
+              p[1 * 8 + col] = t;
+              p[2 * 8 + col] = t;
+              p[3 * 8 + col] = t;
+              p[4 * 8 + col] = t;
+              p[5 * 8 + col] = t;
+              p[6 * 8 + col] = t;
+              p[7 * 8 + col] = t;
               continue;
             }
             v0 = dctSqrt2 * p[0 * 8 + col] + 2048 >> 12;
@@ -5920,30 +5920,30 @@ var require_decoder = __commonJS({
             v7 = dctSqrt1d2 * (p[1 * 8 + col] + p[7 * 8 + col]) + 2048 >> 12;
             v5 = p[3 * 8 + col];
             v6 = p[5 * 8 + col];
-            t2 = v0 - v1 + 1 >> 1;
+            t = v0 - v1 + 1 >> 1;
             v0 = v0 + v1 + 1 >> 1;
-            v1 = t2;
-            t2 = v2 * dctSin6 + v3 * dctCos6 + 2048 >> 12;
+            v1 = t;
+            t = v2 * dctSin6 + v3 * dctCos6 + 2048 >> 12;
             v2 = v2 * dctCos6 - v3 * dctSin6 + 2048 >> 12;
-            v3 = t2;
-            t2 = v4 - v6 + 1 >> 1;
+            v3 = t;
+            t = v4 - v6 + 1 >> 1;
             v4 = v4 + v6 + 1 >> 1;
-            v6 = t2;
-            t2 = v7 + v5 + 1 >> 1;
+            v6 = t;
+            t = v7 + v5 + 1 >> 1;
             v5 = v7 - v5 + 1 >> 1;
-            v7 = t2;
-            t2 = v0 - v3 + 1 >> 1;
+            v7 = t;
+            t = v0 - v3 + 1 >> 1;
             v0 = v0 + v3 + 1 >> 1;
-            v3 = t2;
-            t2 = v1 - v2 + 1 >> 1;
+            v3 = t;
+            t = v1 - v2 + 1 >> 1;
             v1 = v1 + v2 + 1 >> 1;
-            v2 = t2;
-            t2 = v4 * dctSin3 + v7 * dctCos3 + 2048 >> 12;
+            v2 = t;
+            t = v4 * dctSin3 + v7 * dctCos3 + 2048 >> 12;
             v4 = v4 * dctCos3 - v7 * dctSin3 + 2048 >> 12;
-            v7 = t2;
-            t2 = v5 * dctSin1 + v6 * dctCos1 + 2048 >> 12;
+            v7 = t;
+            t = v5 * dctSin1 + v6 * dctCos1 + 2048 >> 12;
             v5 = v5 * dctCos1 - v6 * dctSin1 + 2048 >> 12;
-            v6 = t2;
+            v6 = t;
             p[0 * 8 + col] = v0 + v7;
             p[7 * 8 + col] = v0 - v7;
             p[1 * 8 + col] = v1 + v6;
@@ -7983,12 +7983,12 @@ var require_filter_pack = __commonJS({
       let sel = filterTypes[0];
       for (let y2 = 0; y2 < height; y2++) {
         if (filterTypes.length > 1) {
-          let min2 = Infinity;
+          let min = Infinity;
           for (let i = 0; i < filterTypes.length; i++) {
             let sum = filterSums[filterTypes[i]](pxData, pxPos, byteWidth, bpp);
-            if (sum < min2) {
+            if (sum < min) {
               sel = filterTypes[i];
-              min2 = sum;
+              min = sum;
             }
           }
         }
@@ -8731,7 +8731,7 @@ var require_common = __commonJS({
 var require_trees = __commonJS({
   "node_modules/pako/lib/zlib/trees.js"(exports2) {
     "use strict";
-    var utils3 = require_common();
+    var utils2 = require_common();
     var Z_FIXED = 4;
     var Z_BINARY = 0;
     var Z_TEXT = 1;
@@ -9024,7 +9024,7 @@ var require_trees = __commonJS({
         put_short(s, len);
         put_short(s, ~len);
       }
-      utils3.arraySet(s.pending_buf, s.window, buf, len, s.pending);
+      utils2.arraySet(s.pending_buf, s.window, buf, len, s.pending);
       s.pending += len;
     }
     function smaller(tree, n, m, depth) {
@@ -9408,10 +9408,10 @@ var require_crc32 = __commonJS({
     }
     var crcTable = makeTable();
     function crc32(crc, buf, len, pos) {
-      var t2 = crcTable, end = pos + len;
+      var t = crcTable, end = pos + len;
       crc ^= -1;
       for (var i = pos; i < end; i++) {
-        crc = crc >>> 8 ^ t2[(crc ^ buf[i]) & 255];
+        crc = crc >>> 8 ^ t[(crc ^ buf[i]) & 255];
       }
       return crc ^ -1;
     }
@@ -9450,7 +9450,7 @@ var require_messages = __commonJS({
 var require_deflate = __commonJS({
   "node_modules/pako/lib/zlib/deflate.js"(exports2) {
     "use strict";
-    var utils3 = require_common();
+    var utils2 = require_common();
     var trees = require_trees();
     var adler32 = require_adler32();
     var crc32 = require_crc32();
@@ -9521,7 +9521,7 @@ var require_deflate = __commonJS({
       if (len === 0) {
         return;
       }
-      utils3.arraySet(strm.output, s.pending_buf, s.pending_out, len, strm.next_out);
+      utils2.arraySet(strm.output, s.pending_buf, s.pending_out, len, strm.next_out);
       strm.next_out += len;
       s.pending_out += len;
       strm.total_out += len;
@@ -9552,7 +9552,7 @@ var require_deflate = __commonJS({
         return 0;
       }
       strm.avail_in -= len;
-      utils3.arraySet(buf, strm.input, strm.next_in, len, start);
+      utils2.arraySet(buf, strm.input, strm.next_in, len, start);
       if (strm.state.wrap === 1) {
         strm.adler = adler32(strm.adler, buf, len, start);
       } else if (strm.state.wrap === 2) {
@@ -9614,7 +9614,7 @@ var require_deflate = __commonJS({
       do {
         more = s.window_size - s.lookahead - s.strstart;
         if (s.strstart >= _w_size + (_w_size - MIN_LOOKAHEAD)) {
-          utils3.arraySet(s.window, s.window, _w_size, _w_size, 0);
+          utils2.arraySet(s.window, s.window, _w_size, _w_size, 0);
           s.match_start -= _w_size;
           s.strstart -= _w_size;
           s.block_start -= _w_size;
@@ -10042,21 +10042,21 @@ var require_deflate = __commonJS({
       this.strategy = 0;
       this.good_match = 0;
       this.nice_match = 0;
-      this.dyn_ltree = new utils3.Buf16(HEAP_SIZE * 2);
-      this.dyn_dtree = new utils3.Buf16((2 * D_CODES + 1) * 2);
-      this.bl_tree = new utils3.Buf16((2 * BL_CODES + 1) * 2);
+      this.dyn_ltree = new utils2.Buf16(HEAP_SIZE * 2);
+      this.dyn_dtree = new utils2.Buf16((2 * D_CODES + 1) * 2);
+      this.bl_tree = new utils2.Buf16((2 * BL_CODES + 1) * 2);
       zero(this.dyn_ltree);
       zero(this.dyn_dtree);
       zero(this.bl_tree);
       this.l_desc = null;
       this.d_desc = null;
       this.bl_desc = null;
-      this.bl_count = new utils3.Buf16(MAX_BITS + 1);
-      this.heap = new utils3.Buf16(2 * L_CODES + 1);
+      this.bl_count = new utils2.Buf16(MAX_BITS + 1);
+      this.heap = new utils2.Buf16(2 * L_CODES + 1);
       zero(this.heap);
       this.heap_len = 0;
       this.heap_max = 0;
-      this.depth = new utils3.Buf16(2 * L_CODES + 1);
+      this.depth = new utils2.Buf16(2 * L_CODES + 1);
       zero(this.depth);
       this.l_buf = 0;
       this.lit_bufsize = 0;
@@ -10138,12 +10138,12 @@ var require_deflate = __commonJS({
       s.hash_size = 1 << s.hash_bits;
       s.hash_mask = s.hash_size - 1;
       s.hash_shift = ~~((s.hash_bits + MIN_MATCH - 1) / MIN_MATCH);
-      s.window = new utils3.Buf8(s.w_size * 2);
-      s.head = new utils3.Buf16(s.hash_size);
-      s.prev = new utils3.Buf16(s.w_size);
+      s.window = new utils2.Buf8(s.w_size * 2);
+      s.head = new utils2.Buf16(s.hash_size);
+      s.prev = new utils2.Buf16(s.w_size);
       s.lit_bufsize = 1 << memLevel + 6;
       s.pending_buf_size = s.lit_bufsize * 4;
-      s.pending_buf = new utils3.Buf8(s.pending_buf_size);
+      s.pending_buf = new utils2.Buf8(s.pending_buf_size);
       s.d_buf = 1 * s.lit_bufsize;
       s.l_buf = (1 + 2) * s.lit_bufsize;
       s.level = level;
@@ -10446,8 +10446,8 @@ var require_deflate = __commonJS({
           s.block_start = 0;
           s.insert = 0;
         }
-        tmpDict = new utils3.Buf8(s.w_size);
-        utils3.arraySet(tmpDict, dictionary, dictLength - s.w_size, s.w_size, 0);
+        tmpDict = new utils2.Buf8(s.w_size);
+        utils2.arraySet(tmpDict, dictionary, dictLength - s.w_size, s.w_size, 0);
         dictionary = tmpDict;
         dictLength = s.w_size;
       }
@@ -10499,7 +10499,7 @@ var require_deflate = __commonJS({
 var require_strings = __commonJS({
   "node_modules/pako/lib/utils/strings.js"(exports2) {
     "use strict";
-    var utils3 = require_common();
+    var utils2 = require_common();
     var STR_APPLY_OK = true;
     var STR_APPLY_UIA_OK = true;
     try {
@@ -10512,7 +10512,7 @@ var require_strings = __commonJS({
     } catch (__) {
       STR_APPLY_UIA_OK = false;
     }
-    var _utf8len = new utils3.Buf8(256);
+    var _utf8len = new utils2.Buf8(256);
     for (q = 0; q < 256; q++) {
       _utf8len[q] = q >= 252 ? 6 : q >= 248 ? 5 : q >= 240 ? 4 : q >= 224 ? 3 : q >= 192 ? 2 : 1;
     }
@@ -10531,7 +10531,7 @@ var require_strings = __commonJS({
         }
         buf_len += c2 < 128 ? 1 : c2 < 2048 ? 2 : c2 < 65536 ? 3 : 4;
       }
-      buf = new utils3.Buf8(buf_len);
+      buf = new utils2.Buf8(buf_len);
       for (i = 0, m_pos = 0; i < buf_len; m_pos++) {
         c2 = str.charCodeAt(m_pos);
         if ((c2 & 64512) === 55296 && m_pos + 1 < str_len) {
@@ -10562,7 +10562,7 @@ var require_strings = __commonJS({
     function buf2binstring(buf, len) {
       if (len < 65534) {
         if (buf.subarray && STR_APPLY_UIA_OK || !buf.subarray && STR_APPLY_OK) {
-          return String.fromCharCode.apply(null, utils3.shrinkBuf(buf, len));
+          return String.fromCharCode.apply(null, utils2.shrinkBuf(buf, len));
         }
       }
       var result = "";
@@ -10575,15 +10575,15 @@ var require_strings = __commonJS({
       return buf2binstring(buf, buf.length);
     };
     exports2.binstring2buf = function(str) {
-      var buf = new utils3.Buf8(str.length);
+      var buf = new utils2.Buf8(str.length);
       for (var i = 0, len = buf.length; i < len; i++) {
         buf[i] = str.charCodeAt(i);
       }
       return buf;
     };
-    exports2.buf2string = function(buf, max2) {
+    exports2.buf2string = function(buf, max) {
       var i, out, c2, c_len;
-      var len = max2 || buf.length;
+      var len = max || buf.length;
       var utf16buf = new Array(len * 2);
       for (out = 0, i = 0; i < len; ) {
         c2 = buf[i++];
@@ -10616,23 +10616,23 @@ var require_strings = __commonJS({
       }
       return buf2binstring(utf16buf, out);
     };
-    exports2.utf8border = function(buf, max2) {
+    exports2.utf8border = function(buf, max) {
       var pos;
-      max2 = max2 || buf.length;
-      if (max2 > buf.length) {
-        max2 = buf.length;
+      max = max || buf.length;
+      if (max > buf.length) {
+        max = buf.length;
       }
-      pos = max2 - 1;
+      pos = max - 1;
       while (pos >= 0 && (buf[pos] & 192) === 128) {
         pos--;
       }
       if (pos < 0) {
-        return max2;
+        return max;
       }
       if (pos === 0) {
-        return max2;
+        return max;
       }
-      return pos + _utf8len[buf[pos]] > max2 ? pos : max2;
+      return pos + _utf8len[buf[pos]] > max ? pos : max;
     };
   }
 });
@@ -10664,7 +10664,7 @@ var require_deflate2 = __commonJS({
   "node_modules/pako/lib/deflate.js"(exports2) {
     "use strict";
     var zlib_deflate = require_deflate();
-    var utils3 = require_common();
+    var utils2 = require_common();
     var strings = require_strings();
     var msg = require_messages();
     var ZStream = require_zstream();
@@ -10679,7 +10679,7 @@ var require_deflate2 = __commonJS({
     var Z_DEFLATED = 8;
     function Deflate(options) {
       if (!(this instanceof Deflate)) return new Deflate(options);
-      this.options = utils3.assign({
+      this.options = utils2.assign({
         level: Z_DEFAULT_COMPRESSION,
         method: Z_DEFLATED,
         chunkSize: 16384,
@@ -10749,7 +10749,7 @@ var require_deflate2 = __commonJS({
       strm.avail_in = strm.input.length;
       do {
         if (strm.avail_out === 0) {
-          strm.output = new utils3.Buf8(chunkSize);
+          strm.output = new utils2.Buf8(chunkSize);
           strm.next_out = 0;
           strm.avail_out = chunkSize;
         }
@@ -10761,9 +10761,9 @@ var require_deflate2 = __commonJS({
         }
         if (strm.avail_out === 0 || strm.avail_in === 0 && (_mode === Z_FINISH || _mode === Z_SYNC_FLUSH)) {
           if (this.options.to === "string") {
-            this.onData(strings.buf2binstring(utils3.shrinkBuf(strm.output, strm.next_out)));
+            this.onData(strings.buf2binstring(utils2.shrinkBuf(strm.output, strm.next_out)));
           } else {
-            this.onData(utils3.shrinkBuf(strm.output, strm.next_out));
+            this.onData(utils2.shrinkBuf(strm.output, strm.next_out));
           }
         }
       } while ((strm.avail_in > 0 || strm.avail_out === 0) && status !== Z_STREAM_END);
@@ -10788,7 +10788,7 @@ var require_deflate2 = __commonJS({
         if (this.options.to === "string") {
           this.result = this.chunks.join("");
         } else {
-          this.result = utils3.flattenChunks(this.chunks);
+          this.result = utils2.flattenChunks(this.chunks);
         }
       }
       this.chunks = [];
@@ -11053,7 +11053,7 @@ var require_inffast = __commonJS({
 var require_inftrees = __commonJS({
   "node_modules/pako/lib/zlib/inftrees.js"(exports2, module2) {
     "use strict";
-    var utils3 = require_common();
+    var utils2 = require_common();
     var MAXBITS = 15;
     var ENOUGH_LENS = 852;
     var ENOUGH_DISTS = 592;
@@ -11202,7 +11202,7 @@ var require_inftrees = __commonJS({
       var bits = opts.bits;
       var len = 0;
       var sym = 0;
-      var min2 = 0, max2 = 0;
+      var min = 0, max = 0;
       var root = 0;
       var curr = 0;
       var drop = 0;
@@ -11217,8 +11217,8 @@ var require_inftrees = __commonJS({
       var base = null;
       var base_index = 0;
       var end;
-      var count = new utils3.Buf16(MAXBITS + 1);
-      var offs = new utils3.Buf16(MAXBITS + 1);
+      var count = new utils2.Buf16(MAXBITS + 1);
+      var offs = new utils2.Buf16(MAXBITS + 1);
       var extra = null;
       var extra_index = 0;
       var here_bits, here_op, here_val;
@@ -11229,27 +11229,27 @@ var require_inftrees = __commonJS({
         count[lens[lens_index + sym]]++;
       }
       root = bits;
-      for (max2 = MAXBITS; max2 >= 1; max2--) {
-        if (count[max2] !== 0) {
+      for (max = MAXBITS; max >= 1; max--) {
+        if (count[max] !== 0) {
           break;
         }
       }
-      if (root > max2) {
-        root = max2;
+      if (root > max) {
+        root = max;
       }
-      if (max2 === 0) {
+      if (max === 0) {
         table[table_index++] = 1 << 24 | 64 << 16 | 0;
         table[table_index++] = 1 << 24 | 64 << 16 | 0;
         opts.bits = 1;
         return 0;
       }
-      for (min2 = 1; min2 < max2; min2++) {
-        if (count[min2] !== 0) {
+      for (min = 1; min < max; min++) {
+        if (count[min] !== 0) {
           break;
         }
       }
-      if (root < min2) {
-        root = min2;
+      if (root < min) {
+        root = min;
       }
       left = 1;
       for (len = 1; len <= MAXBITS; len++) {
@@ -11259,7 +11259,7 @@ var require_inftrees = __commonJS({
           return -1;
         }
       }
-      if (left > 0 && (type === CODES || max2 !== 1)) {
+      if (left > 0 && (type === CODES || max !== 1)) {
         return -1;
       }
       offs[1] = 0;
@@ -11287,7 +11287,7 @@ var require_inftrees = __commonJS({
       }
       huff = 0;
       sym = 0;
-      len = min2;
+      len = min;
       next = table_index;
       curr = root;
       drop = 0;
@@ -11311,7 +11311,7 @@ var require_inftrees = __commonJS({
         }
         incr = 1 << len - drop;
         fill = 1 << curr;
-        min2 = fill;
+        min = fill;
         do {
           fill -= incr;
           table[next + (huff >> drop) + fill] = here_bits << 24 | here_op << 16 | here_val | 0;
@@ -11328,7 +11328,7 @@ var require_inftrees = __commonJS({
         }
         sym++;
         if (--count[len] === 0) {
-          if (len === max2) {
+          if (len === max) {
             break;
           }
           len = lens[lens_index + work[sym]];
@@ -11337,10 +11337,10 @@ var require_inftrees = __commonJS({
           if (drop === 0) {
             drop = root;
           }
-          next += min2;
+          next += min;
           curr = len - drop;
           left = 1 << curr;
-          while (curr + drop < max2) {
+          while (curr + drop < max) {
             left -= count[curr + drop];
             if (left <= 0) {
               break;
@@ -11369,7 +11369,7 @@ var require_inftrees = __commonJS({
 var require_inflate = __commonJS({
   "node_modules/pako/lib/zlib/inflate.js"(exports2) {
     "use strict";
-    var utils3 = require_common();
+    var utils2 = require_common();
     var adler32 = require_adler32();
     var crc32 = require_crc32();
     var inflate_fast = require_inffast();
@@ -11456,8 +11456,8 @@ var require_inflate = __commonJS({
       this.ndist = 0;
       this.have = 0;
       this.next = null;
-      this.lens = new utils3.Buf16(320);
-      this.work = new utils3.Buf16(288);
+      this.lens = new utils2.Buf16(320);
+      this.work = new utils2.Buf16(288);
       this.lendyn = null;
       this.distdyn = null;
       this.sane = 0;
@@ -11482,8 +11482,8 @@ var require_inflate = __commonJS({
       state.head = null;
       state.hold = 0;
       state.bits = 0;
-      state.lencode = state.lendyn = new utils3.Buf32(ENOUGH_LENS);
-      state.distcode = state.distdyn = new utils3.Buf32(ENOUGH_DISTS);
+      state.lencode = state.lendyn = new utils2.Buf32(ENOUGH_LENS);
+      state.distcode = state.distdyn = new utils2.Buf32(ENOUGH_DISTS);
       state.sane = 1;
       state.back = -1;
       return Z_OK;
@@ -11549,8 +11549,8 @@ var require_inflate = __commonJS({
     function fixedtables(state) {
       if (virgin) {
         var sym;
-        lenfix = new utils3.Buf32(512);
-        distfix = new utils3.Buf32(32);
+        lenfix = new utils2.Buf32(512);
+        distfix = new utils2.Buf32(32);
         sym = 0;
         while (sym < 144) {
           state.lens[sym++] = 8;
@@ -11584,10 +11584,10 @@ var require_inflate = __commonJS({
         state.wsize = 1 << state.wbits;
         state.wnext = 0;
         state.whave = 0;
-        state.window = new utils3.Buf8(state.wsize);
+        state.window = new utils2.Buf8(state.wsize);
       }
       if (copy >= state.wsize) {
-        utils3.arraySet(state.window, src, end - state.wsize, state.wsize, 0);
+        utils2.arraySet(state.window, src, end - state.wsize, state.wsize, 0);
         state.wnext = 0;
         state.whave = state.wsize;
       } else {
@@ -11595,10 +11595,10 @@ var require_inflate = __commonJS({
         if (dist > copy) {
           dist = copy;
         }
-        utils3.arraySet(state.window, src, end - copy, dist, state.wnext);
+        utils2.arraySet(state.window, src, end - copy, dist, state.wnext);
         copy -= dist;
         if (copy) {
-          utils3.arraySet(state.window, src, end - copy, copy, 0);
+          utils2.arraySet(state.window, src, end - copy, copy, 0);
           state.wnext = copy;
           state.whave = state.wsize;
         } else {
@@ -11630,7 +11630,7 @@ var require_inflate = __commonJS({
       var last_bits, last_op, last_val;
       var len;
       var ret;
-      var hbuf = new utils3.Buf8(4);
+      var hbuf = new utils2.Buf8(4);
       var opts;
       var n;
       var order = (
@@ -11827,7 +11827,7 @@ var require_inflate = __commonJS({
                     if (!state.head.extra) {
                       state.head.extra = new Array(state.head.extra_len);
                     }
-                    utils3.arraySet(
+                    utils2.arraySet(
                       state.head.extra,
                       input,
                       next,
@@ -12040,7 +12040,7 @@ var require_inflate = __commonJS({
                 if (copy === 0) {
                   break inf_leave;
                 }
-                utils3.arraySet(output, input, next, copy, put);
+                utils2.arraySet(output, input, next, copy, put);
                 have -= copy;
                 next += copy;
                 left -= copy;
@@ -12676,7 +12676,7 @@ var require_inflate2 = __commonJS({
   "node_modules/pako/lib/inflate.js"(exports2) {
     "use strict";
     var zlib_inflate = require_inflate();
-    var utils3 = require_common();
+    var utils2 = require_common();
     var strings = require_strings();
     var c2 = require_constants2();
     var msg = require_messages();
@@ -12685,7 +12685,7 @@ var require_inflate2 = __commonJS({
     var toString2 = Object.prototype.toString;
     function Inflate(options) {
       if (!(this instanceof Inflate)) return new Inflate(options);
-      this.options = utils3.assign({
+      this.options = utils2.assign({
         chunkSize: 16384,
         windowBits: 0,
         to: ""
@@ -12756,7 +12756,7 @@ var require_inflate2 = __commonJS({
       strm.avail_in = strm.input.length;
       do {
         if (strm.avail_out === 0) {
-          strm.output = new utils3.Buf8(chunkSize);
+          strm.output = new utils2.Buf8(chunkSize);
           strm.next_out = 0;
           strm.avail_out = chunkSize;
         }
@@ -12782,11 +12782,11 @@ var require_inflate2 = __commonJS({
               strm.next_out = tail;
               strm.avail_out = chunkSize - tail;
               if (tail) {
-                utils3.arraySet(strm.output, strm.output, next_out_utf8, tail, 0);
+                utils2.arraySet(strm.output, strm.output, next_out_utf8, tail, 0);
               }
               this.onData(utf8str);
             } else {
-              this.onData(utils3.shrinkBuf(strm.output, strm.next_out));
+              this.onData(utils2.shrinkBuf(strm.output, strm.next_out));
             }
           }
         }
@@ -12818,7 +12818,7 @@ var require_inflate2 = __commonJS({
         if (this.options.to === "string") {
           this.result = this.chunks.join("");
         } else {
-          this.result = utils3.flattenChunks(this.chunks);
+          this.result = utils2.flattenChunks(this.chunks);
         }
       }
       this.chunks = [];
@@ -12885,7 +12885,7 @@ var require_UTIF = __commonJS({
             W2.constructor = W2;
             return W2;
           })(), ak = (function ag() {
-            var p = new Uint8Array([0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]), t2 = 4017, ac = 799, ah = 3406, ao = 2276, ar = 1567, ai = 3784, s = 5793, ad = 2896;
+            var p = new Uint8Array([0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]), t = 4017, ac = 799, ah = 3406, ao = 2276, ar = 1567, ai = 3784, s = 5793, ad = 2896;
             function ak2(Q) {
               if (Q == null) Q = {};
               if (Q.w == null) Q.w = -1;
@@ -13227,8 +13227,8 @@ var require_UTIF = __commonJS({
                 b = d * ao + z * ah + 2048 >> 12;
                 d = d * ah - z * ao + 2048 >> 12;
                 z = b;
-                b = T * ac + U * t2 + 2048 >> 12;
-                T = T * t2 - U * ac + 2048 >> 12;
+                b = T * ac + U * t + 2048 >> 12;
+                T = T * t - U * ac + 2048 >> 12;
                 U = b;
                 f[r] = E + z;
                 f[r + 7] = E - z;
@@ -13291,8 +13291,8 @@ var require_UTIF = __commonJS({
                 b = d * ao + z * ah + 2048 >> 12;
                 d = d * ah - z * ao + 2048 >> 12;
                 z = b;
-                b = T * ac + U * t2 + 2048 >> 12;
-                T = T * t2 - U * ac + 2048 >> 12;
+                b = T * ac + U * t + 2048 >> 12;
+                T = T * t - U * ac + 2048 >> 12;
                 U = b;
                 J = E + z;
                 $ = E - z;
@@ -13737,14 +13737,14 @@ var require_UTIF = __commonJS({
             } };
             return ak2;
           })();
-          function a9(p, t2) {
-            return p[t2] << 24 >> 24;
+          function a9(p, t) {
+            return p[t] << 24 >> 24;
           }
-          function Z(p, t2) {
-            return p[t2] << 8 | p[t2 + 1];
+          function Z(p, t) {
+            return p[t] << 8 | p[t + 1];
           }
-          function am(p, t2) {
-            return (p[t2] << 24 | p[t2 + 1] << 16 | p[t2 + 2] << 8 | p[t2 + 3]) >>> 0;
+          function am(p, t) {
+            return (p[t] << 24 | p[t + 1] << 16 | p[t + 2] << 8 | p[t + 3]) >>> 0;
           }
           UTIF2.JpegDecoder = ak;
         })();
@@ -13905,9 +13905,9 @@ var require_UTIF = __commonJS({
             for (var y2 = 0; y2 < h; y2++) {
               var roff = toff + y2 * bpl;
               for (var x2 = 1; x2 < bpl; x2 += 2) {
-                var t2 = tgt[roff + x2];
+                var t = tgt[roff + x2];
                 tgt[roff + x2] = tgt[roff + x2 - 1];
-                tgt[roff + x2 - 1] = t2;
+                tgt[roff + x2 - 1] = t;
               }
             }
           if (img["t317"] && img["t317"][0] == 2) {
@@ -14111,61 +14111,61 @@ var require_UTIF = __commonJS({
         };
         UTIF2.decode._decodeVC5 = (function() {
           var x2 = [1, 0, 1, 0, 2, 2, 1, 1, 3, 7, 1, 2, 5, 25, 1, 3, 6, 48, 1, 4, 6, 54, 1, 5, 7, 111, 1, 8, 7, 99, 1, 6, 7, 105, 12, 0, 7, 107, 1, 7, 8, 209, 20, 0, 8, 212, 1, 9, 8, 220, 1, 10, 9, 393, 1, 11, 9, 394, 32, 0, 9, 416, 1, 12, 9, 427, 1, 13, 10, 887, 1, 18, 10, 784, 1, 14, 10, 790, 1, 15, 10, 835, 60, 0, 10, 852, 1, 16, 10, 885, 1, 17, 11, 1571, 1, 19, 11, 1668, 1, 20, 11, 1669, 100, 0, 11, 1707, 1, 21, 11, 1772, 1, 22, 12, 3547, 1, 29, 12, 3164, 1, 24, 12, 3166, 1, 25, 12, 3140, 1, 23, 12, 3413, 1, 26, 12, 3537, 1, 27, 12, 3539, 1, 28, 13, 7093, 1, 35, 13, 6283, 1, 30, 13, 6331, 1, 31, 13, 6335, 180, 0, 13, 6824, 1, 32, 13, 7072, 1, 33, 13, 7077, 320, 0, 13, 7076, 1, 34, 14, 12565, 1, 36, 14, 12661, 1, 37, 14, 12669, 1, 38, 14, 13651, 1, 39, 14, 14184, 1, 40, 15, 28295, 1, 46, 15, 28371, 1, 47, 15, 25320, 1, 42, 15, 25336, 1, 43, 15, 25128, 1, 41, 15, 27300, 1, 44, 15, 28293, 1, 45, 16, 50259, 1, 48, 16, 50643, 1, 49, 16, 50675, 1, 50, 16, 56740, 1, 53, 16, 56584, 1, 51, 16, 56588, 1, 52, 17, 113483, 1, 61, 17, 113482, 1, 60, 17, 101285, 1, 55, 17, 101349, 1, 56, 17, 109205, 1, 57, 17, 109207, 1, 58, 17, 100516, 1, 54, 17, 113171, 1, 59, 18, 202568, 1, 62, 18, 202696, 1, 63, 18, 218408, 1, 64, 18, 218412, 1, 65, 18, 226340, 1, 66, 18, 226356, 1, 67, 18, 226358, 1, 68, 19, 402068, 1, 69, 19, 405138, 1, 70, 19, 405394, 1, 71, 19, 436818, 1, 72, 19, 436826, 1, 73, 19, 452714, 1, 75, 19, 452718, 1, 76, 19, 452682, 1, 74, 20, 804138, 1, 77, 20, 810279, 1, 78, 20, 810790, 1, 79, 20, 873638, 1, 80, 20, 873654, 1, 81, 20, 905366, 1, 82, 20, 905430, 1, 83, 20, 905438, 1, 84, 21, 1608278, 1, 85, 21, 1620557, 1, 86, 21, 1621582, 1, 87, 21, 1621583, 1, 88, 21, 1747310, 1, 89, 21, 1810734, 1, 90, 21, 1810735, 1, 91, 21, 1810863, 1, 92, 21, 1810879, 1, 93, 22, 3621725, 1, 99, 22, 3621757, 1, 100, 22, 3241112, 1, 94, 22, 3494556, 1, 95, 22, 3494557, 1, 96, 22, 3494622, 1, 97, 22, 3494623, 1, 98, 23, 6482227, 1, 102, 23, 6433117, 1, 101, 23, 6989117, 1, 103, 23, 6989119, 1, 105, 23, 6989118, 1, 104, 23, 7243449, 1, 106, 23, 7243512, 1, 107, 24, 13978233, 1, 111, 24, 12964453, 1, 109, 24, 12866232, 1, 108, 24, 14486897, 1, 113, 24, 13978232, 1, 110, 24, 14486896, 1, 112, 24, 14487026, 1, 114, 24, 14487027, 1, 115, 25, 25732598, 1, 225, 25, 25732597, 1, 189, 25, 25732596, 1, 188, 25, 25732595, 1, 203, 25, 25732594, 1, 202, 25, 25732593, 1, 197, 25, 25732592, 1, 207, 25, 25732591, 1, 169, 25, 25732590, 1, 223, 25, 25732589, 1, 159, 25, 25732522, 1, 235, 25, 25732579, 1, 152, 25, 25732575, 1, 192, 25, 25732489, 1, 179, 25, 25732573, 1, 201, 25, 25732472, 1, 172, 25, 25732576, 1, 149, 25, 25732488, 1, 178, 25, 25732566, 1, 120, 25, 25732571, 1, 219, 25, 25732577, 1, 150, 25, 25732487, 1, 127, 25, 25732506, 1, 211, 25, 25732548, 1, 125, 25, 25732588, 1, 158, 25, 25732486, 1, 247, 25, 25732467, 1, 238, 25, 25732508, 1, 163, 25, 25732552, 1, 228, 25, 25732603, 1, 183, 25, 25732513, 1, 217, 25, 25732587, 1, 168, 25, 25732520, 1, 122, 25, 25732484, 1, 128, 25, 25732562, 1, 249, 25, 25732505, 1, 187, 25, 25732504, 1, 186, 25, 25732483, 1, 136, 25, 25928905, 1, 181, 25, 25732560, 1, 255, 25, 25732500, 1, 230, 25, 25732482, 1, 135, 25, 25732555, 1, 233, 25, 25732568, 1, 222, 25, 25732583, 1, 145, 25, 25732481, 1, 134, 25, 25732586, 1, 167, 25, 25732521, 1, 248, 25, 25732518, 1, 209, 25, 25732480, 1, 243, 25, 25732512, 1, 216, 25, 25732509, 1, 164, 25, 25732547, 1, 140, 25, 25732479, 1, 157, 25, 25732544, 1, 239, 25, 25732574, 1, 191, 25, 25732564, 1, 251, 25, 25732478, 1, 156, 25, 25732546, 1, 139, 25, 25732498, 1, 242, 25, 25732557, 1, 133, 25, 25732477, 1, 162, 25, 25732515, 1, 213, 25, 25732584, 1, 165, 25, 25732514, 1, 212, 25, 25732476, 1, 227, 25, 25732494, 1, 198, 25, 25732531, 1, 236, 25, 25732530, 1, 234, 25, 25732529, 1, 117, 25, 25732528, 1, 215, 25, 25732527, 1, 124, 25, 25732526, 1, 123, 25, 25732525, 1, 254, 25, 25732524, 1, 253, 25, 25732523, 1, 148, 25, 25732570, 1, 218, 25, 25732580, 1, 146, 25, 25732581, 1, 147, 25, 25732569, 1, 224, 25, 25732533, 1, 143, 25, 25732540, 1, 184, 25, 25732541, 1, 185, 25, 25732585, 1, 166, 25, 25732556, 1, 132, 25, 25732485, 1, 129, 25, 25732563, 1, 250, 25, 25732578, 1, 151, 25, 25732501, 1, 119, 25, 25732502, 1, 193, 25, 25732536, 1, 176, 25, 25732496, 1, 245, 25, 25732553, 1, 229, 25, 25732516, 1, 206, 25, 25732582, 1, 144, 25, 25732517, 1, 208, 25, 25732558, 1, 137, 25, 25732543, 1, 241, 25, 25732466, 1, 237, 25, 25732507, 1, 190, 25, 25732542, 1, 240, 25, 25732551, 1, 131, 25, 25732554, 1, 232, 25, 25732565, 1, 252, 25, 25732475, 1, 171, 25, 25732493, 1, 205, 25, 25732492, 1, 204, 25, 25732491, 1, 118, 25, 25732490, 1, 214, 25, 25928904, 1, 180, 25, 25732549, 1, 126, 25, 25732602, 1, 182, 25, 25732539, 1, 175, 25, 25732545, 1, 141, 25, 25732559, 1, 138, 25, 25732537, 1, 177, 25, 25732534, 1, 153, 25, 25732503, 1, 194, 25, 25732606, 1, 160, 25, 25732567, 1, 121, 25, 25732538, 1, 174, 25, 25732497, 1, 246, 25, 25732550, 1, 130, 25, 25732572, 1, 200, 25, 25732474, 1, 170, 25, 25732511, 1, 221, 25, 25732601, 1, 196, 25, 25732532, 1, 142, 25, 25732519, 1, 210, 25, 25732495, 1, 199, 25, 25732605, 1, 155, 25, 25732535, 1, 154, 25, 25732499, 1, 244, 25, 25732510, 1, 220, 25, 25732600, 1, 195, 25, 25732607, 1, 161, 25, 25732604, 1, 231, 25, 25732473, 1, 173, 25, 25732599, 1, 226, 26, 51465122, 1, 116, 26, 51465123, 0, 1], o, C, k, P = [3, 3, 3, 3, 2, 2, 2, 1, 1, 1], V = 24576, ar = 16384, H = 8192, az = ar | H;
-          function d(t2) {
-            var E = t2[1], h = t2[0][E >>> 3] >>> 7 - (E & 7) & 1;
-            t2[1]++;
+          function d(t) {
+            var E = t[1], h = t[0][E >>> 3] >>> 7 - (E & 7) & 1;
+            t[1]++;
             return h;
           }
-          function ag(t2, E) {
+          function ag(t, E) {
             if (o == null) {
               o = {};
               for (var h = 0; h < x2.length; h += 4) o[x2[h + 1]] = x2.slice(h, h + 4);
             }
-            var L = d(t2), g = o[L];
+            var L = d(t), g = o[L];
             while (g == null) {
-              L = L << 1 | d(t2);
+              L = L << 1 | d(t);
               g = o[L];
             }
             var n = g[3];
-            if (n != 0) n = d(t2) == 0 ? n : -n;
+            if (n != 0) n = d(t) == 0 ? n : -n;
             E[0] = g[2];
             E[1] = n;
           }
-          function m(t2, E) {
+          function m(t, E) {
             for (var h = 0; h < E; h++) {
-              if ((t2 & 1) == 1) t2++;
-              t2 = t2 >>> 1;
+              if ((t & 1) == 1) t++;
+              t = t >>> 1;
             }
-            return t2;
+            return t;
           }
-          function A(t2, E) {
-            return t2 >> E;
+          function A(t, E) {
+            return t >> E;
           }
-          function O(t2, E, h, L, g, n) {
-            E[h] = A(A(11 * t2[g] - 4 * t2[g + n] + t2[g + n + n] + 4, 3) + t2[L], 1);
-            E[h + n] = A(A(5 * t2[g] + 4 * t2[g + n] - t2[g + n + n] + 4, 3) - t2[L], 1);
+          function O(t, E, h, L, g, n) {
+            E[h] = A(A(11 * t[g] - 4 * t[g + n] + t[g + n + n] + 4, 3) + t[L], 1);
+            E[h + n] = A(A(5 * t[g] + 4 * t[g + n] - t[g + n + n] + 4, 3) - t[L], 1);
           }
-          function J(t2, E, h, L, g, n) {
-            var W = t2[g - n] - t2[g + n], j = t2[g], $ = t2[L];
+          function J(t, E, h, L, g, n) {
+            var W = t[g - n] - t[g + n], j = t[g], $ = t[L];
             E[h] = A(A(W + 4, 3) + j + $, 1);
             E[h + n] = A(A(-W + 4, 3) + j - $, 1);
           }
-          function y2(t2, E, h, L, g, n) {
-            E[h] = A(A(5 * t2[g] + 4 * t2[g - n] - t2[g - n - n] + 4, 3) + t2[L], 1);
-            E[h + n] = A(A(11 * t2[g] - 4 * t2[g - n] + t2[g - n - n] + 4, 3) - t2[L], 1);
+          function y2(t, E, h, L, g, n) {
+            E[h] = A(A(5 * t[g] + 4 * t[g - n] - t[g - n - n] + 4, 3) + t[L], 1);
+            E[h + n] = A(A(11 * t[g] - 4 * t[g - n] + t[g - n - n] + 4, 3) - t[L], 1);
           }
-          function q(t2) {
-            t2 = t2 < 0 ? 0 : t2 > 4095 ? 4095 : t2;
-            t2 = k[t2] >>> 2;
-            return t2;
+          function q(t) {
+            t = t < 0 ? 0 : t > 4095 ? 4095 : t;
+            t = k[t] >>> 2;
+            return t;
           }
-          function av(t2, E, h, L, g, n) {
+          function av(t, E, h, L, g, n) {
             L = new Uint16Array(L.buffer);
             var W = Date.now(), j = UTIF2._binBE, $ = E + h, r, u, X, I, ax, a3, R, ai, aa, ap, ah, ae, aD, al, i, aE, T, B;
             E += 4;
             var a5 = n[0] == 1;
             while (E < $) {
-              var S = j.readShort(t2, E), s = j.readUshort(t2, E + 2);
+              var S = j.readShort(t, E), s = j.readUshort(t, E + 2);
               E += 4;
               if (S == 12) r = s;
               else if (S == 20) u = s;
@@ -14214,10 +14214,10 @@ var require_UTIF = __commonJS({
                   if (I == 0) {
                     for (var b = 0; b < N; b++) for (var G = 0; G < v; G++) {
                       var c2 = E + (b * v + G) * 2;
-                      w[b * (u >>> 1) + G] = t2[c2] << 8 | t2[c2 + 1];
+                      w[b * (u >>> 1) + G] = t[c2] << 8 | t[c2 + 1];
                     }
                   } else {
-                    var a7 = [t2, E * 8], a4 = [], ay = 0, aw = v * N, f = [0, 0], Q = 0, s = 0;
+                    var a7 = [t, E * 8], a4 = [], ay = 0, aw = v * N, f = [0, 0], Q = 0, s = 0;
                     while (ay < aw) {
                       ag(a7, f);
                       Q = f[0];
@@ -14385,21 +14385,21 @@ var require_UTIF = __commonJS({
             return;
           }
           var pix = new Uint16Array(16);
-          var row, col, val, max2, min2, imax, imin, sh, bit, i, dp;
+          var row, col, val, max, min, imax, imin, sh, bit, i, dp;
           var data = new Uint8Array(raw_width + 1);
           for (row = 0; row < height; row++) {
             for (var j = 0; j < raw_width; j++) data[j] = inp[off++];
             for (dp = 0, col = 0; col < raw_width - 30; dp += 16) {
-              max2 = 2047 & (val = bin.readUint(data, dp));
-              min2 = 2047 & val >>> 11;
+              max = 2047 & (val = bin.readUint(data, dp));
+              min = 2047 & val >>> 11;
               imax = 15 & val >>> 22;
               imin = 15 & val >>> 26;
-              for (sh = 0; sh < 4 && 128 << sh <= max2 - min2; sh++) ;
+              for (sh = 0; sh < 4 && 128 << sh <= max - min; sh++) ;
               for (bit = 30, i = 0; i < 16; i++)
-                if (i == imax) pix[i] = max2;
-                else if (i == imin) pix[i] = min2;
+                if (i == imax) pix[i] = max;
+                else if (i == imin) pix[i] = min;
                 else {
-                  pix[i] = ((bin.readUshort(data, dp + (bit >> 3)) >>> (bit & 7) & 127) << sh) + min2;
+                  pix[i] = ((bin.readUshort(data, dp + (bit >> 3)) >>> (bit & 7) & 127) << sh) + min;
                   if (pix[i] > 2047) pix[i] = 2047;
                   bit += 7;
                 }
@@ -14633,10 +14633,10 @@ var require_UTIF = __commonJS({
             vpred[i][j] = bin.readShort(md, mdo);
             mdo += 2;
           }
-          var max2 = 1 << tiff_bps & 32767, step = 0;
+          var max = 1 << tiff_bps & 32767, step = 0;
           var csize = bin.readShort(md, mdo);
           mdo += 2;
-          if (csize > 1) step = Math.floor(max2 / (csize - 1));
+          if (csize > 1) step = Math.floor(max / (csize - 1));
           if (ver0 == 68 && ver1 == 32 && step > 0) split = bin.readShort(md, 562);
           var i;
           var row, col;
@@ -14695,15 +14695,15 @@ var require_UTIF = __commonJS({
           return c2;
         };
         UTIF2.decode._make_decoder = function(source) {
-          var max2, len, h, i, j;
+          var max, len, h, i, j;
           var huff = [];
-          for (max2 = 16; max2 != 0 && !source[max2]; max2--) ;
+          for (max = 16; max != 0 && !source[max]; max--) ;
           var si = 17;
-          huff[0] = max2;
-          for (h = len = 1; len <= max2; len++)
+          huff[0] = max;
+          for (h = len = 1; len <= max; len++)
             for (i = 0; i < source[len]; i++, ++si)
-              for (j = 0; j < 1 << max2 - len; j++)
-                if (h <= 1 << max2)
+              for (j = 0; j < 1 << max - len; j++)
+                if (h <= 1 << max)
                   huff[h++] = len << 8 | source[si];
           return huff;
         };
@@ -15232,7 +15232,7 @@ var require_UTIF = __commonJS({
             U = S;
             Z = a;
             u = n;
-            var B = A + j << 3, _ = 0, t2 = 0;
+            var B = A + j << 3, _ = 0, t = 0;
             m(q);
             i(q);
             while (e < B && (_ = O()) != N) {
@@ -15244,13 +15244,13 @@ var require_UTIF = __commonJS({
               } else {
                 if (_ < K) {
                   D(_);
-                  L(t2, _);
+                  L(t, _);
                 } else {
-                  L(t2, t2);
+                  L(t, t);
                   D(K - 1);
                 }
               }
-              t2 = _;
+              t = _;
             }
             return u;
           };
@@ -15542,15 +15542,15 @@ var require_UTIF = __commonJS({
               }
             } else if (bps == 32) {
               var ndt = new Float32Array(data.buffer);
-              var min2 = 0;
-              for (var i = 0; i < ndt.length; i++) min2 = Math.min(min2, ndt[i]);
-              if (min2 < 0) for (var i = 0; i < data.length; i += 4) {
-                var t2 = data[i];
+              var min = 0;
+              for (var i = 0; i < ndt.length; i++) min = Math.min(min, ndt[i]);
+              if (min < 0) for (var i = 0; i < data.length; i += 4) {
+                var t = data[i];
                 data[i] = data[i + 3];
-                data[i + 3] = t2;
-                t2 = data[i + 1];
+                data[i + 3] = t;
+                t = data[i + 1];
                 data[i + 1] = data[i + 2];
-                data[i + 2] = t2;
+                data[i + 2] = t;
               }
               var pmap = [];
               for (var i = 0; i < 65536; i++) pmap.push(gamma(i / 65535));
@@ -15934,8 +15934,8 @@ var require_UTIF = __commonJS({
                 for (var Y2 = 0; Y2 < w; Y2++) h[s + _ + Y2] = a2(f[Y2], I);
               }
               if (I.e != 0 && T % I.e == 0 && G != 0) {
-                var F = I.a, t2 = I.data;
-                while (t2[F] != 255 || !(208 <= t2[F + 1] && t2[F + 1] <= 215)) F--;
+                var F = I.a, t = I.data;
+                while (t[F] != 255 || !(208 <= t[F + 1] && t[F + 1] <= 215)) F--;
                 I.a = F + 2;
                 I.f = 0;
                 I.b = 0;
@@ -15958,9 +15958,9 @@ var require_UTIF = __commonJS({
             for (var E = 0; E < w; E++) {
               var s = 32768, _ = 32768;
               for (var Y2 = 0; Y2 < V; Y2 += 2) {
-                var F = g(f, I), t2 = g(f, I);
+                var F = g(f, I), t = g(f, I);
                 if (F != 0) s += o(F, I);
-                if (t2 != 0) _ += o(t2, I);
+                if (t != 0) _ += o(t, I);
                 h[E * V + Y2] = s & 65535;
                 h[E * V + Y2 + 1] = _ & 65535;
               }
@@ -15983,17 +15983,17 @@ var require_UTIF = __commonJS({
                 s = m();
                 _ = m();
                 E = l();
-                for (var t2 = 0; t2 < E; t2++) {
+                for (var t = 0; t < E; t++) {
                   var a = l(), J = l(), r = l();
                   if (r != 0) throw "e";
-                  V[a] = [t2, J >> 4, J & 15];
+                  V[a] = [t, J >> 4, J & 15];
                 }
               } else if (Y2 == 65476) {
                 var a3 = O + F - 2;
                 while (O < a3) a0(T);
               } else if (Y2 == 65498) {
                 O++;
-                for (var t2 = 0; t2 < E; t2++) {
+                for (var t = 0; t < E; t++) {
                   var a5 = l(), v = V[a5];
                   G[v[0]] = T[l() >>> 4];
                   x2[v[0]] = v.slice(1);
@@ -16011,8 +16011,8 @@ var require_UTIF = __commonJS({
             if (M.c) a1($, _ * E, M, G[0], s);
             else {
               var c2 = [], p = 0, D = 0;
-              for (var t2 = 0; t2 < E; t2++) {
-                var N = x2[t2], S = N[0], K = N[1];
+              for (var t = 0; t < E; t++) {
+                var N = x2[t], S = N[0], K = N[1];
                 if (S > p) p = S;
                 if (K > D) D = K;
                 c2.push(S * K);
@@ -16021,38 +16021,38 @@ var require_UTIF = __commonJS({
                 if (E != 3 || c2[1] != 1 || c2[2] != 1) throw "e";
                 if (p != 2 || D != 1 && D != 2) throw "e";
                 var u = [], Z = 0;
-                for (var t2 = 0; t2 < E; t2++) {
-                  for (var R = 0; R < c2[t2]; R++) u.push(G[t2]);
-                  Z += c2[t2];
+                for (var t = 0; t < E; t++) {
+                  for (var R = 0; R < c2[t]; R++) u.push(G[t]);
+                  Z += c2[t];
                 }
                 var B = _ / p, e = s / D, d = B * e;
                 X($, B * Z, M, u, Z, e);
                 j($, I, B, e, Z - 2, Z, Z, f);
                 var A = new Uint16Array(d * c2[0]);
                 if (p == 2 && D == 2) {
-                  for (var t2 = 0; t2 < d; t2++) {
-                    A[4 * t2] = $[6 * t2];
-                    A[4 * t2 + 1] = $[6 * t2 + 1];
-                    A[4 * t2 + 2] = $[6 * t2 + 2];
-                    A[4 * t2 + 3] = $[6 * t2 + 3];
+                  for (var t = 0; t < d; t++) {
+                    A[4 * t] = $[6 * t];
+                    A[4 * t + 1] = $[6 * t + 1];
+                    A[4 * t + 2] = $[6 * t + 2];
+                    A[4 * t + 3] = $[6 * t + 3];
                   }
                   j(A, I, B * 4, e, 0, 1, 1, f);
-                  for (var t2 = 0; t2 < d; t2++) {
-                    $[6 * t2] = A[4 * t2];
-                    $[6 * t2 + 1] = A[4 * t2 + 1];
-                    $[6 * t2 + 2] = A[4 * t2 + 2];
-                    $[6 * t2 + 3] = A[4 * t2 + 3];
+                  for (var t = 0; t < d; t++) {
+                    $[6 * t] = A[4 * t];
+                    $[6 * t + 1] = A[4 * t + 1];
+                    $[6 * t + 2] = A[4 * t + 2];
+                    $[6 * t + 3] = A[4 * t + 3];
                   }
                 }
                 if (p == 2 && D == 1) {
-                  for (var t2 = 0; t2 < d; t2++) {
-                    A[2 * t2] = $[4 * t2];
-                    A[2 * t2 + 1] = $[4 * t2 + 1];
+                  for (var t = 0; t < d; t++) {
+                    A[2 * t] = $[4 * t];
+                    A[2 * t + 1] = $[4 * t + 1];
                   }
                   j(A, I, B * 2, e, 0, 1, 1, f);
-                  for (var t2 = 0; t2 < d; t2++) {
-                    $[4 * t2] = A[2 * t2];
-                    $[4 * t2 + 1] = A[2 * t2 + 1];
+                  for (var t = 0; t < d; t++) {
+                    $[4 * t] = A[2 * t];
+                    $[4 * t + 1] = A[2 * t + 1];
                   }
                 }
                 var n = $.slice(0);
@@ -16090,11 +16090,11 @@ var require_UTIF = __commonJS({
             for (var _ = w; _ < x2; _++) h[_] += 1 << E - 1;
             for (var Y2 = G; Y2 < s; Y2 += G) for (var _ = w; _ < x2; _++) h[Y2 + _] += h[Y2 + _ - G];
             for (var F = 1; F < f; F++) {
-              var t2 = F * s;
-              for (var _ = w; _ < x2; _++) h[t2 + _] += h[t2 + _ - s];
+              var t = F * s;
+              for (var _ = w; _ < x2; _++) h[t + _] += h[t + _ - s];
               for (var Y2 = G; Y2 < s; Y2 += G) {
                 for (var _ = w; _ < x2; _++) {
-                  var a = t2 + Y2 + _, J = a - s, r = h[a - G], Q = 0;
+                  var a = t + Y2 + _, J = a - s, r = h[a - G], Q = 0;
                   if (V == 0) Q = 0;
                   else if (V == 1) Q = r;
                   else if (V == 2) Q = h[J];
@@ -16113,8 +16113,8 @@ var require_UTIF = __commonJS({
         })();
         (function() {
           var G = 0, F = 1, i = 2, b = 3, J = 4, N = 5, E = 6, s = 7, c2 = 8, T = 9, a3 = 10, f = 11, q = 12, M = 13, m = 14, x2 = 15, L = 16, $ = 17, p = 18;
-          function a5(t2) {
-            var Z = UTIF2._binBE.readUshort, u = { b: Z(t2, 0), i: t2[2], C: t2[3], u: t2[4], q: Z(t2, 5), k: Z(t2, 7), e: Z(t2, 9), l: Z(t2, 11), s: t2[13], d: Z(t2, 14) };
+          function a5(t) {
+            var Z = UTIF2._binBE.readUshort, u = { b: Z(t, 0), i: t[2], C: t[3], u: t[4], q: Z(t, 5), k: Z(t, 7), e: Z(t, 9), l: Z(t, 11), s: t[13], d: Z(t, 14) };
             if (u.b != 18771 || u.i > 1 || u.q < 6 || u.q % 6 || u.e < 768 || u.e % 24 || u.l != 768 || u.k < u.l || u.k % u.l || u.k - u.e >= u.l || u.s > 16 || u.s != u.k / u.l || u.s != Math.ceil(u.e / u.l) || u.d != u.q / 6 || u.u != 12 && u.u != 14 && u.u != 16 || u.C != 16 && u.C != 0) {
               throw "Invalid data";
             }
@@ -16129,40 +16129,40 @@ var require_UTIF = __commonJS({
             u.n = 4 * u.u;
             return u;
           }
-          function a7(t2, Z) {
+          function a7(t, Z) {
             var u = new Array(Z.s), e = 4 * Z.s, Q = 16 + e;
             if (e & 12) Q += 16 - (e & 12);
             for (var V = 0, O = 16; V < Z.s; O += 4) {
-              var o = UTIF2._binBE.readUint(t2, O);
-              u[V] = t2.slice(Q, Q + o);
+              var o = UTIF2._binBE.readUint(t, O);
+              u[V] = t.slice(Q, Q + o);
               u[V].j = 0;
               u[V].a = 0;
               Q += o;
               V++;
             }
-            if (Q != t2.length) throw "Invalid data";
+            if (Q != t.length) throw "Invalid data";
             return u;
           }
-          function a6(t2, Z) {
+          function a6(t, Z) {
             for (var u = -Z[4], e = 0; u <= Z[4]; e++, u++) {
-              t2[e] = u <= -Z[3] ? -4 : u <= -Z[2] ? -3 : u <= -Z[1] ? -2 : u < -Z[0] ? -1 : u <= Z[0] ? 0 : u < Z[1] ? 1 : u < Z[2] ? 2 : u < Z[3] ? 3 : 4;
+              t[e] = u <= -Z[3] ? -4 : u <= -Z[2] ? -3 : u <= -Z[1] ? -2 : u < -Z[0] ? -1 : u <= Z[0] ? 0 : u < Z[1] ? 1 : u < Z[2] ? 2 : u < Z[3] ? 3 : 4;
             }
           }
-          function a1(t2, Z, u) {
+          function a1(t, Z, u) {
             var e = [Z, 3 * Z + 18, 5 * Z + 67, 7 * Z + 276, u];
-            t2.o = Z;
-            t2.w = (e[4] + 2 * Z) / (2 * Z + 1) + 1 | 0;
-            t2.v = Math.ceil(Math.log2(t2.w));
-            t2.t = 9;
-            a6(t2.c, e);
+            t.o = Z;
+            t.w = (e[4] + 2 * Z) / (2 * Z + 1) + 1 | 0;
+            t.v = Math.ceil(Math.log2(t.w));
+            t.t = 9;
+            a6(t.c, e);
           }
-          function a2(t2) {
-            var Z = { c: new Int8Array(2 << t2.u) };
-            a1(Z, 0, t2.g);
+          function a2(t) {
+            var Z = { c: new Int8Array(2 << t.u) };
+            a1(Z, 0, t.g);
             return Z;
           }
-          function D(t2) {
-            var Z = [[], [], []], u = Math.max(2, t2.w + 32 >>> 6);
+          function D(t) {
+            var Z = [[], [], []], u = Math.max(2, t.w + 32 >>> 6);
             for (var e = 0; e < 3; e++) {
               for (var Q = 0; Q < 41; Q++) {
                 Z[e][Q] = [u, 1];
@@ -16170,44 +16170,44 @@ var require_UTIF = __commonJS({
             }
             return Z;
           }
-          function a4(t2) {
+          function a4(t) {
             for (var Z = -1, u = 0; !u; Z++) {
-              u = t2[t2.j] >>> 7 - t2.a & 1;
-              t2.a++;
-              t2.a &= 7;
-              if (!t2.a) t2.j++;
+              u = t[t.j] >>> 7 - t.a & 1;
+              t.a++;
+              t.a &= 7;
+              if (!t.a) t.j++;
             }
             return Z;
           }
-          function K(t2, Z) {
-            var u = 0, e = 8 - t2.a, Q = t2.j, V = t2.a;
+          function K(t, Z) {
+            var u = 0, e = 8 - t.a, Q = t.j, V = t.a;
             if (Z) {
               if (Z >= e) {
                 do {
                   u <<= e;
                   Z -= e;
-                  u |= t2[t2.j] & (1 << e) - 1;
-                  t2.j++;
+                  u |= t[t.j] & (1 << e) - 1;
+                  t.j++;
                   e = 8;
                 } while (Z >= 8);
               }
               if (Z) {
                 u <<= Z;
                 e -= Z;
-                u |= t2[t2.j] >>> e & (1 << Z) - 1;
+                u |= t[t.j] >>> e & (1 << Z) - 1;
               }
-              t2.a = 8 - e;
+              t.a = 8 - e;
             }
             return u;
           }
-          function a0(t2, Z) {
+          function a0(t, Z) {
             var u = 0;
-            if (Z < t2) {
-              while (u <= 14 && Z << ++u < t2) ;
+            if (Z < t) {
+              while (u <= 14 && Z << ++u < t) ;
             }
             return u;
           }
-          function r(t2, Z, u, e, Q, V, O, o) {
+          function r(t, Z, u, e, Q, V, O, o) {
             if (o == null) o = 0;
             var X = V + 1, k = X % 2, j = 0, I = 0, a = 0, l, R, w = e[Q], S = e[Q - 1], H = e[Q - 2][X], g = S[X - 1], Y2 = S[X], P = S[X + 1], A = w[X - 1], v = w[X + 1], y2 = Math.abs, d, C, n, h;
             if (k) {
@@ -16222,14 +16222,14 @@ var require_UTIF = __commonJS({
                 w[X] = h;
                 return;
               }
-              l = Z.t * Z.c[t2.g + Y2 - H] + Z.c[t2.g + g - Y2];
+              l = Z.t * Z.c[t.g + Y2 - H] + Z.c[t.g + g - Y2];
             } else {
               h = Y2 > g && Y2 > P || Y2 < g && Y2 < P ? v + A + 2 * Y2 >>> 2 : A + v >>> 1;
-              l = Z.t * Z.c[t2.g + Y2 - g] + Z.c[t2.g + g - A];
+              l = Z.t * Z.c[t.g + Y2 - g] + Z.c[t.g + g - A];
             }
             R = y2(l);
             var W = a4(u);
-            if (W < t2.n - Z.v - 1) {
+            if (W < t.n - Z.v - 1) {
               var z = a0(O[R][0], O[R][1]);
               a = K(u, z) + (W << z);
             } else {
@@ -16237,58 +16237,58 @@ var require_UTIF = __commonJS({
             }
             a = a & 1 ? -1 - (a >>> 1) : a >>> 1;
             O[R][0] += y2(a);
-            if (O[R][1] == t2.f) {
+            if (O[R][1] == t.f) {
               O[R][0] >>>= 1;
               O[R][1] >>>= 1;
             }
             O[R][1]++;
             h = l < 0 ? h - a : h + a;
-            if (t2.i) {
+            if (t.i) {
               if (h < 0) h += Z.w;
-              else if (h > t2.g) h -= Z.w;
+              else if (h > t.g) h -= Z.w;
             }
-            w[X] = h >= 0 ? Math.min(h, t2.g) : 0;
+            w[X] = h >= 0 ? Math.min(h, t.g) : 0;
           }
-          function U(t2, Z, u) {
-            var e = t2[0].length;
+          function U(t, Z, u) {
+            var e = t[0].length;
             for (var Q = Z; Q <= u; Q++) {
-              t2[Q][0] = t2[Q - 1][1];
-              t2[Q][e - 1] = t2[Q - 1][e - 2];
+              t[Q][0] = t[Q - 1][1];
+              t[Q][e - 1] = t[Q - 1][e - 2];
             }
           }
-          function B(t2) {
-            U(t2, s, q);
-            U(t2, i, J);
-            U(t2, x2, $);
+          function B(t) {
+            U(t, s, q);
+            U(t, i, J);
+            U(t, x2, $);
           }
-          function _(t2, Z, u, e, Q, V, O, o, X, k, j, I, a) {
+          function _(t, Z, u, e, Q, V, O, o, X, k, j, I, a) {
             var l = 0, R = 1, w = Q < M && Q > J;
-            while (R < t2.m) {
-              if (l < t2.m) {
-                r(t2, Z, u, e, Q, l, O[X], t2.h && (w && k || !w && (j || (l & I) == a)));
-                r(t2, Z, u, e, V, l, O[X], t2.h && (!w && k || w && (j || (l & I) == a)));
+            while (R < t.m) {
+              if (l < t.m) {
+                r(t, Z, u, e, Q, l, O[X], t.h && (w && k || !w && (j || (l & I) == a)));
+                r(t, Z, u, e, V, l, O[X], t.h && (!w && k || w && (j || (l & I) == a)));
                 l += 2;
               }
               if (l > 8) {
-                r(t2, Z, u, e, Q, R, o[X]);
-                r(t2, Z, u, e, V, R, o[X]);
+                r(t, Z, u, e, Q, R, o[X]);
+                r(t, Z, u, e, V, R, o[X]);
                 R += 2;
               }
             }
             B(e);
           }
-          function a8(t2, Z, u, e, Q, V) {
-            _(t2, Z, u, e, i, s, Q, V, 0, 0, 1, 0, 8);
-            _(t2, Z, u, e, c2, x2, Q, V, 1, 0, 1, 0, 8);
-            _(t2, Z, u, e, b, T, Q, V, 2, 1, 0, 3, 0);
-            _(t2, Z, u, e, a3, L, Q, V, 0, 0, 0, 3, 2);
-            _(t2, Z, u, e, J, f, Q, V, 1, 0, 0, 3, 2);
-            _(t2, Z, u, e, q, $, Q, V, 2, 1, 0, 3, 0);
+          function a8(t, Z, u, e, Q, V) {
+            _(t, Z, u, e, i, s, Q, V, 0, 0, 1, 0, 8);
+            _(t, Z, u, e, c2, x2, Q, V, 1, 0, 1, 0, 8);
+            _(t, Z, u, e, b, T, Q, V, 2, 1, 0, 3, 0);
+            _(t, Z, u, e, a3, L, Q, V, 0, 0, 0, 3, 2);
+            _(t, Z, u, e, J, f, Q, V, 1, 0, 0, 3, 2);
+            _(t, Z, u, e, q, $, Q, V, 2, 1, 0, 3, 0);
           }
-          function a9(t2, Z, u, e, Q, V) {
-            var O = V.length, o = t2.l;
-            if (Q + 1 == t2.s) o = t2.e - Q * t2.l;
-            var X = 6 * t2.e * e + Q * t2.l;
+          function a9(t, Z, u, e, Q, V) {
+            var O = V.length, o = t.l;
+            if (Q + 1 == t.s) o = t.e - Q * t.l;
+            var X = 6 * t.e * e + Q * t.l;
             for (var k = 0; k < 6; k++) {
               for (var j = 0; j < o; j++) {
                 var I = V[k % O][j % O], a;
@@ -16299,14 +16299,14 @@ var require_UTIF = __commonJS({
                 } else {
                   a = s + k;
                 }
-                var l = t2.h ? (j * 2 / 3 & 2147483646 | j % 3 & 1) + (j % 3 >>> 1) : j >>> 1;
+                var l = t.h ? (j * 2 / 3 & 2147483646 | j % 3 & 1) + (j % 3 >>> 1) : j >>> 1;
                 Z[X + j] = u[a][l + 1];
               }
-              X += t2.e;
+              X += t.e;
             }
           }
-          UTIF2._decompressRAF = function(t2, Z) {
-            var u = a5(t2), e = a7(t2, u), Q = a2(u), V = new Int16Array(u.e * u.q);
+          UTIF2._decompressRAF = function(t, Z) {
+            var u = a5(t), e = a7(t, u), Q = a2(u), V = new Int16Array(u.e * u.q);
             if (Z == null) {
               Z = u.h ? [[1, 1, 0, 1, 1, 2], [1, 1, 2, 1, 1, 0], [2, 0, 1, 0, 2, 1], [1, 1, 2, 1, 1, 0], [1, 1, 0, 1, 1, 2], [0, 2, 1, 2, 0, 1]] : [[0, 1], [3, 2]];
             }
@@ -16763,8 +16763,8 @@ var require_lib = __commonJS({
         }
         return str;
       }
-      static inRange(a, min2, max2) {
-        return min2 <= a && a <= max2;
+      static inRange(a, min, max) {
+        return min <= a && a <= max;
       }
       static codePointToString(cp) {
         if (cp <= 65535) {
@@ -18877,8 +18877,8 @@ var require_Mime = __commonJS({
     }
     Mime.prototype.define = function(typeMap, force) {
       for (let type in typeMap) {
-        let extensions = typeMap[type].map(function(t2) {
-          return t2.toLowerCase();
+        let extensions = typeMap[type].map(function(t) {
+          return t.toLowerCase();
         });
         type = type.toLowerCase();
         for (let i = 0; i < extensions.length; i++) {
@@ -19272,23 +19272,23 @@ var require_simplify = __commonJS({
     ];
     module2.exports = {
       castDegreeValues: function(getTagValue, setTagValue) {
-        degreeTags.forEach(function(t2) {
-          var degreeVal = getTagValue(t2);
+        degreeTags.forEach(function(t) {
+          var degreeVal = getTagValue(t);
           if (degreeVal) {
-            var degreeRef = getTagValue({ section: t2.section, type: t2.refType, name: t2.refName });
-            var degreeNumRef = degreeRef === t2.posVal ? 1 : -1;
+            var degreeRef = getTagValue({ section: t.section, type: t.refType, name: t.refName });
+            var degreeNumRef = degreeRef === t.posVal ? 1 : -1;
             var degree = (degreeVal[0] + degreeVal[1] / 60 + degreeVal[2] / 3600) * degreeNumRef;
-            setTagValue(t2, degree);
+            setTagValue(t, degree);
           }
         });
       },
       castDateValues: function(getTagValue, setTagValue) {
-        dateTags.forEach(function(t2) {
-          var dateStrVal = getTagValue(t2);
+        dateTags.forEach(function(t) {
+          var dateStrVal = getTagValue(t);
           if (dateStrVal) {
             var timestamp = date.parseExifDate(dateStrVal);
             if (typeof timestamp !== "undefined") {
-              setTagValue(t2, timestamp);
+              setTagValue(t, timestamp);
             }
           }
         });
@@ -19883,26 +19883,26 @@ var require_parser2 = __commonJS({
         }
         if (flags.resolveTagNames) {
           tags = {};
-          getTagValue = function(t2) {
-            return tags[t2.name];
+          getTagValue = function(t) {
+            return tags[t.name];
           };
-          setTagValue = function(t2, value) {
-            tags[t2.name] = value;
+          setTagValue = function(t, value) {
+            tags[t.name] = value;
           };
         } else {
           tags = [];
-          getTagValue = function(t2) {
+          getTagValue = function(t) {
             var i;
             for (i = 0; i < tags.length; ++i) {
-              if (tags[i].type === t2.type && tags[i].section === t2.section) {
+              if (tags[i].type === t.type && tags[i].section === t.section) {
                 return tags.value;
               }
             }
           };
-          setTagValue = function(t2, value) {
+          setTagValue = function(t, value) {
             var i;
             for (i = 0; i < tags.length; ++i) {
-              if (tags[i].type === t2.type && tags[i].section === t2.section) {
+              if (tags[i].type === t.type && tags[i].section === t.section) {
                 tags.value = value;
                 return;
               }
@@ -25117,21 +25117,21 @@ var require_sax = __commonJS({
           emitNode(parser, "onscript", parser.script);
           parser.script = "";
         }
-        var t2 = parser.tags.length;
+        var t = parser.tags.length;
         var tagName = parser.tagName;
         if (!parser.strict) {
           tagName = tagName[parser.looseCase]();
         }
         var closeTo = tagName;
-        while (t2--) {
-          var close = parser.tags[t2];
+        while (t--) {
+          var close = parser.tags[t];
           if (close.name !== closeTo) {
             strictFail(parser, "Unexpected close tag");
           } else {
             break;
           }
         }
-        if (t2 < 0) {
+        if (t < 0) {
           strictFail(parser, "Unmatched closing tag: " + parser.tagName);
           parser.textNode += "</" + parser.tagName + ">";
           parser.state = S.TEXT;
@@ -25139,7 +25139,7 @@ var require_sax = __commonJS({
         }
         parser.tagName = tagName;
         var s2 = parser.tags.length;
-        while (s2-- > t2) {
+        while (s2-- > t) {
           var tag = parser.tag = parser.tags.pop();
           parser.tagName = parser.tag.name;
           emitNode(parser, "onclosetag", parser.tagName);
@@ -25155,7 +25155,7 @@ var require_sax = __commonJS({
             });
           }
         }
-        if (t2 === 0) parser.closedRoot = true;
+        if (t === 0) parser.closedRoot = true;
         parser.tagName = parser.attribValue = parser.attribName = "";
         parser.attribList.length = 0;
         parser.state = S.TEXT;
@@ -26495,23 +26495,23 @@ var require_simpleXmlToJson_min = __commonJS({
     function e(e2) {
       return e2 && e2.__esModule && Object.prototype.hasOwnProperty.call(e2, "default") ? e2.default : e2;
     }
-    var t2 = (e2) => {
+    var t = (e2) => {
       if (!e2) return null;
       const n2 = {};
       switch (e2.type) {
         case "ELEMENT": {
           let a2 = {};
-          const u2 = s(e2.value.attributes), c3 = t2(e2.value.children);
+          const u2 = s(e2.value.attributes), c3 = t(e2.value.children);
           if (u2 && (a2 = Object.assign(a2, u2)), c3) {
-            const t3 = r(e2.value.children);
-            a2 = Object.assign(a2, t3);
+            const t2 = r(e2.value.children);
+            a2 = Object.assign(a2, t2);
           }
           n2[e2.value.type] = a2;
           break;
         }
         case "ATTRIBUTE": {
-          const t3 = e2.value;
-          n2[t3.name] = t3.value;
+          const t2 = e2.value;
+          n2[t2.name] = t2.value;
           break;
         }
         case "CONTENT":
@@ -26519,56 +26519,56 @@ var require_simpleXmlToJson_min = __commonJS({
       }
       return n2;
     };
-    var r = (e2) => e2 && Array.isArray(e2) && 0 !== e2.length ? n(e2) ? { content: e2[0].value } : { children: e2.map(t2) } : null;
+    var r = (e2) => e2 && Array.isArray(e2) && 0 !== e2.length ? n(e2) ? { content: e2[0].value } : { children: e2.map(t) } : null;
     var n = (e2) => e2 && Array.isArray(e2) && 1 === e2.length && "CONTENT" === e2[0].type;
     var s = (e2) => {
       if (e2 && Array.isArray(e2)) {
-        return e2.map(t2).reduce(((e3, t3) => Object.assign(e3, t3)), {});
+        return e2.map(t).reduce(((e3, t2) => Object.assign(e3, t2)), {});
       }
       return null;
     };
-    var a = { convert: (e2) => t2(e2.value.children[0]) };
-    var u = { Token: (e2, t3) => ({ type: e2, value: t3 }) };
+    var a = { convert: (e2) => t(e2.value.children[0]) };
+    var u = { Token: (e2, t2) => ({ type: e2, value: t2 }) };
     var { Token: c2 } = u;
     var l = c2("EOF");
     var E = (e2) => " " === e2 || "\n" === e2 || "\r" === e2 || "	" === e2;
     var o = (e2) => e2.replace(/'/g, "'");
     var T = { createLexer: function(e2) {
-      let t3 = null, r2 = ((e3) => {
-        let t4 = 0;
-        for (; t4 < e3.length && E(e3[t4]); ) t4++;
-        return ((e4, t5) => {
-          if (e4.startsWith("<?xml", t5)) {
+      let t2 = null, r2 = ((e3) => {
+        let t3 = 0;
+        for (; t3 < e3.length && E(e3[t3]); ) t3++;
+        return ((e4, t4) => {
+          if (e4.startsWith("<?xml", t4)) {
             const r3 = e4.length;
-            for (; t5 < r3; ) if ("?" !== e4[t5]) t5++;
+            for (; t4 < r3; ) if ("?" !== e4[t4]) t4++;
             else {
-              if (">" === e4[t5 + 1]) return t5 + 2;
-              t5++;
+              if (">" === e4[t4 + 1]) return t4 + 2;
+              t4++;
             }
           }
-          return t5;
-        })(e3, t4);
+          return t4;
+        })(e3, t3);
       })(e2), n2 = [];
-      const s2 = () => e2[r2], a2 = () => t3 !== l && r2 < e2.length, u2 = (e3) => '"' === e3 || "'" === e3, T2 = () => {
+      const s2 = () => e2[r2], a2 = () => t2 !== l && r2 < e2.length, u2 = (e3) => '"' === e3 || "'" === e3, T2 = () => {
         for (; a2() && E(e2[r2]); ) r2++;
-      }, i2 = (t4) => {
+      }, i2 = (t3) => {
         if (a2()) {
           if ("<" === e2[r2]) {
-            let t5 = "<";
-            return r2++, a2() && "/" === e2[r2] ? (r2++, t5 = "</") : a2() && "!" === e2[r2] && "-" === e2[r2 + 1] && "-" === e2[r2 + 2] && (r2++, r2++, r2++, t5 = "<!--"), t5;
+            let t4 = "<";
+            return r2++, a2() && "/" === e2[r2] ? (r2++, t4 = "</") : a2() && "!" === e2[r2] && "-" === e2[r2 + 1] && "-" === e2[r2 + 2] && (r2++, r2++, r2++, t4 = "<!--"), t4;
           }
           if ("/" === s2()) {
             let e3 = "/";
             return r2++, a2() && ">" === s2() && (r2++, e3 = "/>"), e3;
           }
           if ("=" === e2[r2] || ">" === e2[r2]) {
-            const t5 = e2[r2];
-            return r2++, t5;
+            const t4 = e2[r2];
+            return r2++, t4;
           }
         }
-        return p2(!!t4);
-      }, p2 = (t4) => {
-        const n3 = t4 ? /[^>=<]/u : /[a-zA-Z0-9_:-]/;
+        return p2(!!t3);
+      }, p2 = (t3) => {
+        const n3 = t3 ? /[^>=<]/u : /[a-zA-Z0-9_:-]/;
         let s3 = r2;
         for (; a2() && e2[r2].match(n3); ) r2++;
         return o(e2.substring(s3, r2));
@@ -26576,89 +26576,89 @@ var require_simpleXmlToJson_min = __commonJS({
         const E2 = r2;
         T2();
         const f2 = r2 - E2;
-        if (a2()) if (t3 && "OPEN_BRACKET" === t3.type) {
+        if (a2()) if (t2 && "OPEN_BRACKET" === t2.type) {
           T2();
           const e3 = i2(false);
-          t3 = c2("ELEMENT_TYPE", e3), n2.push(e3);
-        } else if (t3 && "ASSIGN" === t3.type) {
+          t2 = c2("ELEMENT_TYPE", e3), n2.push(e3);
+        } else if (t2 && "ASSIGN" === t2.type) {
           a2() && u2(s2()) && r2++;
           const n3 = e2[r2 - 1];
           let l2 = r2;
           for (; a2() && s2() !== n3; ) r2++;
           const E3 = o(e2.substring(l2, r2));
-          r2++, t3 = c2("ATTRIB_VALUE", E3);
+          r2++, t2 = c2("ATTRIB_VALUE", E3);
         } else {
           T2();
           let u3 = i2(true);
           switch (u3) {
             case "=":
-              t3 = "ATTRIB_NAME" === t3.type ? c2("ASSIGN") : c2("CONTENT", u3);
+              t2 = "ATTRIB_NAME" === t2.type ? c2("ASSIGN") : c2("CONTENT", u3);
               break;
             case "</": {
               const s3 = r2;
               for (; ">" !== e2[r2]; ) r2++;
-              t3 = c2("CLOSE_ELEMENT", e2.substring(s3, r2)), r2++, n2.pop();
+              t2 = c2("CLOSE_ELEMENT", e2.substring(s3, r2)), r2++, n2.pop();
               break;
             }
             case "/>": {
               const e3 = n2.pop();
-              t3 = c2("CLOSE_ELEMENT", e3);
+              t2 = c2("CLOSE_ELEMENT", e3);
               break;
             }
             case "<!--": {
-              const t4 = ["!", "-", "-"];
-              for (; a2() && (">" !== t4[2] || "-" !== t4[1] || "-" !== t4[0]); ) t4.shift(), t4.push(e2[r2]), r2++;
+              const t3 = ["!", "-", "-"];
+              for (; a2() && (">" !== t3[2] || "-" !== t3[1] || "-" !== t3[0]); ) t3.shift(), t3.push(e2[r2]), r2++;
               return N2();
             }
             case ">":
-              t3 = c2("CLOSE_BRACKET");
+              t2 = c2("CLOSE_BRACKET");
               break;
             case "<":
-              t3 = c2("OPEN_BRACKET");
+              t2 = c2("OPEN_BRACKET");
               break;
             default:
               if (u3 && u3.length > 0) {
-                if ("CLOSE_BRACKET" === t3.type) {
+                if ("CLOSE_BRACKET" === t2.type) {
                   let e3 = "";
-                  "<" !== s2() && (e3 = p2(true)), t3 = c2("CONTENT", u3 + e3);
-                } else if ("ATTRIB_NAME" !== t3.type && "CONTENT" !== t3.type) "CLOSE_ELEMENT" === t3.type ? (u3 = " ".repeat(f2) + u3, t3 = c2("CONTENT", u3)) : t3 = c2("ATTRIB_NAME", u3);
+                  "<" !== s2() && (e3 = p2(true)), t2 = c2("CONTENT", u3 + e3);
+                } else if ("ATTRIB_NAME" !== t2.type && "CONTENT" !== t2.type) "CLOSE_ELEMENT" === t2.type ? (u3 = " ".repeat(f2) + u3, t2 = c2("CONTENT", u3)) : t2 = c2("ATTRIB_NAME", u3);
                 else {
                   const e3 = " ".repeat(f2) + u3;
-                  t3 = c2("CONTENT", e3);
+                  t2 = c2("CONTENT", e3);
                 }
                 break;
               }
               {
-                const t4 = 'Unknown Syntax : "' + e2[r2] + '"';
-                throw new Error(t4);
+                const t3 = 'Unknown Syntax : "' + e2[r2] + '"';
+                throw new Error(t3);
               }
           }
         }
-        else t3 = l;
-        return t3;
+        else t2 = l;
+        return t2;
       };
       return { peek: s2, next: N2, hasNext: a2 };
     } };
     var { createLexer: i } = T;
     var { Token: p } = u;
     var [N, f, h, O] = ["ROOT", "ELEMENT", "ATTRIBUTE", "CONTENT"];
-    var y2 = (e2, t3) => ({ type: e2, value: t3 });
+    var y2 = (e2, t2) => ({ type: e2, value: t2 });
     var C = (e2) => y2(O, e2);
-    var v = (e2, t3, r2) => y2(f, { type: e2, attributes: t3, children: r2 });
-    var A = (e2, t3) => y2(h, { name: e2, value: t3 });
-    var L = (e2, t3) => {
+    var v = (e2, t2, r2) => y2(f, { type: e2, attributes: t2, children: r2 });
+    var A = (e2, t2) => y2(h, { name: e2, value: t2 });
+    var L = (e2, t2) => {
       const r2 = [];
       for (; e2.hasNext(); ) {
         const n2 = e2.next();
         switch (n2.type) {
           case "OPEN_BRACKET": {
-            const t4 = e2.next(), [n3, s2] = _(e2);
+            const t3 = e2.next(), [n3, s2] = _(e2);
             let a2 = [];
-            "CLOSE_ELEMENT" !== s2.type && (a2 = L(e2, t4)), a2 && a2.length > 0 && "CONTENT" === a2[0].type && (a2 = b(a2)), r2.push(v(t4.value, n3, a2));
+            "CLOSE_ELEMENT" !== s2.type && (a2 = L(e2, t3)), a2 && a2.length > 0 && "CONTENT" === a2[0].type && (a2 = b(a2)), r2.push(v(t3.value, n3, a2));
             break;
           }
           case "CLOSE_ELEMENT":
-            if (n2.value === t3.value) return r2;
+            if (n2.value === t2.value) return r2;
             break;
           case "CONTENT":
             r2.push(C(n2.value));
@@ -26666,37 +26666,37 @@ var require_simpleXmlToJson_min = __commonJS({
           case "EOF":
             return r2;
           default:
-            throw new Error(`Unknown Lexem type: ${n2.type} "${n2.value}, scoping element: ${t3.value}"`);
+            throw new Error(`Unknown Lexem type: ${n2.type} "${n2.value}, scoping element: ${t2.value}"`);
         }
       }
       return r2;
     };
     var _ = (e2) => {
-      const t3 = [];
+      const t2 = [];
       let r2 = e2.peek();
-      if (!e2.hasNext() || r2 && "CLOSE_BRACKET" === r2.type || r2 && "CLOSE_ELEMENT" === r2.type) return [t3, r2];
+      if (!e2.hasNext() || r2 && "CLOSE_BRACKET" === r2.type || r2 && "CLOSE_ELEMENT" === r2.type) return [t2, r2];
       for (r2 = e2.next(); e2.hasNext() && r2 && "CLOSE_BRACKET" !== r2.type && "CLOSE_ELEMENT" !== r2.type; ) {
         const n2 = r2;
         e2.next();
         const s2 = e2.next(), a2 = A(n2.value, s2.value);
-        t3.push(a2), r2 = e2.next();
+        t2.push(a2), r2 = e2.next();
       }
-      return [t3, r2];
+      return [t2, r2];
     };
     function b(e2) {
-      let t3 = [], r2 = "";
+      let t2 = [], r2 = "";
       return e2.forEach(((e3) => {
-        "CONTENT" === e3.type ? r2 += e3.value : (r2.length && (t3.push(C(r2)), r2 = ""), t3.push(e3));
-      })), r2.length && t3.push(C(r2)), t3;
+        "CONTENT" === e3.type ? r2 += e3.value : (r2.length && (t2.push(C(r2)), r2 = ""), t2.push(e3));
+      })), r2.length && t2.push(C(r2)), t2;
     }
-    var x2 = { AttribNode: A, ContentNode: C, ElementNode: v, Node: y2, transpile: function(e2, t3) {
+    var x2 = { AttribNode: A, ContentNode: C, ElementNode: v, Node: y2, transpile: function(e2, t2) {
       const r2 = ((e3) => y2(N, { children: L(e3, p(N, "ROOT")) }))(i(e2));
-      return t3 ? t3.convert(r2) : r2;
+      return t2 ? t2.convert(r2) : r2;
     } };
     var k = a;
     var { transpile: d } = x2;
-    var g = e({ convertXML: function(e2, t3) {
-      return d(e2, t3 || k);
+    var g = e({ convertXML: function(e2, t2) {
+      return d(e2, t2 || k);
     }, createAST: function(e2) {
       return d(e2);
     } });
@@ -26780,8 +26780,8 @@ var require_pixelmatch = __commonJS({
       const y2 = Math.min(y1 + 1, height - 1);
       const pos = (y1 * width + x1) * 4;
       let zeroes = x1 === x0 || x1 === x2 || y1 === y0 || y1 === y2 ? 1 : 0;
-      let min2 = 0;
-      let max2 = 0;
+      let min = 0;
+      let max = 0;
       let minX, minY, maxX, maxY;
       for (let x3 = x0; x3 <= x2; x3++) {
         for (let y3 = y0; y3 <= y2; y3++) {
@@ -26790,18 +26790,18 @@ var require_pixelmatch = __commonJS({
           if (delta === 0) {
             zeroes++;
             if (zeroes > 2) return false;
-          } else if (delta < min2) {
-            min2 = delta;
+          } else if (delta < min) {
+            min = delta;
             minX = x3;
             minY = y3;
-          } else if (delta > max2) {
-            max2 = delta;
+          } else if (delta > max) {
+            max = delta;
             maxX = x3;
             maxY = y3;
           }
         }
       }
-      if (min2 === 0 || max2 === 0) return false;
+      if (min === 0 || max === 0) return false;
       return hasManySiblings(img, minX, minY, width, height) && hasManySiblings(img2, minX, minY, width, height) || hasManySiblings(img, maxX, maxY, width, height) && hasManySiblings(img2, maxX, maxY, width, height);
     }
     function hasManySiblings(img, x1, y1, width, height) {
@@ -26881,7 +26881,7 @@ var require_pixelmatch = __commonJS({
 });
 
 // src/main/main.ts
-var import_electron6 = require("electron");
+var import_electron7 = require("electron");
 var import_path6 = __toESM(require("path"), 1);
 var import_url = require("url");
 var import_fs8 = __toESM(require("fs"), 1);
@@ -27660,1421 +27660,19 @@ var UsageService = class _UsageService {
   }
 };
 
-// src/main/services/SchedulerService.ts
-var import_electron5 = require("electron");
+// src/main/services/RunManager.ts
+var import_electron6 = require("electron");
 var import_fs7 = __toESM(require("fs"), 1);
 var import_path5 = __toESM(require("path"), 1);
-var import_child_process = require("child_process");
 var import_uuid = require("uuid");
 
-// node_modules/bezier-js/src/utils.js
-var { abs, cos, sin, acos, atan2, sqrt, pow } = Math;
-function crt(v) {
-  return v < 0 ? -pow(-v, 1 / 3) : pow(v, 1 / 3);
-}
-var pi = Math.PI;
-var tau = 2 * pi;
-var quart = pi / 2;
-var epsilon = 1e-6;
-var nMax = Number.MAX_SAFE_INTEGER || 9007199254740991;
-var nMin = Number.MIN_SAFE_INTEGER || -9007199254740991;
-var ZERO = { x: 0, y: 0, z: 0 };
-var utils2 = {
-  // Legendre-Gauss abscissae with n=24 (x_i values, defined at i=n as the roots of the nth order Legendre polynomial Pn(x))
-  Tvalues: [
-    -0.06405689286260563,
-    0.06405689286260563,
-    -0.1911188674736163,
-    0.1911188674736163,
-    -0.3150426796961634,
-    0.3150426796961634,
-    -0.4337935076260451,
-    0.4337935076260451,
-    -0.5454214713888396,
-    0.5454214713888396,
-    -0.6480936519369755,
-    0.6480936519369755,
-    -0.7401241915785544,
-    0.7401241915785544,
-    -0.820001985973903,
-    0.820001985973903,
-    -0.8864155270044011,
-    0.8864155270044011,
-    -0.9382745520027328,
-    0.9382745520027328,
-    -0.9747285559713095,
-    0.9747285559713095,
-    -0.9951872199970213,
-    0.9951872199970213
-  ],
-  // Legendre-Gauss weights with n=24 (w_i values, defined by a function linked to in the Bezier primer article)
-  Cvalues: [
-    0.12793819534675216,
-    0.12793819534675216,
-    0.1258374563468283,
-    0.1258374563468283,
-    0.12167047292780339,
-    0.12167047292780339,
-    0.1155056680537256,
-    0.1155056680537256,
-    0.10744427011596563,
-    0.10744427011596563,
-    0.09761865210411388,
-    0.09761865210411388,
-    0.08619016153195327,
-    0.08619016153195327,
-    0.0733464814110803,
-    0.0733464814110803,
-    0.05929858491543678,
-    0.05929858491543678,
-    0.04427743881741981,
-    0.04427743881741981,
-    0.028531388628933663,
-    0.028531388628933663,
-    0.0123412297999872,
-    0.0123412297999872
-  ],
-  arcfn: function(t2, derivativeFn) {
-    const d = derivativeFn(t2);
-    let l = d.x * d.x + d.y * d.y;
-    if (typeof d.z !== "undefined") {
-      l += d.z * d.z;
-    }
-    return sqrt(l);
-  },
-  compute: function(t2, points, _3d) {
-    if (t2 === 0) {
-      points[0].t = 0;
-      return points[0];
-    }
-    const order = points.length - 1;
-    if (t2 === 1) {
-      points[order].t = 1;
-      return points[order];
-    }
-    const mt = 1 - t2;
-    let p = points;
-    if (order === 0) {
-      points[0].t = t2;
-      return points[0];
-    }
-    if (order === 1) {
-      const ret = {
-        x: mt * p[0].x + t2 * p[1].x,
-        y: mt * p[0].y + t2 * p[1].y,
-        t: t2
-      };
-      if (_3d) {
-        ret.z = mt * p[0].z + t2 * p[1].z;
-      }
-      return ret;
-    }
-    if (order < 4) {
-      let mt2 = mt * mt, t22 = t2 * t2, a, b, c2, d = 0;
-      if (order === 2) {
-        p = [p[0], p[1], p[2], ZERO];
-        a = mt2;
-        b = mt * t2 * 2;
-        c2 = t22;
-      } else if (order === 3) {
-        a = mt2 * mt;
-        b = mt2 * t2 * 3;
-        c2 = mt * t22 * 3;
-        d = t2 * t22;
-      }
-      const ret = {
-        x: a * p[0].x + b * p[1].x + c2 * p[2].x + d * p[3].x,
-        y: a * p[0].y + b * p[1].y + c2 * p[2].y + d * p[3].y,
-        t: t2
-      };
-      if (_3d) {
-        ret.z = a * p[0].z + b * p[1].z + c2 * p[2].z + d * p[3].z;
-      }
-      return ret;
-    }
-    const dCpts = JSON.parse(JSON.stringify(points));
-    while (dCpts.length > 1) {
-      for (let i = 0; i < dCpts.length - 1; i++) {
-        dCpts[i] = {
-          x: dCpts[i].x + (dCpts[i + 1].x - dCpts[i].x) * t2,
-          y: dCpts[i].y + (dCpts[i + 1].y - dCpts[i].y) * t2
-        };
-        if (typeof dCpts[i].z !== "undefined") {
-          dCpts[i].z = dCpts[i].z + (dCpts[i + 1].z - dCpts[i].z) * t2;
-        }
-      }
-      dCpts.splice(dCpts.length - 1, 1);
-    }
-    dCpts[0].t = t2;
-    return dCpts[0];
-  },
-  computeWithRatios: function(t2, points, ratios, _3d) {
-    const mt = 1 - t2, r = ratios, p = points;
-    let f1 = r[0], f2 = r[1], f3 = r[2], f4 = r[3], d;
-    f1 *= mt;
-    f2 *= t2;
-    if (p.length === 2) {
-      d = f1 + f2;
-      return {
-        x: (f1 * p[0].x + f2 * p[1].x) / d,
-        y: (f1 * p[0].y + f2 * p[1].y) / d,
-        z: !_3d ? false : (f1 * p[0].z + f2 * p[1].z) / d,
-        t: t2
-      };
-    }
-    f1 *= mt;
-    f2 *= 2 * mt;
-    f3 *= t2 * t2;
-    if (p.length === 3) {
-      d = f1 + f2 + f3;
-      return {
-        x: (f1 * p[0].x + f2 * p[1].x + f3 * p[2].x) / d,
-        y: (f1 * p[0].y + f2 * p[1].y + f3 * p[2].y) / d,
-        z: !_3d ? false : (f1 * p[0].z + f2 * p[1].z + f3 * p[2].z) / d,
-        t: t2
-      };
-    }
-    f1 *= mt;
-    f2 *= 1.5 * mt;
-    f3 *= 3 * mt;
-    f4 *= t2 * t2 * t2;
-    if (p.length === 4) {
-      d = f1 + f2 + f3 + f4;
-      return {
-        x: (f1 * p[0].x + f2 * p[1].x + f3 * p[2].x + f4 * p[3].x) / d,
-        y: (f1 * p[0].y + f2 * p[1].y + f3 * p[2].y + f4 * p[3].y) / d,
-        z: !_3d ? false : (f1 * p[0].z + f2 * p[1].z + f3 * p[2].z + f4 * p[3].z) / d,
-        t: t2
-      };
-    }
-  },
-  derive: function(points, _3d) {
-    const dpoints = [];
-    for (let p = points, d = p.length, c2 = d - 1; d > 1; d--, c2--) {
-      const list = [];
-      for (let j = 0, dpt; j < c2; j++) {
-        dpt = {
-          x: c2 * (p[j + 1].x - p[j].x),
-          y: c2 * (p[j + 1].y - p[j].y)
-        };
-        if (_3d) {
-          dpt.z = c2 * (p[j + 1].z - p[j].z);
-        }
-        list.push(dpt);
-      }
-      dpoints.push(list);
-      p = list;
-    }
-    return dpoints;
-  },
-  between: function(v, m, M) {
-    return m <= v && v <= M || utils2.approximately(v, m) || utils2.approximately(v, M);
-  },
-  approximately: function(a, b, precision) {
-    return abs(a - b) <= (precision || epsilon);
-  },
-  length: function(derivativeFn) {
-    const z = 0.5, len = utils2.Tvalues.length;
-    let sum = 0;
-    for (let i = 0, t2; i < len; i++) {
-      t2 = z * utils2.Tvalues[i] + z;
-      sum += utils2.Cvalues[i] * utils2.arcfn(t2, derivativeFn);
-    }
-    return z * sum;
-  },
-  map: function(v, ds, de, ts, te) {
-    const d1 = de - ds, d2 = te - ts, v2 = v - ds, r = v2 / d1;
-    return ts + d2 * r;
-  },
-  lerp: function(r, v1, v2) {
-    const ret = {
-      x: v1.x + r * (v2.x - v1.x),
-      y: v1.y + r * (v2.y - v1.y)
-    };
-    if (v1.z !== void 0 && v2.z !== void 0) {
-      ret.z = v1.z + r * (v2.z - v1.z);
-    }
-    return ret;
-  },
-  pointToString: function(p) {
-    let s = p.x + "/" + p.y;
-    if (typeof p.z !== "undefined") {
-      s += "/" + p.z;
-    }
-    return s;
-  },
-  pointsToString: function(points) {
-    return "[" + points.map(utils2.pointToString).join(", ") + "]";
-  },
-  copy: function(obj) {
-    return JSON.parse(JSON.stringify(obj));
-  },
-  angle: function(o, v1, v2) {
-    const dx1 = v1.x - o.x, dy1 = v1.y - o.y, dx2 = v2.x - o.x, dy2 = v2.y - o.y, cross = dx1 * dy2 - dy1 * dx2, dot = dx1 * dx2 + dy1 * dy2;
-    return atan2(cross, dot);
-  },
-  // round as string, to avoid rounding errors
-  round: function(v, d) {
-    const s = "" + v;
-    const pos = s.indexOf(".");
-    return parseFloat(s.substring(0, pos + 1 + d));
-  },
-  dist: function(p1, p2) {
-    const dx = p1.x - p2.x, dy = p1.y - p2.y;
-    return sqrt(dx * dx + dy * dy);
-  },
-  closest: function(LUT, point) {
-    let mdist = pow(2, 63), mpos, d;
-    LUT.forEach(function(p, idx) {
-      d = utils2.dist(point, p);
-      if (d < mdist) {
-        mdist = d;
-        mpos = idx;
-      }
-    });
-    return { mdist, mpos };
-  },
-  abcratio: function(t2, n) {
-    if (n !== 2 && n !== 3) {
-      return false;
-    }
-    if (typeof t2 === "undefined") {
-      t2 = 0.5;
-    } else if (t2 === 0 || t2 === 1) {
-      return t2;
-    }
-    const bottom = pow(t2, n) + pow(1 - t2, n), top = bottom - 1;
-    return abs(top / bottom);
-  },
-  projectionratio: function(t2, n) {
-    if (n !== 2 && n !== 3) {
-      return false;
-    }
-    if (typeof t2 === "undefined") {
-      t2 = 0.5;
-    } else if (t2 === 0 || t2 === 1) {
-      return t2;
-    }
-    const top = pow(1 - t2, n), bottom = pow(t2, n) + top;
-    return top / bottom;
-  },
-  lli8: function(x1, y1, x2, y2, x3, y3, x4, y4) {
-    const nx = (x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4), ny = (x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4), d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-    if (d == 0) {
-      return false;
-    }
-    return { x: nx / d, y: ny / d };
-  },
-  lli4: function(p1, p2, p3, p4) {
-    const x1 = p1.x, y1 = p1.y, x2 = p2.x, y2 = p2.y, x3 = p3.x, y3 = p3.y, x4 = p4.x, y4 = p4.y;
-    return utils2.lli8(x1, y1, x2, y2, x3, y3, x4, y4);
-  },
-  lli: function(v1, v2) {
-    return utils2.lli4(v1, v1.c, v2, v2.c);
-  },
-  makeline: function(p1, p2) {
-    return new Bezier(
-      p1.x,
-      p1.y,
-      (p1.x + p2.x) / 2,
-      (p1.y + p2.y) / 2,
-      p2.x,
-      p2.y
-    );
-  },
-  findbbox: function(sections) {
-    let mx = nMax, my = nMax, MX = nMin, MY = nMin;
-    sections.forEach(function(s) {
-      const bbox = s.bbox();
-      if (mx > bbox.x.min) mx = bbox.x.min;
-      if (my > bbox.y.min) my = bbox.y.min;
-      if (MX < bbox.x.max) MX = bbox.x.max;
-      if (MY < bbox.y.max) MY = bbox.y.max;
-    });
-    return {
-      x: { min: mx, mid: (mx + MX) / 2, max: MX, size: MX - mx },
-      y: { min: my, mid: (my + MY) / 2, max: MY, size: MY - my }
-    };
-  },
-  shapeintersections: function(s1, bbox1, s2, bbox2, curveIntersectionThreshold) {
-    if (!utils2.bboxoverlap(bbox1, bbox2)) return [];
-    const intersections = [];
-    const a1 = [s1.startcap, s1.forward, s1.back, s1.endcap];
-    const a2 = [s2.startcap, s2.forward, s2.back, s2.endcap];
-    a1.forEach(function(l1) {
-      if (l1.virtual) return;
-      a2.forEach(function(l2) {
-        if (l2.virtual) return;
-        const iss = l1.intersects(l2, curveIntersectionThreshold);
-        if (iss.length > 0) {
-          iss.c1 = l1;
-          iss.c2 = l2;
-          iss.s1 = s1;
-          iss.s2 = s2;
-          intersections.push(iss);
-        }
-      });
-    });
-    return intersections;
-  },
-  makeshape: function(forward, back, curveIntersectionThreshold) {
-    const bpl = back.points.length;
-    const fpl = forward.points.length;
-    const start = utils2.makeline(back.points[bpl - 1], forward.points[0]);
-    const end = utils2.makeline(forward.points[fpl - 1], back.points[0]);
-    const shape = {
-      startcap: start,
-      forward,
-      back,
-      endcap: end,
-      bbox: utils2.findbbox([start, forward, back, end])
-    };
-    shape.intersections = function(s2) {
-      return utils2.shapeintersections(
-        shape,
-        shape.bbox,
-        s2,
-        s2.bbox,
-        curveIntersectionThreshold
-      );
-    };
-    return shape;
-  },
-  getminmax: function(curve, d, list) {
-    if (!list) return { min: 0, max: 0 };
-    let min2 = nMax, max2 = nMin, t2, c2;
-    if (list.indexOf(0) === -1) {
-      list = [0].concat(list);
-    }
-    if (list.indexOf(1) === -1) {
-      list.push(1);
-    }
-    for (let i = 0, len = list.length; i < len; i++) {
-      t2 = list[i];
-      c2 = curve.get(t2);
-      if (c2[d] < min2) {
-        min2 = c2[d];
-      }
-      if (c2[d] > max2) {
-        max2 = c2[d];
-      }
-    }
-    return { min: min2, mid: (min2 + max2) / 2, max: max2, size: max2 - min2 };
-  },
-  align: function(points, line) {
-    const tx = line.p1.x, ty = line.p1.y, a = -atan2(line.p2.y - ty, line.p2.x - tx), d = function(v) {
-      return {
-        x: (v.x - tx) * cos(a) - (v.y - ty) * sin(a),
-        y: (v.x - tx) * sin(a) + (v.y - ty) * cos(a)
-      };
-    };
-    return points.map(d);
-  },
-  roots: function(points, line) {
-    line = line || { p1: { x: 0, y: 0 }, p2: { x: 1, y: 0 } };
-    const order = points.length - 1;
-    const aligned = utils2.align(points, line);
-    const reduce = function(t2) {
-      return 0 <= t2 && t2 <= 1;
-    };
-    if (order === 2) {
-      const a2 = aligned[0].y, b2 = aligned[1].y, c3 = aligned[2].y, d2 = a2 - 2 * b2 + c3;
-      if (d2 !== 0) {
-        const m1 = -sqrt(b2 * b2 - a2 * c3), m2 = -a2 + b2, v12 = -(m1 + m2) / d2, v2 = -(-m1 + m2) / d2;
-        return [v12, v2].filter(reduce);
-      } else if (b2 !== c3 && d2 === 0) {
-        return [(2 * b2 - c3) / (2 * b2 - 2 * c3)].filter(reduce);
-      }
-      return [];
-    }
-    const pa = aligned[0].y, pb = aligned[1].y, pc = aligned[2].y, pd = aligned[3].y;
-    let d = -pa + 3 * pb - 3 * pc + pd, a = 3 * pa - 6 * pb + 3 * pc, b = -3 * pa + 3 * pb, c2 = pa;
-    if (utils2.approximately(d, 0)) {
-      if (utils2.approximately(a, 0)) {
-        if (utils2.approximately(b, 0)) {
-          return [];
-        }
-        return [-c2 / b].filter(reduce);
-      }
-      const q3 = sqrt(b * b - 4 * a * c2), a2 = 2 * a;
-      return [(q3 - b) / a2, (-b - q3) / a2].filter(reduce);
-    }
-    a /= d;
-    b /= d;
-    c2 /= d;
-    const p = (3 * b - a * a) / 3, p3 = p / 3, q = (2 * a * a * a - 9 * a * b + 27 * c2) / 27, q2 = q / 2, discriminant = q2 * q2 + p3 * p3 * p3;
-    let u1, v1, x1, x2, x3;
-    if (discriminant < 0) {
-      const mp3 = -p / 3, mp33 = mp3 * mp3 * mp3, r = sqrt(mp33), t2 = -q / (2 * r), cosphi = t2 < -1 ? -1 : t2 > 1 ? 1 : t2, phi = acos(cosphi), crtr = crt(r), t1 = 2 * crtr;
-      x1 = t1 * cos(phi / 3) - a / 3;
-      x2 = t1 * cos((phi + tau) / 3) - a / 3;
-      x3 = t1 * cos((phi + 2 * tau) / 3) - a / 3;
-      return [x1, x2, x3].filter(reduce);
-    } else if (discriminant === 0) {
-      u1 = q2 < 0 ? crt(-q2) : -crt(q2);
-      x1 = 2 * u1 - a / 3;
-      x2 = -u1 - a / 3;
-      return [x1, x2].filter(reduce);
-    } else {
-      const sd = sqrt(discriminant);
-      u1 = crt(-q2 + sd);
-      v1 = crt(q2 + sd);
-      return [u1 - v1 - a / 3].filter(reduce);
-    }
-  },
-  droots: function(p) {
-    if (p.length === 3) {
-      const a = p[0], b = p[1], c2 = p[2], d = a - 2 * b + c2;
-      if (d !== 0) {
-        const m1 = -sqrt(b * b - a * c2), m2 = -a + b, v1 = -(m1 + m2) / d, v2 = -(-m1 + m2) / d;
-        return [v1, v2];
-      } else if (b !== c2 && d === 0) {
-        return [(2 * b - c2) / (2 * (b - c2))];
-      }
-      return [];
-    }
-    if (p.length === 2) {
-      const a = p[0], b = p[1];
-      if (a !== b) {
-        return [a / (a - b)];
-      }
-      return [];
-    }
-    return [];
-  },
-  curvature: function(t2, d1, d2, _3d, kOnly) {
-    let num, dnm, adk, dk, k = 0, r = 0;
-    const d = utils2.compute(t2, d1);
-    const dd = utils2.compute(t2, d2);
-    const qdsum = d.x * d.x + d.y * d.y;
-    if (_3d) {
-      num = sqrt(
-        pow(d.y * dd.z - dd.y * d.z, 2) + pow(d.z * dd.x - dd.z * d.x, 2) + pow(d.x * dd.y - dd.x * d.y, 2)
-      );
-      dnm = pow(qdsum + d.z * d.z, 3 / 2);
-    } else {
-      num = d.x * dd.y - d.y * dd.x;
-      dnm = pow(qdsum, 3 / 2);
-    }
-    if (num === 0 || dnm === 0) {
-      return { k: 0, r: 0 };
-    }
-    k = num / dnm;
-    r = dnm / num;
-    if (!kOnly) {
-      const pk = utils2.curvature(t2 - 1e-3, d1, d2, _3d, true).k;
-      const nk = utils2.curvature(t2 + 1e-3, d1, d2, _3d, true).k;
-      dk = (nk - k + (k - pk)) / 2;
-      adk = (abs(nk - k) + abs(k - pk)) / 2;
-    }
-    return { k, r, dk, adk };
-  },
-  inflections: function(points) {
-    if (points.length < 4) return [];
-    const p = utils2.align(points, { p1: points[0], p2: points.slice(-1)[0] }), a = p[2].x * p[1].y, b = p[3].x * p[1].y, c2 = p[1].x * p[2].y, d = p[3].x * p[2].y, v1 = 18 * (-3 * a + 2 * b + 3 * c2 - d), v2 = 18 * (3 * a - b - 3 * c2), v3 = 18 * (c2 - a);
-    if (utils2.approximately(v1, 0)) {
-      if (!utils2.approximately(v2, 0)) {
-        let t2 = -v3 / v2;
-        if (0 <= t2 && t2 <= 1) return [t2];
-      }
-      return [];
-    }
-    const d2 = 2 * v1;
-    if (utils2.approximately(d2, 0)) return [];
-    const trm = v2 * v2 - 4 * v1 * v3;
-    if (trm < 0) return [];
-    const sq = Math.sqrt(trm);
-    return [(sq - v2) / d2, -(v2 + sq) / d2].filter(function(r) {
-      return 0 <= r && r <= 1;
-    });
-  },
-  bboxoverlap: function(b1, b2) {
-    const dims = ["x", "y"], len = dims.length;
-    for (let i = 0, dim, l, t2, d; i < len; i++) {
-      dim = dims[i];
-      l = b1[dim].mid;
-      t2 = b2[dim].mid;
-      d = (b1[dim].size + b2[dim].size) / 2;
-      if (abs(l - t2) >= d) return false;
-    }
-    return true;
-  },
-  expandbox: function(bbox, _bbox) {
-    if (_bbox.x.min < bbox.x.min) {
-      bbox.x.min = _bbox.x.min;
-    }
-    if (_bbox.y.min < bbox.y.min) {
-      bbox.y.min = _bbox.y.min;
-    }
-    if (_bbox.z && _bbox.z.min < bbox.z.min) {
-      bbox.z.min = _bbox.z.min;
-    }
-    if (_bbox.x.max > bbox.x.max) {
-      bbox.x.max = _bbox.x.max;
-    }
-    if (_bbox.y.max > bbox.y.max) {
-      bbox.y.max = _bbox.y.max;
-    }
-    if (_bbox.z && _bbox.z.max > bbox.z.max) {
-      bbox.z.max = _bbox.z.max;
-    }
-    bbox.x.mid = (bbox.x.min + bbox.x.max) / 2;
-    bbox.y.mid = (bbox.y.min + bbox.y.max) / 2;
-    if (bbox.z) {
-      bbox.z.mid = (bbox.z.min + bbox.z.max) / 2;
-    }
-    bbox.x.size = bbox.x.max - bbox.x.min;
-    bbox.y.size = bbox.y.max - bbox.y.min;
-    if (bbox.z) {
-      bbox.z.size = bbox.z.max - bbox.z.min;
-    }
-  },
-  pairiteration: function(c1, c2, curveIntersectionThreshold) {
-    const c1b = c1.bbox(), c2b = c2.bbox(), r = 1e5, threshold = curveIntersectionThreshold || 0.5;
-    if (c1b.x.size + c1b.y.size < threshold && c2b.x.size + c2b.y.size < threshold) {
-      return [
-        (r * (c1._t1 + c1._t2) / 2 | 0) / r + "/" + (r * (c2._t1 + c2._t2) / 2 | 0) / r
-      ];
-    }
-    let cc1 = c1.split(0.5), cc2 = c2.split(0.5), pairs = [
-      { left: cc1.left, right: cc2.left },
-      { left: cc1.left, right: cc2.right },
-      { left: cc1.right, right: cc2.right },
-      { left: cc1.right, right: cc2.left }
-    ];
-    pairs = pairs.filter(function(pair) {
-      return utils2.bboxoverlap(pair.left.bbox(), pair.right.bbox());
-    });
-    let results = [];
-    if (pairs.length === 0) return results;
-    pairs.forEach(function(pair) {
-      results = results.concat(
-        utils2.pairiteration(pair.left, pair.right, threshold)
-      );
-    });
-    results = results.filter(function(v, i) {
-      return results.indexOf(v) === i;
-    });
-    return results;
-  },
-  getccenter: function(p1, p2, p3) {
-    const dx1 = p2.x - p1.x, dy1 = p2.y - p1.y, dx2 = p3.x - p2.x, dy2 = p3.y - p2.y, dx1p = dx1 * cos(quart) - dy1 * sin(quart), dy1p = dx1 * sin(quart) + dy1 * cos(quart), dx2p = dx2 * cos(quart) - dy2 * sin(quart), dy2p = dx2 * sin(quart) + dy2 * cos(quart), mx1 = (p1.x + p2.x) / 2, my1 = (p1.y + p2.y) / 2, mx2 = (p2.x + p3.x) / 2, my2 = (p2.y + p3.y) / 2, mx1n = mx1 + dx1p, my1n = my1 + dy1p, mx2n = mx2 + dx2p, my2n = my2 + dy2p, arc = utils2.lli8(mx1, my1, mx1n, my1n, mx2, my2, mx2n, my2n), r = utils2.dist(arc, p1);
-    let s = atan2(p1.y - arc.y, p1.x - arc.x), m = atan2(p2.y - arc.y, p2.x - arc.x), e = atan2(p3.y - arc.y, p3.x - arc.x), _;
-    if (s < e) {
-      if (s > m || m > e) {
-        s += tau;
-      }
-      if (s > e) {
-        _ = e;
-        e = s;
-        s = _;
-      }
-    } else {
-      if (e < m && m < s) {
-        _ = e;
-        e = s;
-        s = _;
-      } else {
-        e += tau;
-      }
-    }
-    arc.s = s;
-    arc.e = e;
-    arc.r = r;
-    return arc;
-  },
-  numberSort: function(a, b) {
-    return a - b;
-  }
-};
-
-// node_modules/bezier-js/src/poly-bezier.js
-var PolyBezier = class _PolyBezier {
-  constructor(curves) {
-    this.curves = [];
-    this._3d = false;
-    if (!!curves) {
-      this.curves = curves;
-      this._3d = this.curves[0]._3d;
-    }
-  }
-  valueOf() {
-    return this.toString();
-  }
-  toString() {
-    return "[" + this.curves.map(function(curve) {
-      return utils2.pointsToString(curve.points);
-    }).join(", ") + "]";
-  }
-  addCurve(curve) {
-    this.curves.push(curve);
-    this._3d = this._3d || curve._3d;
-  }
-  length() {
-    return this.curves.map(function(v) {
-      return v.length();
-    }).reduce(function(a, b) {
-      return a + b;
-    });
-  }
-  curve(idx) {
-    return this.curves[idx];
-  }
-  bbox() {
-    const c2 = this.curves;
-    var bbox = c2[0].bbox();
-    for (var i = 1; i < c2.length; i++) {
-      utils2.expandbox(bbox, c2[i].bbox());
-    }
-    return bbox;
-  }
-  offset(d) {
-    const offset = [];
-    this.curves.forEach(function(v) {
-      offset.push(...v.offset(d));
-    });
-    return new _PolyBezier(offset);
-  }
-};
-
-// node_modules/bezier-js/src/bezier.js
-var { abs: abs2, min, max, cos: cos2, sin: sin2, acos: acos2, sqrt: sqrt2 } = Math;
-var pi2 = Math.PI;
-var Bezier = class _Bezier {
-  constructor(coords) {
-    let args = coords && coords.forEach ? coords : Array.from(arguments).slice();
-    let coordlen = false;
-    if (typeof args[0] === "object") {
-      coordlen = args.length;
-      const newargs = [];
-      args.forEach(function(point2) {
-        ["x", "y", "z"].forEach(function(d) {
-          if (typeof point2[d] !== "undefined") {
-            newargs.push(point2[d]);
-          }
-        });
-      });
-      args = newargs;
-    }
-    let higher = false;
-    const len = args.length;
-    if (coordlen) {
-      if (coordlen > 4) {
-        if (arguments.length !== 1) {
-          throw new Error(
-            "Only new Bezier(point[]) is accepted for 4th and higher order curves"
-          );
-        }
-        higher = true;
-      }
-    } else {
-      if (len !== 6 && len !== 8 && len !== 9 && len !== 12) {
-        if (arguments.length !== 1) {
-          throw new Error(
-            "Only new Bezier(point[]) is accepted for 4th and higher order curves"
-          );
-        }
-      }
-    }
-    const _3d = this._3d = !higher && (len === 9 || len === 12) || coords && coords[0] && typeof coords[0].z !== "undefined";
-    const points = this.points = [];
-    for (let idx = 0, step = _3d ? 3 : 2; idx < len; idx += step) {
-      var point = {
-        x: args[idx],
-        y: args[idx + 1]
-      };
-      if (_3d) {
-        point.z = args[idx + 2];
-      }
-      points.push(point);
-    }
-    const order = this.order = points.length - 1;
-    const dims = this.dims = ["x", "y"];
-    if (_3d) dims.push("z");
-    this.dimlen = dims.length;
-    const aligned = utils2.align(points, { p1: points[0], p2: points[order] });
-    const baselength = utils2.dist(points[0], points[order]);
-    this._linear = aligned.reduce((t2, p) => t2 + abs2(p.y), 0) < baselength / 50;
-    this._lut = [];
-    this._t1 = 0;
-    this._t2 = 1;
-    this.update();
-  }
-  static quadraticFromPoints(p1, p2, p3, t2) {
-    if (typeof t2 === "undefined") {
-      t2 = 0.5;
-    }
-    if (t2 === 0) {
-      return new _Bezier(p2, p2, p3);
-    }
-    if (t2 === 1) {
-      return new _Bezier(p1, p2, p2);
-    }
-    const abc = _Bezier.getABC(2, p1, p2, p3, t2);
-    return new _Bezier(p1, abc.A, p3);
-  }
-  static cubicFromPoints(S, B, E, t2, d1) {
-    if (typeof t2 === "undefined") {
-      t2 = 0.5;
-    }
-    const abc = _Bezier.getABC(3, S, B, E, t2);
-    if (typeof d1 === "undefined") {
-      d1 = utils2.dist(B, abc.C);
-    }
-    const d2 = d1 * (1 - t2) / t2;
-    const selen = utils2.dist(S, E), lx = (E.x - S.x) / selen, ly = (E.y - S.y) / selen, bx1 = d1 * lx, by1 = d1 * ly, bx2 = d2 * lx, by2 = d2 * ly;
-    const e1 = { x: B.x - bx1, y: B.y - by1 }, e2 = { x: B.x + bx2, y: B.y + by2 }, A = abc.A, v1 = { x: A.x + (e1.x - A.x) / (1 - t2), y: A.y + (e1.y - A.y) / (1 - t2) }, v2 = { x: A.x + (e2.x - A.x) / t2, y: A.y + (e2.y - A.y) / t2 }, nc1 = { x: S.x + (v1.x - S.x) / t2, y: S.y + (v1.y - S.y) / t2 }, nc2 = {
-      x: E.x + (v2.x - E.x) / (1 - t2),
-      y: E.y + (v2.y - E.y) / (1 - t2)
-    };
-    return new _Bezier(S, nc1, nc2, E);
-  }
-  static getUtils() {
-    return utils2;
-  }
-  getUtils() {
-    return _Bezier.getUtils();
-  }
-  static get PolyBezier() {
-    return PolyBezier;
-  }
-  valueOf() {
-    return this.toString();
-  }
-  toString() {
-    return utils2.pointsToString(this.points);
-  }
-  toSVG() {
-    if (this._3d) return false;
-    const p = this.points, x2 = p[0].x, y2 = p[0].y, s = ["M", x2, y2, this.order === 2 ? "Q" : "C"];
-    for (let i = 1, last = p.length; i < last; i++) {
-      s.push(p[i].x);
-      s.push(p[i].y);
-    }
-    return s.join(" ");
-  }
-  setRatios(ratios) {
-    if (ratios.length !== this.points.length) {
-      throw new Error("incorrect number of ratio values");
-    }
-    this.ratios = ratios;
-    this._lut = [];
-  }
-  verify() {
-    const print = this.coordDigest();
-    if (print !== this._print) {
-      this._print = print;
-      this.update();
-    }
-  }
-  coordDigest() {
-    return this.points.map(function(c2, pos) {
-      return "" + pos + c2.x + c2.y + (c2.z ? c2.z : 0);
-    }).join("");
-  }
-  update() {
-    this._lut = [];
-    this.dpoints = utils2.derive(this.points, this._3d);
-    this.computedirection();
-  }
-  computedirection() {
-    const points = this.points;
-    const angle = utils2.angle(points[0], points[this.order], points[1]);
-    this.clockwise = angle > 0;
-  }
-  length() {
-    return utils2.length(this.derivative.bind(this));
-  }
-  static getABC(order = 2, S, B, E, t2 = 0.5) {
-    const u = utils2.projectionratio(t2, order), um = 1 - u, C = {
-      x: u * S.x + um * E.x,
-      y: u * S.y + um * E.y
-    }, s = utils2.abcratio(t2, order), A = {
-      x: B.x + (B.x - C.x) / s,
-      y: B.y + (B.y - C.y) / s
-    };
-    return { A, B, C, S, E };
-  }
-  getABC(t2, B) {
-    B = B || this.get(t2);
-    let S = this.points[0];
-    let E = this.points[this.order];
-    return _Bezier.getABC(this.order, S, B, E, t2);
-  }
-  getLUT(steps) {
-    this.verify();
-    steps = steps || 100;
-    if (this._lut.length === steps + 1) {
-      return this._lut;
-    }
-    this._lut = [];
-    steps++;
-    this._lut = [];
-    for (let i = 0, p, t2; i < steps; i++) {
-      t2 = i / (steps - 1);
-      p = this.compute(t2);
-      p.t = t2;
-      this._lut.push(p);
-    }
-    return this._lut;
-  }
-  on(point, error) {
-    error = error || 5;
-    const lut = this.getLUT(), hits = [];
-    for (let i = 0, c2, t2 = 0; i < lut.length; i++) {
-      c2 = lut[i];
-      if (utils2.dist(c2, point) < error) {
-        hits.push(c2);
-        t2 += i / lut.length;
-      }
-    }
-    if (!hits.length) return false;
-    return t /= hits.length;
-  }
-  project(point) {
-    const LUT = this.getLUT(), l = LUT.length - 1, closest = utils2.closest(LUT, point), mpos = closest.mpos, t1 = (mpos - 1) / l, t2 = (mpos + 1) / l, step = 0.1 / l;
-    let mdist = closest.mdist, t3 = t1, ft = t3, p;
-    mdist += 1;
-    for (let d; t3 < t2 + step; t3 += step) {
-      p = this.compute(t3);
-      d = utils2.dist(point, p);
-      if (d < mdist) {
-        mdist = d;
-        ft = t3;
-      }
-    }
-    ft = ft < 0 ? 0 : ft > 1 ? 1 : ft;
-    p = this.compute(ft);
-    p.t = ft;
-    p.d = mdist;
-    return p;
-  }
-  get(t2) {
-    return this.compute(t2);
-  }
-  point(idx) {
-    return this.points[idx];
-  }
-  compute(t2) {
-    if (this.ratios) {
-      return utils2.computeWithRatios(t2, this.points, this.ratios, this._3d);
-    }
-    return utils2.compute(t2, this.points, this._3d, this.ratios);
-  }
-  raise() {
-    const p = this.points, np = [p[0]], k = p.length;
-    for (let i = 1, pi3, pim; i < k; i++) {
-      pi3 = p[i];
-      pim = p[i - 1];
-      np[i] = {
-        x: (k - i) / k * pi3.x + i / k * pim.x,
-        y: (k - i) / k * pi3.y + i / k * pim.y
-      };
-    }
-    np[k] = p[k - 1];
-    return new _Bezier(np);
-  }
-  derivative(t2) {
-    return utils2.compute(t2, this.dpoints[0], this._3d);
-  }
-  dderivative(t2) {
-    return utils2.compute(t2, this.dpoints[1], this._3d);
-  }
-  align() {
-    let p = this.points;
-    return new _Bezier(utils2.align(p, { p1: p[0], p2: p[p.length - 1] }));
-  }
-  curvature(t2) {
-    return utils2.curvature(t2, this.dpoints[0], this.dpoints[1], this._3d);
-  }
-  inflections() {
-    return utils2.inflections(this.points);
-  }
-  normal(t2) {
-    return this._3d ? this.__normal3(t2) : this.__normal2(t2);
-  }
-  __normal2(t2) {
-    const d = this.derivative(t2);
-    const q = sqrt2(d.x * d.x + d.y * d.y);
-    return { t: t2, x: -d.y / q, y: d.x / q };
-  }
-  __normal3(t2) {
-    const r1 = this.derivative(t2), r2 = this.derivative(t2 + 0.01), q1 = sqrt2(r1.x * r1.x + r1.y * r1.y + r1.z * r1.z), q2 = sqrt2(r2.x * r2.x + r2.y * r2.y + r2.z * r2.z);
-    r1.x /= q1;
-    r1.y /= q1;
-    r1.z /= q1;
-    r2.x /= q2;
-    r2.y /= q2;
-    r2.z /= q2;
-    const c2 = {
-      x: r2.y * r1.z - r2.z * r1.y,
-      y: r2.z * r1.x - r2.x * r1.z,
-      z: r2.x * r1.y - r2.y * r1.x
-    };
-    const m = sqrt2(c2.x * c2.x + c2.y * c2.y + c2.z * c2.z);
-    c2.x /= m;
-    c2.y /= m;
-    c2.z /= m;
-    const R = [
-      c2.x * c2.x,
-      c2.x * c2.y - c2.z,
-      c2.x * c2.z + c2.y,
-      c2.x * c2.y + c2.z,
-      c2.y * c2.y,
-      c2.y * c2.z - c2.x,
-      c2.x * c2.z - c2.y,
-      c2.y * c2.z + c2.x,
-      c2.z * c2.z
-    ];
-    const n = {
-      t: t2,
-      x: R[0] * r1.x + R[1] * r1.y + R[2] * r1.z,
-      y: R[3] * r1.x + R[4] * r1.y + R[5] * r1.z,
-      z: R[6] * r1.x + R[7] * r1.y + R[8] * r1.z
-    };
-    return n;
-  }
-  hull(t2) {
-    let p = this.points, _p = [], q = [], idx = 0;
-    q[idx++] = p[0];
-    q[idx++] = p[1];
-    q[idx++] = p[2];
-    if (this.order === 3) {
-      q[idx++] = p[3];
-    }
-    while (p.length > 1) {
-      _p = [];
-      for (let i = 0, pt, l = p.length - 1; i < l; i++) {
-        pt = utils2.lerp(t2, p[i], p[i + 1]);
-        q[idx++] = pt;
-        _p.push(pt);
-      }
-      p = _p;
-    }
-    return q;
-  }
-  split(t1, t2) {
-    if (t1 === 0 && !!t2) {
-      return this.split(t2).left;
-    }
-    if (t2 === 1) {
-      return this.split(t1).right;
-    }
-    const q = this.hull(t1);
-    const result = {
-      left: this.order === 2 ? new _Bezier([q[0], q[3], q[5]]) : new _Bezier([q[0], q[4], q[7], q[9]]),
-      right: this.order === 2 ? new _Bezier([q[5], q[4], q[2]]) : new _Bezier([q[9], q[8], q[6], q[3]]),
-      span: q
-    };
-    result.left._t1 = utils2.map(0, 0, 1, this._t1, this._t2);
-    result.left._t2 = utils2.map(t1, 0, 1, this._t1, this._t2);
-    result.right._t1 = utils2.map(t1, 0, 1, this._t1, this._t2);
-    result.right._t2 = utils2.map(1, 0, 1, this._t1, this._t2);
-    if (!t2) {
-      return result;
-    }
-    t2 = utils2.map(t2, t1, 1, 0, 1);
-    return result.right.split(t2).left;
-  }
-  extrema() {
-    const result = {};
-    let roots = [];
-    this.dims.forEach(
-      function(dim) {
-        let mfn = function(v) {
-          return v[dim];
-        };
-        let p = this.dpoints[0].map(mfn);
-        result[dim] = utils2.droots(p);
-        if (this.order === 3) {
-          p = this.dpoints[1].map(mfn);
-          result[dim] = result[dim].concat(utils2.droots(p));
-        }
-        result[dim] = result[dim].filter(function(t2) {
-          return t2 >= 0 && t2 <= 1;
-        });
-        roots = roots.concat(result[dim].sort(utils2.numberSort));
-      }.bind(this)
-    );
-    result.values = roots.sort(utils2.numberSort).filter(function(v, idx) {
-      return roots.indexOf(v) === idx;
-    });
-    return result;
-  }
-  bbox() {
-    const extrema = this.extrema(), result = {};
-    this.dims.forEach(
-      function(d) {
-        result[d] = utils2.getminmax(this, d, extrema[d]);
-      }.bind(this)
-    );
-    return result;
-  }
-  overlaps(curve) {
-    const lbbox = this.bbox(), tbbox = curve.bbox();
-    return utils2.bboxoverlap(lbbox, tbbox);
-  }
-  offset(t2, d) {
-    if (typeof d !== "undefined") {
-      const c2 = this.get(t2), n = this.normal(t2);
-      const ret = {
-        c: c2,
-        n,
-        x: c2.x + n.x * d,
-        y: c2.y + n.y * d
-      };
-      if (this._3d) {
-        ret.z = c2.z + n.z * d;
-      }
-      return ret;
-    }
-    if (this._linear) {
-      const nv = this.normal(0), coords = this.points.map(function(p) {
-        const ret = {
-          x: p.x + t2 * nv.x,
-          y: p.y + t2 * nv.y
-        };
-        if (p.z && nv.z) {
-          ret.z = p.z + t2 * nv.z;
-        }
-        return ret;
-      });
-      return [new _Bezier(coords)];
-    }
-    return this.reduce().map(function(s) {
-      if (s._linear) {
-        return s.offset(t2)[0];
-      }
-      return s.scale(t2);
-    });
-  }
-  simple() {
-    if (this.order === 3) {
-      const a1 = utils2.angle(this.points[0], this.points[3], this.points[1]);
-      const a2 = utils2.angle(this.points[0], this.points[3], this.points[2]);
-      if (a1 > 0 && a2 < 0 || a1 < 0 && a2 > 0) return false;
-    }
-    const n1 = this.normal(0);
-    const n2 = this.normal(1);
-    let s = n1.x * n2.x + n1.y * n2.y;
-    if (this._3d) {
-      s += n1.z * n2.z;
-    }
-    return abs2(acos2(s)) < pi2 / 3;
-  }
-  reduce() {
-    let i, t1 = 0, t2 = 0, step = 0.01, segment, pass1 = [], pass2 = [];
-    let extrema = this.extrema().values;
-    if (extrema.indexOf(0) === -1) {
-      extrema = [0].concat(extrema);
-    }
-    if (extrema.indexOf(1) === -1) {
-      extrema.push(1);
-    }
-    for (t1 = extrema[0], i = 1; i < extrema.length; i++) {
-      t2 = extrema[i];
-      segment = this.split(t1, t2);
-      segment._t1 = t1;
-      segment._t2 = t2;
-      pass1.push(segment);
-      t1 = t2;
-    }
-    pass1.forEach(function(p1) {
-      t1 = 0;
-      t2 = 0;
-      while (t2 <= 1) {
-        for (t2 = t1 + step; t2 <= 1 + step; t2 += step) {
-          segment = p1.split(t1, t2);
-          if (!segment.simple()) {
-            t2 -= step;
-            if (abs2(t1 - t2) < step) {
-              return [];
-            }
-            segment = p1.split(t1, t2);
-            segment._t1 = utils2.map(t1, 0, 1, p1._t1, p1._t2);
-            segment._t2 = utils2.map(t2, 0, 1, p1._t1, p1._t2);
-            pass2.push(segment);
-            t1 = t2;
-            break;
-          }
-        }
-      }
-      if (t1 < 1) {
-        segment = p1.split(t1, 1);
-        segment._t1 = utils2.map(t1, 0, 1, p1._t1, p1._t2);
-        segment._t2 = p1._t2;
-        pass2.push(segment);
-      }
-    });
-    return pass2;
-  }
-  translate(v, d1, d2) {
-    d2 = typeof d2 === "number" ? d2 : d1;
-    const o = this.order;
-    let d = this.points.map((_, i) => (1 - i / o) * d1 + i / o * d2);
-    return new _Bezier(
-      this.points.map((p, i) => ({
-        x: p.x + v.x * d[i],
-        y: p.y + v.y * d[i]
-      }))
-    );
-  }
-  scale(d) {
-    const order = this.order;
-    let distanceFn = false;
-    if (typeof d === "function") {
-      distanceFn = d;
-    }
-    if (distanceFn && order === 2) {
-      return this.raise().scale(distanceFn);
-    }
-    const clockwise = this.clockwise;
-    const points = this.points;
-    if (this._linear) {
-      return this.translate(
-        this.normal(0),
-        distanceFn ? distanceFn(0) : d,
-        distanceFn ? distanceFn(1) : d
-      );
-    }
-    const r1 = distanceFn ? distanceFn(0) : d;
-    const r2 = distanceFn ? distanceFn(1) : d;
-    const v = [this.offset(0, 10), this.offset(1, 10)];
-    const np = [];
-    const o = utils2.lli4(v[0], v[0].c, v[1], v[1].c);
-    if (!o) {
-      throw new Error("cannot scale this curve. Try reducing it first.");
-    }
-    [0, 1].forEach(function(t2) {
-      const p = np[t2 * order] = utils2.copy(points[t2 * order]);
-      p.x += (t2 ? r2 : r1) * v[t2].n.x;
-      p.y += (t2 ? r2 : r1) * v[t2].n.y;
-    });
-    if (!distanceFn) {
-      [0, 1].forEach((t2) => {
-        if (order === 2 && !!t2) return;
-        const p = np[t2 * order];
-        const d2 = this.derivative(t2);
-        const p2 = { x: p.x + d2.x, y: p.y + d2.y };
-        np[t2 + 1] = utils2.lli4(p, p2, o, points[t2 + 1]);
-      });
-      return new _Bezier(np);
-    }
-    [0, 1].forEach(function(t2) {
-      if (order === 2 && !!t2) return;
-      var p = points[t2 + 1];
-      var ov = {
-        x: p.x - o.x,
-        y: p.y - o.y
-      };
-      var rc = distanceFn ? distanceFn((t2 + 1) / order) : d;
-      if (distanceFn && !clockwise) rc = -rc;
-      var m = sqrt2(ov.x * ov.x + ov.y * ov.y);
-      ov.x /= m;
-      ov.y /= m;
-      np[t2 + 1] = {
-        x: p.x + rc * ov.x,
-        y: p.y + rc * ov.y
-      };
-    });
-    return new _Bezier(np);
-  }
-  outline(d1, d2, d3, d4) {
-    d2 = d2 === void 0 ? d1 : d2;
-    if (this._linear) {
-      const n = this.normal(0);
-      const start = this.points[0];
-      const end = this.points[this.points.length - 1];
-      let s, mid, e;
-      if (d3 === void 0) {
-        d3 = d1;
-        d4 = d2;
-      }
-      s = { x: start.x + n.x * d1, y: start.y + n.y * d1 };
-      e = { x: end.x + n.x * d3, y: end.y + n.y * d3 };
-      mid = { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 };
-      const fline = [s, mid, e];
-      s = { x: start.x - n.x * d2, y: start.y - n.y * d2 };
-      e = { x: end.x - n.x * d4, y: end.y - n.y * d4 };
-      mid = { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 };
-      const bline = [e, mid, s];
-      const ls2 = utils2.makeline(bline[2], fline[0]);
-      const le2 = utils2.makeline(fline[2], bline[0]);
-      const segments2 = [ls2, new _Bezier(fline), le2, new _Bezier(bline)];
-      return new PolyBezier(segments2);
-    }
-    const reduced = this.reduce(), len = reduced.length, fcurves = [];
-    let bcurves = [], p, alen = 0, tlen = this.length();
-    const graduated = typeof d3 !== "undefined" && typeof d4 !== "undefined";
-    function linearDistanceFunction(s, e, tlen2, alen2, slen) {
-      return function(v) {
-        const f1 = alen2 / tlen2, f2 = (alen2 + slen) / tlen2, d = e - s;
-        return utils2.map(v, 0, 1, s + f1 * d, s + f2 * d);
-      };
-    }
-    reduced.forEach(function(segment) {
-      const slen = segment.length();
-      if (graduated) {
-        fcurves.push(
-          segment.scale(linearDistanceFunction(d1, d3, tlen, alen, slen))
-        );
-        bcurves.push(
-          segment.scale(linearDistanceFunction(-d2, -d4, tlen, alen, slen))
-        );
-      } else {
-        fcurves.push(segment.scale(d1));
-        bcurves.push(segment.scale(-d2));
-      }
-      alen += slen;
-    });
-    bcurves = bcurves.map(function(s) {
-      p = s.points;
-      if (p[3]) {
-        s.points = [p[3], p[2], p[1], p[0]];
-      } else {
-        s.points = [p[2], p[1], p[0]];
-      }
-      return s;
-    }).reverse();
-    const fs10 = fcurves[0].points[0], fe = fcurves[len - 1].points[fcurves[len - 1].points.length - 1], bs = bcurves[len - 1].points[bcurves[len - 1].points.length - 1], be = bcurves[0].points[0], ls = utils2.makeline(bs, fs10), le = utils2.makeline(fe, be), segments = [ls].concat(fcurves).concat([le]).concat(bcurves);
-    return new PolyBezier(segments);
-  }
-  outlineshapes(d1, d2, curveIntersectionThreshold) {
-    d2 = d2 || d1;
-    const outline = this.outline(d1, d2).curves;
-    const shapes = [];
-    for (let i = 1, len = outline.length; i < len / 2; i++) {
-      const shape = utils2.makeshape(
-        outline[i],
-        outline[len - i],
-        curveIntersectionThreshold
-      );
-      shape.startcap.virtual = i > 1;
-      shape.endcap.virtual = i < len / 2 - 1;
-      shapes.push(shape);
-    }
-    return shapes;
-  }
-  intersects(curve, curveIntersectionThreshold) {
-    if (!curve) return this.selfintersects(curveIntersectionThreshold);
-    if (curve.p1 && curve.p2) {
-      return this.lineIntersects(curve);
-    }
-    if (curve instanceof _Bezier) {
-      curve = curve.reduce();
-    }
-    return this.curveintersects(
-      this.reduce(),
-      curve,
-      curveIntersectionThreshold
-    );
-  }
-  lineIntersects(line) {
-    const mx = min(line.p1.x, line.p2.x), my = min(line.p1.y, line.p2.y), MX = max(line.p1.x, line.p2.x), MY = max(line.p1.y, line.p2.y);
-    return utils2.roots(this.points, line).filter((t2) => {
-      var p = this.get(t2);
-      return utils2.between(p.x, mx, MX) && utils2.between(p.y, my, MY);
-    });
-  }
-  selfintersects(curveIntersectionThreshold) {
-    const reduced = this.reduce(), len = reduced.length - 2, results = [];
-    for (let i = 0, result, left, right; i < len; i++) {
-      left = reduced.slice(i, i + 1);
-      right = reduced.slice(i + 2);
-      result = this.curveintersects(left, right, curveIntersectionThreshold);
-      results.push(...result);
-    }
-    return results;
-  }
-  curveintersects(c1, c2, curveIntersectionThreshold) {
-    const pairs = [];
-    c1.forEach(function(l) {
-      c2.forEach(function(r) {
-        if (l.overlaps(r)) {
-          pairs.push({ left: l, right: r });
-        }
-      });
-    });
-    let intersections = [];
-    pairs.forEach(function(pair) {
-      const result = utils2.pairiteration(
-        pair.left,
-        pair.right,
-        curveIntersectionThreshold
-      );
-      if (result.length > 0) {
-        intersections = intersections.concat(result);
-      }
-    });
-    return intersections;
-  }
-  arcs(errorThreshold) {
-    errorThreshold = errorThreshold || 0.5;
-    return this._iterate(errorThreshold, []);
-  }
-  _error(pc, np1, s, e) {
-    const q = (e - s) / 4, c1 = this.get(s + q), c2 = this.get(e - q), ref = utils2.dist(pc, np1), d1 = utils2.dist(pc, c1), d2 = utils2.dist(pc, c2);
-    return abs2(d1 - ref) + abs2(d2 - ref);
-  }
-  _iterate(errorThreshold, circles) {
-    let t_s = 0, t_e = 1, safety;
-    do {
-      safety = 0;
-      t_e = 1;
-      let np1 = this.get(t_s), np2, np3, arc, prev_arc;
-      let curr_good = false, prev_good = false, done;
-      let t_m = t_e, prev_e = 1, step = 0;
-      do {
-        prev_good = curr_good;
-        prev_arc = arc;
-        t_m = (t_s + t_e) / 2;
-        step++;
-        np2 = this.get(t_m);
-        np3 = this.get(t_e);
-        arc = utils2.getccenter(np1, np2, np3);
-        arc.interval = {
-          start: t_s,
-          end: t_e
-        };
-        let error = this._error(arc, np1, t_s, t_e);
-        curr_good = error <= errorThreshold;
-        done = prev_good && !curr_good;
-        if (!done) prev_e = t_e;
-        if (curr_good) {
-          if (t_e >= 1) {
-            arc.interval.end = prev_e = 1;
-            prev_arc = arc;
-            if (t_e > 1) {
-              let d = {
-                x: arc.x + arc.r * cos2(arc.e),
-                y: arc.y + arc.r * sin2(arc.e)
-              };
-              arc.e += utils2.angle({ x: arc.x, y: arc.y }, d, this.get(1));
-            }
-            break;
-          }
-          t_e = t_e + (t_e - t_s) / 2;
-        } else {
-          t_e = t_m;
-        }
-      } while (!done && safety++ < 100);
-      if (safety >= 100) {
-        break;
-      }
-      prev_arc = prev_arc ? prev_arc : arc;
-      circles.push(prev_arc);
-      t_s = prev_e;
-    } while (t_e < 1);
-    return circles;
-  }
-};
+// src/main/services/Kowalski.ts
+var import_electron5 = require("electron");
 
 // src/main/services/GhostMouse.ts
 var GhostMouse = class {
   page;
   currentPosition = { x: 0, y: 0 };
-  // Cached viewport width for proportional calculations
-  _viewportWidth = 0;
   constructor(page) {
     this.page = page;
   }
@@ -29082,419 +27680,88 @@ var GhostMouse = class {
   setPage(page) {
     this.page = page;
   }
-  /** Get viewport width, cached per session for proportional calculations. */
-  async getViewportWidth() {
-    if (this._viewportWidth > 0) return this._viewportWidth;
-    this._viewportWidth = await this.page.evaluate(() => window.innerWidth).catch(() => 1080);
-    return this._viewportWidth;
-  }
   /**
-   * Move mouse to target with human-like Bezier curve trajectory.
-   * Includes variable velocity (acceleration/deceleration).
+   * Move mouse to target point.
    */
-  async moveTo(target, config = {}) {
-    const vw = await this.getViewportWidth();
-    const {
-      minSpeed = 2,
-      maxSpeed = 8,
-      overshootProbability = 0.15,
-      jitterAmount = Math.max(1, Math.round(vw * 2e-3))
-    } = config;
-    const movementDistance = Math.hypot(
-      target.x - this.currentPosition.x,
-      target.y - this.currentPosition.y
-    );
-    const controlPoints = this.generateBezierControlPoints(
-      this.currentPosition,
-      target
-    );
-    const curve = new Bezier(
-      controlPoints.start.x,
-      controlPoints.start.y,
-      controlPoints.cp1.x,
-      controlPoints.cp1.y,
-      controlPoints.cp2.x,
-      controlPoints.cp2.y,
-      controlPoints.end.x,
-      controlPoints.end.y
-    );
-    const points = this.generateVariableVelocityPoints(curve, minSpeed, maxSpeed);
-    for (let i = 0; i < points.length; i++) {
-      const jitteredPoint = this.addJitter(points[i], jitterAmount);
-      await this.page.mouse.move(jitteredPoint.x, jitteredPoint.y);
-      await this.microDelay(5, 15);
-    }
-    if (Math.random() < overshootProbability) {
-      await this.overshootAndCorrect(target, movementDistance);
-    }
+  async moveTo(target) {
+    await this.page.mouse.move(target.x, target.y);
     this.currentPosition = target;
   }
   /**
-   * Generate Bezier control points that create natural curve.
-   * Humans don't move in straight lines - they curve slightly.
-   */
-  generateBezierControlPoints(start, end) {
-    const distance3 = Math.hypot(end.x - start.x, end.y - start.y);
-    const angle = Math.atan2(end.y - start.y, end.x - start.x);
-    const perpAngle = angle + Math.PI / 2;
-    const curveIntensity = distance3 * (0.1 + Math.random() * 0.2);
-    const curveDirection = Math.random() > 0.5 ? 1 : -1;
-    return {
-      start,
-      cp1: {
-        x: start.x + (end.x - start.x) * 0.25 + Math.cos(perpAngle) * curveIntensity * curveDirection,
-        y: start.y + (end.y - start.y) * 0.25 + Math.sin(perpAngle) * curveIntensity * curveDirection
-      },
-      cp2: {
-        x: start.x + (end.x - start.x) * 0.75 + Math.cos(perpAngle) * curveIntensity * curveDirection * 0.5,
-        y: start.y + (end.y - start.y) * 0.75 + Math.sin(perpAngle) * curveIntensity * curveDirection * 0.5
-      },
-      end
-    };
-  }
-  /**
-   * Generate points with easing (slow start, fast middle, slow end).
-   * Mimics human acceleration/deceleration pattern.
-   *
-   * Uses the cinematic easing curve from animations.ts for consistency
-   * with the app's visual language.
-   */
-  generateVariableVelocityPoints(curve, minSpeed, maxSpeed) {
-    const points = [];
-    const curveLength = curve.length();
-    let t2 = 0;
-    while (t2 <= 1) {
-      const point = curve.get(t2);
-      points.push({ x: point.x, y: point.y });
-      const easing = this.easeInOutCinematic(t2);
-      const speed = minSpeed + (maxSpeed - minSpeed) * (1 - Math.abs(easing - 0.5) * 2);
-      const increment = speed / curveLength;
-      t2 += Math.max(increment, 0.01);
-    }
-    return points;
-  }
-  /**
-   * Easing function adapted from animations.ts cinematic curve.
-   * [0.22, 1, 0.36, 1] converted to a function.
-   *
-   * This creates the characteristic "slow start, fast middle, slow end"
-   * that makes mouse movements feel natural.
-   */
-  easeInOutCinematic(t2) {
-    return t2 < 0.5 ? 2 * t2 * t2 : 1 - Math.pow(-2 * t2 + 2, 2) / 2;
-  }
-  /**
-   * Add random micro-jitter to a point with layered noise.
-   * Humans have small involuntary hand movements at multiple frequencies.
-   *
-   * Layer 1: Base jitter (primary hand tremor)
-   * Layer 2: Micro-tremor (higher frequency, smaller amplitude neurological noise)
-   *
-   * This two-layer approach defeats bot detection that looks for
-   * geometrically perfect Bezier curves.
-   */
-  addJitter(point, amount) {
-    const baseJitter = {
-      x: (Math.random() - 0.5) * amount,
-      y: (Math.random() - 0.5) * amount
-    };
-    const tremor = {
-      x: (Math.random() - 0.5) * (amount * 0.3),
-      y: (Math.random() - 0.5) * (amount * 0.3)
-    };
-    return {
-      x: point.x + baseJitter.x + tremor.x,
-      y: point.y + baseJitter.y + tremor.y
-    };
-  }
-  /**
-   * Simulate human overshoot: move past target, then correct.
-   * This happens when moving quickly - we slightly overshoot, then adjust.
-   *
-   * Physics-based: Faster movements = more overshoot (human momentum).
-   *
-   * IMPORTANT: Correction movement uses a micro-curve, NOT a straight line.
-   * Straight-line correction is a bot signal (humans don't move perfectly).
-   *
-   * @param target - The intended target point
-   * @param movementDistance - Distance traveled to reach target (affects overshoot magnitude)
-   */
-  async overshootAndCorrect(target, movementDistance = 100) {
-    const vw = await this.getViewportWidth();
-    const baseOvershoot = Math.min(vw * 0.028, Math.max(vw * 5e-3, movementDistance * 0.08));
-    const overshootAmount = baseOvershoot * (0.5 + Math.random());
-    const overshootAngle = Math.random() * Math.PI * 2;
-    const overshoot = {
-      x: target.x + Math.cos(overshootAngle) * overshootAmount,
-      y: target.y + Math.sin(overshootAngle) * overshootAmount
-    };
-    await this.page.mouse.move(overshoot.x, overshoot.y);
-    await this.microDelay(20, 60);
-    const correctionOffset = vw * 7e-3;
-    const midpoint = {
-      x: (overshoot.x + target.x) / 2 + (Math.random() - 0.5) * correctionOffset,
-      y: (overshoot.y + target.y) / 2 + (Math.random() - 0.5) * correctionOffset
-    };
-    await this.page.mouse.move(midpoint.x, midpoint.y);
-    await this.microDelay(5, 15);
-    await this.page.mouse.move(target.x, target.y);
-  }
-  /**
-   * Human-like click with pre-click hover and post-click pause.
+   * Click at a target point.
    */
   async click(target) {
-    await this.moveTo(target);
-    await this.microDelay(30, 80);
-    await this.page.mouse.down();
-    await this.microDelay(40, 90);
-    await this.page.mouse.up();
-    await this.microDelay(50, 120);
+    await this.page.mouse.click(target.x, target.y);
+    this.currentPosition = target;
+  }
+  /**
+   * Click at specific coordinates.
+   * Used by VisionAgent where coordinates come from LLM vision.
+   */
+  async clickPoint(x2, y2) {
+    await this.page.mouse.click(x2, y2);
+    this.currentPosition = { x: x2, y: y2 };
   }
   /**
    * Hover over a target for a duration without clicking.
-   * Used to verify element actionability before clicking (e.g., carousel buttons).
-   *
-   * @param target - Point to hover over
-   * @param durationMs - How long to hover (in milliseconds)
    */
   async hover(target, durationMs = 1e3) {
-    await this.moveTo(target);
-    const jitterDuration = durationMs * 0.8;
-    const jitterInterval = 150;
-    let elapsed = 0;
-    while (elapsed < jitterDuration) {
-      await this.microDelay(jitterInterval * 0.8, jitterInterval * 1.2);
-      const hoverJitter = await this.getViewportWidth() * 3e-3;
-      const microMove = {
-        x: target.x + (Math.random() - 0.5) * hoverJitter,
-        y: target.y + (Math.random() - 0.5) * hoverJitter
-      };
-      await this.page.mouse.move(microMove.x, microMove.y);
-      elapsed += jitterInterval;
-    }
     await this.page.mouse.move(target.x, target.y);
-    await this.microDelay(durationMs * 0.15, durationMs * 0.25);
+    this.currentPosition = target;
+    if (durationMs > 0) {
+      await new Promise((resolve2) => setTimeout(resolve2, durationMs));
+    }
   }
   /**
-   * Hover over an element with randomized offset within its bounds.
-   *
-   * @param boundingBox - Element's bounding box
-   * @param durationMs - How long to hover
-   * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
+   * Click the center of an element's bounding box.
    */
-  async hoverElement(boundingBox, durationMs = 1e3, centerBias) {
-    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
-    const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
-    const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
-    let hoverPoint = {
-      x: boundingBox.x + offsetX,
-      y: boundingBox.y + offsetY
-    };
-    const marginX = Math.max(2, boundingBox.width * 0.05);
-    const marginY = Math.max(2, boundingBox.height * 0.05);
-    hoverPoint.x = Math.max(
-      boundingBox.x + marginX,
-      Math.min(hoverPoint.x, boundingBox.x + boundingBox.width - marginX)
-    );
-    hoverPoint.y = Math.max(
-      boundingBox.y + marginY,
-      Math.min(hoverPoint.y, boundingBox.y + boundingBox.height - marginY)
-    );
-    await this.hover(hoverPoint, durationMs);
+  async clickElement(boundingBox) {
+    const cx = boundingBox.x + boundingBox.width / 2;
+    const cy = boundingBox.y + boundingBox.height / 2;
+    await this.page.mouse.click(cx, cy);
+    this.currentPosition = { x: cx, y: cy };
   }
   /**
-   * Click an element with randomized offset within its bounds.
-   * Humans NEVER click exactly in the center of buttons.
-   *
-   * @param boundingBox - Element's bounding box
-   * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
+   * Hover over the center of an element's bounding box.
    */
-  async clickElement(boundingBox, centerBias) {
-    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
-    const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
-    const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
-    let clickPoint = {
-      x: boundingBox.x + offsetX,
-      y: boundingBox.y + offsetY
-    };
-    const marginX = Math.max(2, boundingBox.width * 0.05);
-    const marginY = Math.max(2, boundingBox.height * 0.05);
-    clickPoint.x = Math.max(
-      boundingBox.x + marginX,
-      Math.min(clickPoint.x, boundingBox.x + boundingBox.width - marginX)
-    );
-    clickPoint.y = Math.max(
-      boundingBox.y + marginY,
-      Math.min(clickPoint.y, boundingBox.y + boundingBox.height - marginY)
-    );
-    await this.click(clickPoint);
+  async hoverElement(boundingBox, durationMs = 1e3) {
+    const cx = boundingBox.x + boundingBox.width / 2;
+    const cy = boundingBox.y + boundingBox.height / 2;
+    await this.hover({ x: cx, y: cy }, durationMs);
   }
   /**
-   * Click at a specific point with small gaussian jitter.
-   * Used by VisionAgent where coordinates come from LLM vision
-   * (no bounding box available — just an x,y target on the viewport).
-   *
-   * Treats the point as center of an implicit small target area.
-   * Applies gaussian offset to simulate natural pointing imprecision.
+   * Click at a target point (role parameter ignored — kept for API compat).
    */
-  async clickPoint(x2, y2) {
-    const vw = await this.getViewportWidth();
-    const jitterRadius = Math.max(3, Math.round(vw * 9e-3));
-    const offsetX = this.gaussianRandom(0.5) * jitterRadius - jitterRadius / 2;
-    const offsetY = this.gaussianRandom(0.5) * jitterRadius - jitterRadius / 2;
-    await this.click({ x: x2 + offsetX, y: y2 + offsetY });
+  async clickWithRole(target, _role) {
+    await this.click(target);
   }
   /**
-   * Get a randomized center bias value (0.2-0.4 range).
-   * Avoids using fixed 0.3 which creates detectable patterns.
+   * Click the center of an element (role parameter ignored — kept for API compat).
    */
-  getRandomizedCenterBias() {
-    return 0.2 + Math.random() * 0.2;
+  async clickElementWithRole(boundingBox, _role) {
+    await this.clickElement(boundingBox);
   }
   /**
-   * Generate a random number between 0 and 1 with gaussian-like distribution.
-   * centerBias: 0.0 = uniform distribution, 1.0 = always 0.5 (center)
-   *
-   * This mimics human click patterns: usually near center, but with natural variation.
+   * Get hover duration for a role. Returns a fixed small value.
+   * Kept for API compatibility.
    */
-  gaussianRandom(centerBias) {
-    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
-    const u1 = Math.random();
-    const u2 = Math.random();
-    const gaussian = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-    const normalized = gaussian / 6 + 0.5;
-    const clamped = Math.max(0.1, Math.min(0.9, normalized));
-    const uniform = 0.1 + Math.random() * 0.8;
-    return clamped * effectiveBias + uniform * (1 - effectiveBias);
-  }
-  /**
-   * Small random delay for human-like timing variation.
-   */
-  microDelay(min2, max2) {
-    const delay = min2 + Math.random() * (max2 - min2);
-    return new Promise((resolve2) => setTimeout(resolve2, delay));
-  }
-  // =========================================================================
-  // Gaze-Lag Execution System (Human-like "Look, then Move")
-  // =========================================================================
-  /**
-   * Randomized value within a range - NO fixed values allowed.
-   */
-  randomInRange(min2, max2) {
-    return min2 + Math.random() * (max2 - min2);
-  }
-  /**
-   * Get element-specific hover duration based on role.
-   * Different element types require different amounts of visual processing.
-   *
-   * @param role - The accessibility role of the element
-   * @returns Randomized hover duration in milliseconds
-   */
-  getHoverDurationForRole(role) {
-    const roleLower = role.toLowerCase();
-    const ranges = {
-      button: [50, 150],
-      // Large, easy targets
-      link: [150, 300],
-      // Precision required
-      textbox: [200, 400],
-      // Cognitive preparation for typing
-      searchbox: [200, 400],
-      // Same as textbox
-      combobox: [180, 350],
-      // Dropdown interaction
-      image: [100, 250],
-      // Visual inspection
-      img: [100, 250],
-      // Same as image
-      menuitem: [120, 280],
-      // Menu navigation
-      tab: [100, 220],
-      // Tab switching
-      checkbox: [80, 180],
-      // Quick toggle
-      radio: [80, 180]
-      // Quick selection
-    };
-    const [min2, max2] = ranges[roleLower] || [100, 300];
-    return this.randomInRange(min2, max2);
-  }
-  /**
-   * Human-like click with element-specific timing.
-   * Varies pre-click hover based on element role.
-   *
-   * @param target - Point to click
-   * @param role - Accessibility role for timing adjustment
-   */
-  async clickWithRole(target, role = "button") {
-    await this.moveTo(target);
-    const hoverDuration = this.getHoverDurationForRole(role);
-    await new Promise((r) => setTimeout(r, hoverDuration));
-    await this.page.mouse.down();
-    await this.microDelay(40, 90);
-    await this.page.mouse.up();
-    await this.microDelay(50, 120);
-  }
-  /**
-   * Click an element with gaze-aware role-specific timing.
-   *
-   * @param boundingBox - Element's bounding box
-   * @param role - Accessibility role for timing adjustment
-   * @param centerBias - How much to favor center (0.0 = uniform, 1.0 = always center). Randomized 0.2-0.4 if not specified.
-   */
-  async clickElementWithRole(boundingBox, role = "button", centerBias) {
-    const effectiveBias = centerBias ?? this.getRandomizedCenterBias();
-    const offsetX = this.gaussianRandom(effectiveBias) * boundingBox.width;
-    const offsetY = this.gaussianRandom(effectiveBias) * boundingBox.height;
-    let clickPoint = {
-      x: boundingBox.x + offsetX,
-      y: boundingBox.y + offsetY
-    };
-    const marginX = Math.max(2, boundingBox.width * 0.05);
-    const marginY = Math.max(2, boundingBox.height * 0.05);
-    clickPoint.x = Math.max(
-      boundingBox.x + marginX,
-      Math.min(clickPoint.x, boundingBox.x + boundingBox.width - marginX)
-    );
-    clickPoint.y = Math.max(
-      boundingBox.y + marginY,
-      Math.min(clickPoint.y, boundingBox.y + boundingBox.height - marginY)
-    );
-    await this.clickWithRole(clickPoint, role);
+  getHoverDurationForRole(_role) {
+    return 100;
   }
 };
 
 // src/main/services/HumanScroll.ts
 var HumanScroll = class {
   page;
-  // Cached viewport height for proportional calculations (avoids repeated CDP calls)
-  cachedViewportHeight = 0;
   constructor(page) {
     this.page = page;
   }
   /** Rebind to a different page (used for tab switching). */
   setPage(page) {
     this.page = page;
-    this.cachedViewportHeight = 0;
-  }
-  /**
-   * Get viewport height, using cache to avoid repeated CDP calls.
-   * Refreshes once per scroll operation.
-   */
-  async getViewportHeight() {
-    if (this.cachedViewportHeight > 0) return this.cachedViewportHeight;
-    const vh = await this.cdpEvaluate("window.innerHeight");
-    this.cachedViewportHeight = vh || 1920;
-    return this.cachedViewportHeight;
-  }
-  /**
-   * Randomized value within a range - NO fixed values allowed.
-   */
-  randomInRange(min2, max2) {
-    return min2 + Math.random() * (max2 - min2);
   }
   // =========================================================================
-  // CDP Helper Methods (Undetectable)
+  // CDP Helper Methods (Undetectable) — ALL KEPT
   // =========================================================================
   /**
    * Execute JavaScript via CDP Runtime.evaluate (undetectable).
@@ -29540,221 +27807,41 @@ var HumanScroll = class {
       return null;
     }
   }
+  // =========================================================================
+  // Scroll Methods — simplified to single wheel calls
+  // =========================================================================
   /**
-   * Perform human-like scroll with:
-   * - Variable distance (not exact pixels every time)
-   * - Smooth acceleration/deceleration
-   * - Occasional micro-adjustments (scroll past, then back)
-   * - Reading pauses
+   * Basic scroll. Single wheel call.
    */
   async scroll(config = {}) {
-    this.cachedViewportHeight = 0;
-    const vh = await this.getViewportHeight();
-    const {
-      baseDistance = Math.round(vh * 0.4),
-      variability = 0.3,
-      microAdjustProb = 0.1
-    } = config;
-    const variation = 1 + (Math.random() - 0.5) * 2 * variability;
-    const targetDistance = Math.round(baseDistance * variation);
-    await this.smoothScrollWithEasing(targetDistance);
-    if (Math.random() < microAdjustProb) {
-      await this.microAdjust();
-    }
+    const vh = await this.cdpEvaluate("window.innerHeight") ?? 1920;
+    const { baseDistance = Math.round(vh * 0.4) } = config;
+    await this.page.mouse.wheel(0, baseDistance);
   }
   /**
-   * Smooth scroll using wheel events with easing.
-   * More realistic than window.scrollBy() which is instant.
-   *
-   * Uses cubic ease-out: fast start, gradual slow down.
-   */
-  async smoothScrollWithEasing(distance3, axis = "y") {
-    const steps = 8 + Math.floor(Math.random() * 4);
-    const direction = distance3 > 0 ? 1 : -1;
-    const absDistance = Math.abs(distance3);
-    let scrolled = 0;
-    for (let i = 0; i < steps; i++) {
-      const progress = i / steps;
-      const easing = 1 - Math.pow(1 - progress, 3);
-      const targetScrolled = absDistance * easing;
-      const stepDistance = (targetScrolled - scrolled) * direction;
-      if (axis === "x") {
-        await this.page.mouse.wheel(stepDistance, 0);
-      } else {
-        await this.page.mouse.wheel(0, stepDistance);
-      }
-      scrolled = targetScrolled;
-      const delay = 5 + Math.random() * 10;
-      await new Promise((resolve2) => setTimeout(resolve2, delay));
-    }
-  }
-  /**
-   * Micro-adjustment: scroll a bit more, then back up.
-   * Simulates "oops, scrolled too far" human behavior.
-   *
-   * This is common when looking for specific content -
-   * we overshoot, then scroll back to find what we want.
-   */
-  async microAdjust() {
-    const vh = await this.getViewportHeight();
-    const overshoot = vh * 0.05 + Math.random() * vh * 0.1;
-    await this.page.mouse.wheel(0, overshoot);
-    await new Promise((resolve2) => setTimeout(resolve2, 50 + Math.random() * 50));
-    const correction = overshoot * (0.8 + Math.random() * 0.4);
-    await this.page.mouse.wheel(0, -correction);
-    await new Promise((resolve2) => setTimeout(resolve2, 30 + Math.random() * 30));
-  }
-  /**
-   * Scroll to bring a specific element into view (human-like).
-   * Uses CDP to get element position - NO DOM injection.
-   *
-   * @param backendNodeId - CDP backend node ID from accessibility tree
-   * @returns true if scrolled successfully, false otherwise
-   */
-  async scrollToElementByCDP(backendNodeId) {
-    let cdpSession = null;
-    try {
-      cdpSession = await this.page.context().newCDPSession(this.page);
-      const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
-      if (!box) return false;
-      const viewportHeight = await this.cdpEvaluate("window.innerHeight");
-      const currentScroll = await this.cdpEvaluate("window.scrollY");
-      if (viewportHeight === null || currentScroll === null) return false;
-      const elementCenter = box.y + box.height / 2;
-      const viewportCenter = viewportHeight / 2;
-      const scrollNeeded = elementCenter - viewportCenter;
-      if (Math.abs(scrollNeeded) > viewportHeight * 0.05) {
-        await this.preciseScroll(scrollNeeded);
-      }
-      return true;
-    } catch {
-      return false;
-    } finally {
-      if (cdpSession) {
-        await cdpSession.detach().catch(() => {
-        });
-      }
-    }
-  }
-  /**
-   * Scroll to center an element with verification and retry.
-   * Ensures the post is actually centered after scrolling.
-   *
-   * This is the recommended method for post-centered browsing.
-   *
-   * @param backendNodeId - CDP backend node ID from accessibility tree
-   * @param maxRetries - Maximum centering attempts (default: 2)
-   * @returns Object with success status and final offset from center
-   */
-  async scrollToElementCentered(backendNodeId, maxRetries = 2) {
-    const vh = await this.cdpEvaluate("window.innerHeight");
-    if (!vh) {
-      return { success: false, finalOffset: Infinity };
-    }
-    const TOLERANCE = vh * 0.08 + Math.random() * vh * 0.04;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      let cdpSession = null;
-      try {
-        cdpSession = await this.page.context().newCDPSession(this.page);
-        const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
-        if (!box) {
-          return { success: false, finalOffset: Infinity };
-        }
-        const viewportHeight = vh;
-        const elementCenterY = box.y + box.height / 2;
-        const viewportCenterY = viewportHeight / 2;
-        const offset = elementCenterY - viewportCenterY;
-        if (Math.abs(offset) <= TOLERANCE) {
-          console.log(`  \u2713 Post centered (offset: ${Math.round(offset)}px, attempt: ${attempt})`);
-          return { success: true, finalOffset: offset };
-        }
-        console.log(`  \u{1F4CD} Centering post (offset: ${Math.round(offset)}px, attempt: ${attempt + 1}/${maxRetries + 1})`);
-        await this.preciseScroll(offset);
-        await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
-      } finally {
-        if (cdpSession) {
-          await cdpSession.detach().catch(() => {
-          });
-        }
-      }
-    }
-    const finalOffset = await this.checkElementCenterOffset(backendNodeId);
-    const success = Math.abs(finalOffset) <= TOLERANCE;
-    if (!success) {
-      console.log(`  \u26A0\uFE0F Centering incomplete after ${maxRetries + 1} attempts (final offset: ${Math.round(finalOffset)}px)`);
-    }
-    return { success, finalOffset };
-  }
-  /**
-   * Check how far an element is from viewport center.
-   * Helper method for scroll verification.
-   */
-  async checkElementCenterOffset(backendNodeId) {
-    let cdpSession = null;
-    try {
-      cdpSession = await this.page.context().newCDPSession(this.page);
-      const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
-      if (!box) return Infinity;
-      const viewportHeight = await this.cdpEvaluate("window.innerHeight");
-      if (!viewportHeight) return Infinity;
-      const elementCenterY = box.y + box.height / 2;
-      const viewportCenterY = viewportHeight / 2;
-      return elementCenterY - viewportCenterY;
-    } finally {
-      if (cdpSession) {
-        await cdpSession.detach().catch(() => {
-        });
-      }
-    }
-  }
-  /**
-   * Quick scroll for navigation (less human-like, but faster).
-   * Use sparingly - mostly for getting to starting position.
-   *
-   * Note: Randomized timing to avoid machine-like patterns.
+   * Quick scroll for navigation. Single wheel call.
    */
   async quickScroll(distance3) {
-    const steps = 5;
-    const stepSize = distance3 / steps;
-    for (let i = 0; i < steps; i++) {
-      await this.page.mouse.wheel(0, stepSize);
-      await new Promise((resolve2) => setTimeout(resolve2, 15 + Math.random() * 15));
-    }
+    await this.page.mouse.wheel(0, distance3);
   }
   /**
-   * Precise scroll for centering operations.
-   * Unlike scroll(), this does NOT add variability - we need exact positioning.
-   * Still uses easing for human-like feel.
-   *
-   * @param distance - Exact pixels to scroll (positive = down, negative = up)
+   * Precise scroll for centering operations. Single wheel call.
    */
   async preciseScroll(distance3) {
-    const steps = 12 + Math.floor(Math.random() * 6);
-    const direction = distance3 > 0 ? 1 : -1;
-    const absDistance = Math.abs(distance3);
-    let scrolled = 0;
-    for (let i = 0; i < steps; i++) {
-      const progress = i / steps;
-      const easing = 1 - Math.pow(1 - progress, 3);
-      const targetScrolled = absDistance * easing;
-      const stepDistance = (targetScrolled - scrolled) * direction;
-      await this.page.mouse.wheel(0, stepDistance);
-      scrolled = targetScrolled;
-      const delay = 5 + Math.random() * 10;
-      await new Promise((resolve2) => setTimeout(resolve2, delay));
-    }
+    await this.page.mouse.wheel(0, distance3);
   }
   /**
-   * Scroll to top of page (for starting fresh exploration).
-   * Uses CDP to get current scroll position - NO DOM injection.
+   * Scroll to top of page.
    */
   async scrollToTop() {
     const currentScroll = await this.cdpEvaluate("window.scrollY");
     if (currentScroll && currentScroll > 0) {
-      await this.quickScroll(-currentScroll);
-      await new Promise((resolve2) => setTimeout(resolve2, 100 + Math.random() * 100));
+      await this.page.mouse.wheel(0, -currentScroll);
     }
   }
+  // =========================================================================
+  // CDP State Queries — ALL KEPT
+  // =========================================================================
   /**
    * Get current scroll position via CDP (undetectable).
    */
@@ -29771,10 +27858,10 @@ var HumanScroll = class {
   }
   /**
    * Check if we're near the bottom of the page via CDP (undetectable).
-   * Useful for detecting "infinite scroll loaded more content".
    */
   async isNearBottom(threshold) {
-    const effectiveThreshold = threshold ?? Math.round(await this.getViewportHeight() * 0.2);
+    const vh = await this.cdpEvaluate("window.innerHeight") ?? 1920;
+    const effectiveThreshold = threshold ?? Math.round(vh * 0.2);
     const result = await this.cdpEvaluate(`(function() {
             const scrollTop = window.scrollY;
             const scrollHeight = document.documentElement.scrollHeight;
@@ -29795,79 +27882,146 @@ var HumanScroll = class {
     return result ?? { width: 0, height: 0, scrollHeight: 0 };
   }
   // =========================================================================
-  // Intent-Driven Scrolling (Content-Aware)
+  // Element Scrolling — CDP-based, simplified scroll calls
   // =========================================================================
   /**
-   * Scroll with human-like behavior: easing, micro-adjustments, reading pause.
-   * The LLM decides scroll distance via config overrides.
-   *
-   * @param config - Scroll configuration with explicit baseDistance from caller
+   * Scroll to bring a specific element into view.
+   * Uses CDP to get element position — NO DOM injection.
+   */
+  async scrollToElementByCDP(backendNodeId) {
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
+      if (!box) return false;
+      const viewportHeight = await this.cdpEvaluate("window.innerHeight");
+      if (viewportHeight === null) return false;
+      const elementCenter = box.y + box.height / 2;
+      const viewportCenter = viewportHeight / 2;
+      const scrollNeeded = elementCenter - viewportCenter;
+      if (Math.abs(scrollNeeded) > viewportHeight * 0.05) {
+        await this.page.mouse.wheel(0, scrollNeeded);
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+  }
+  /**
+   * Scroll to center an element with verification and retry.
+   * Fixed 50px tolerance (no variable tolerance needed without stealth).
+   */
+  async scrollToElementCentered(backendNodeId, maxRetries = 2) {
+    const TOLERANCE = 50;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      let cdpSession = null;
+      try {
+        cdpSession = await this.page.context().newCDPSession(this.page);
+        const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
+        if (!box) {
+          return { success: false, finalOffset: Infinity };
+        }
+        const viewportHeight = await this.cdpEvaluate("window.innerHeight");
+        if (!viewportHeight) {
+          return { success: false, finalOffset: Infinity };
+        }
+        const elementCenterY = box.y + box.height / 2;
+        const viewportCenterY = viewportHeight / 2;
+        const offset = elementCenterY - viewportCenterY;
+        if (Math.abs(offset) <= TOLERANCE) {
+          console.log(`  \u2713 Post centered (offset: ${Math.round(offset)}px, attempt: ${attempt})`);
+          return { success: true, finalOffset: offset };
+        }
+        console.log(`  \u{1F4CD} Centering post (offset: ${Math.round(offset)}px, attempt: ${attempt + 1}/${maxRetries + 1})`);
+        await this.page.mouse.wheel(0, offset);
+        await new Promise((r) => setTimeout(r, 50));
+      } finally {
+        if (cdpSession) {
+          await cdpSession.detach().catch(() => {
+          });
+        }
+      }
+    }
+    const finalOffset = await this.checkElementCenterOffset(backendNodeId);
+    const success = Math.abs(finalOffset) <= TOLERANCE;
+    if (!success) {
+      console.log(`  \u26A0\uFE0F Centering incomplete after ${maxRetries + 1} attempts (final offset: ${Math.round(finalOffset)}px)`);
+    }
+    return { success, finalOffset };
+  }
+  /**
+   * Check how far an element is from viewport center.
+   */
+  async checkElementCenterOffset(backendNodeId) {
+    let cdpSession = null;
+    try {
+      cdpSession = await this.page.context().newCDPSession(this.page);
+      const box = await this.getNodeBoundingBoxByCDP(cdpSession, backendNodeId);
+      if (!box) return Infinity;
+      const viewportHeight = await this.cdpEvaluate("window.innerHeight");
+      if (!viewportHeight) return Infinity;
+      const elementCenterY = box.y + box.height / 2;
+      const viewportCenterY = viewportHeight / 2;
+      return elementCenterY - viewportCenterY;
+    } finally {
+      if (cdpSession) {
+        await cdpSession.detach().catch(() => {
+        });
+      }
+    }
+  }
+  // =========================================================================
+  // Intent-Driven Scrolling — simplified, keeps failure detection
+  // =========================================================================
+  /**
+   * Scroll with failure detection. Single wheel call.
+   * The LLM decides scroll distance via config.baseDistance.
    */
   async scrollWithIntent(config = {}) {
-    const vh = await this.getViewportHeight();
-    const {
-      baseDistance = Math.round(vh * 0.4),
-      variability = 0.3,
-      microAdjustProb = 0.1
-    } = config;
-    const variation = 1 + (Math.random() - 0.5) * 2 * variability;
-    const targetDistance = Math.round(baseDistance * variation);
+    const vh = await this.cdpEvaluate("window.innerHeight") ?? 1920;
+    const { baseDistance = Math.round(vh * 0.4) } = config;
     const scrollYBefore = await this.getScrollPosition();
-    await this.smoothScrollWithEasing(targetDistance);
+    await this.page.mouse.wheel(0, baseDistance);
     const scrollYAfter = await this.getScrollPosition();
     const actualDelta = scrollYAfter - scrollYBefore;
-    console.log(`  \u{1F4DC} SCROLL: Target=${targetDistance}px, Actual=${actualDelta}px`);
+    console.log(`  \u{1F4DC} SCROLL: Target=${baseDistance}px, Actual=${actualDelta}px`);
     let scrollFailed = false;
-    if (actualDelta === 0 && targetDistance > 50) {
+    if (actualDelta === 0 && Math.abs(baseDistance) > 50) {
       console.log("  \u26A0\uFE0F Scroll Failed - Page may be stuck or reached bottom!");
       scrollFailed = true;
     }
-    if (Math.random() < microAdjustProb) {
-      await this.microAdjust();
-    }
     return {
       contentType: "mixed",
-      scrollDistance: targetDistance,
+      scrollDistance: baseDistance,
       actualDelta,
       scrollFailed,
       pauseDurationMs: 0
     };
   }
   /**
-   * Horizontal scroll with human-like behavior: easing, micro-adjustments, reading pause.
-   * Same physics pipeline as vertical scrollWithIntent but on the X axis.
+   * Horizontal scroll with failure detection. Single wheel call.
    */
   async scrollHorizontalWithIntent(config = {}) {
     const vw = await this.cdpEvaluate("window.innerWidth") ?? 1080;
-    const {
-      baseDistance = Math.round(vw * 0.4),
-      variability = 0.3,
-      microAdjustProb = 0.1
-    } = config;
-    const variation = 1 + (Math.random() - 0.5) * 2 * variability;
-    const targetDistance = Math.round(baseDistance * variation);
+    const { baseDistance = Math.round(vw * 0.4) } = config;
     const scrollXBefore = await this.getScrollPositionX();
-    await this.smoothScrollWithEasing(targetDistance, "x");
+    await this.page.mouse.wheel(baseDistance, 0);
     const scrollXAfter = await this.getScrollPositionX();
     const actualDelta = scrollXAfter - scrollXBefore;
-    console.log(`  \u{1F4DC} H-SCROLL: Target=${targetDistance}px, Actual=${actualDelta}px`);
+    console.log(`  \u{1F4DC} H-SCROLL: Target=${baseDistance}px, Actual=${actualDelta}px`);
     let scrollFailed = false;
-    if (actualDelta === 0 && Math.abs(targetDistance) > 50) {
+    if (actualDelta === 0 && Math.abs(baseDistance) > 50) {
       console.log("  \u26A0\uFE0F Horizontal Scroll Failed");
       scrollFailed = true;
     }
-    if (Math.random() < microAdjustProb) {
-      const overshoot = vw * 0.05 + Math.random() * vw * 0.1;
-      const dir = targetDistance > 0 ? 1 : -1;
-      await this.page.mouse.wheel(overshoot * dir, 0);
-      await new Promise((resolve2) => setTimeout(resolve2, 50 + Math.random() * 50));
-      const correction = overshoot * (0.8 + Math.random() * 0.4);
-      await this.page.mouse.wheel(-correction * dir, 0);
-      await new Promise((resolve2) => setTimeout(resolve2, 30 + Math.random() * 30));
-    }
     return {
       contentType: "mixed",
-      scrollDistance: targetDistance,
+      scrollDistance: baseDistance,
       actualDelta,
       scrollFailed,
       pauseDurationMs: 0
@@ -30869,14 +29023,14 @@ function rgbToHsl(r, g, b) {
   r = bound01(r, 255);
   g = bound01(g, 255);
   b = bound01(b, 255);
-  var max2 = Math.max(r, g, b), min2 = Math.min(r, g, b);
-  var h, s, l = (max2 + min2) / 2;
-  if (max2 == min2) {
+  var max = Math.max(r, g, b), min = Math.min(r, g, b);
+  var h, s, l = (max + min) / 2;
+  if (max == min) {
     h = s = 0;
   } else {
-    var d = max2 - min2;
-    s = l > 0.5 ? d / (2 - max2 - min2) : d / (max2 + min2);
-    switch (max2) {
+    var d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
       case r:
         h = (g - b) / d + (g < b ? 6 : 0);
         break;
@@ -30900,12 +29054,12 @@ function hslToRgb(h, s, l) {
   h = bound01(h, 360);
   s = bound01(s, 100);
   l = bound01(l, 100);
-  function hue2rgb(p2, q2, t2) {
-    if (t2 < 0) t2 += 1;
-    if (t2 > 1) t2 -= 1;
-    if (t2 < 1 / 6) return p2 + (q2 - p2) * 6 * t2;
-    if (t2 < 1 / 2) return q2;
-    if (t2 < 2 / 3) return p2 + (q2 - p2) * (2 / 3 - t2) * 6;
+  function hue2rgb(p2, q2, t) {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p2 + (q2 - p2) * 6 * t;
+    if (t < 1 / 2) return q2;
+    if (t < 2 / 3) return p2 + (q2 - p2) * (2 / 3 - t) * 6;
     return p2;
   }
   if (s === 0) {
@@ -30927,14 +29081,14 @@ function rgbToHsv(r, g, b) {
   r = bound01(r, 255);
   g = bound01(g, 255);
   b = bound01(b, 255);
-  var max2 = Math.max(r, g, b), min2 = Math.min(r, g, b);
-  var h, s, v = max2;
-  var d = max2 - min2;
-  s = max2 === 0 ? 0 : d / max2;
-  if (max2 == min2) {
+  var max = Math.max(r, g, b), min = Math.min(r, g, b);
+  var h, s, v = max;
+  var d = max - min;
+  s = max === 0 ? 0 : d / max;
+  if (max == min) {
     h = 0;
   } else {
-    switch (max2) {
+    switch (max) {
       case r:
         h = (g - b) / d + (g < b ? 6 : 0);
         break;
@@ -30957,7 +29111,7 @@ function hsvToRgb(h, s, v) {
   h = bound01(h, 360) * 6;
   s = bound01(s, 100);
   v = bound01(v, 100);
-  var i = Math.floor(h), f = h - i, p = v * (1 - s), q = v * (1 - f * s), t2 = v * (1 - (1 - f) * s), mod = i % 6, r = [v, q, p, p, t2, v][mod], g = [t2, v, v, q, p, p][mod], b = [p, p, t2, v, v, q][mod];
+  var i = Math.floor(h), f = h - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s), mod = i % 6, r = [v, q, p, p, t, v][mod], g = [t, v, v, q, p, p][mod], b = [p, p, t, v, v, q][mod];
   return {
     r: r * 255,
     g: g * 255,
@@ -31331,17 +29485,17 @@ function boundAlpha(a) {
   }
   return a;
 }
-function bound01(n, max2) {
+function bound01(n, max) {
   if (isOnePointZero(n)) n = "100%";
   var processPercent = isPercentage(n);
-  n = Math.min(max2, Math.max(0, parseFloat(n)));
+  n = Math.min(max, Math.max(0, parseFloat(n)));
   if (processPercent) {
-    n = parseInt(n * max2, 10) / 100;
+    n = parseInt(n * max, 10) / 100;
   }
-  if (Math.abs(n - max2) < 1e-6) {
+  if (Math.abs(n - max) < 1e-6) {
     return 1;
   }
-  return n % max2 / parseFloat(max2);
+  return n % max / parseFloat(max);
 }
 function clamp01(val) {
   return Math.min(1, Math.max(0, val));
@@ -31589,11 +29743,11 @@ function intToRGBA(i) {
 }
 function colorDiff(rgba1, rgba2) {
   const sq = (n) => Math.pow(n, 2);
-  const { max: max2 } = Math;
+  const { max } = Math;
   const maxVal = 255 * 255 * 3;
   const rgba1A = "a" in rgba1 ? rgba1.a : 255;
   const rgba2A = "a" in rgba2 ? rgba2.a : 255;
-  return (max2(sq(rgba1.r - rgba2.r), sq(rgba1.r - rgba2.r - rgba1A + rgba2A)) + max2(sq(rgba1.g - rgba2.g), sq(rgba1.g - rgba2.g - rgba1A + rgba2A)) + max2(sq(rgba1.b - rgba2.b), sq(rgba1.b - rgba2.b - rgba1A + rgba2A))) / maxVal;
+  return (max(sq(rgba1.r - rgba2.r), sq(rgba1.r - rgba2.r - rgba1A + rgba2A)) + max(sq(rgba1.g - rgba2.g), sq(rgba1.g - rgba2.g - rgba1A + rgba2A)) + max(sq(rgba1.b - rgba2.b), sq(rgba1.b - rgba2.b - rgba1A + rgba2A))) / maxVal;
 }
 function limit255(n) {
   n = Math.max(n, 0);
@@ -31989,8 +30143,8 @@ var ZodParsedType = util.arrayToEnum([
   "set"
 ]);
 var getParsedType = (data) => {
-  const t2 = typeof data;
-  switch (t2) {
+  const t = typeof data;
+  switch (t) {
     case "undefined":
       return ZodParsedType.undefined;
     case "string":
@@ -33320,24 +31474,24 @@ var ZodString = class _ZodString extends ZodType {
     return !!this._def.checks.find((ch) => ch.kind === "base64url");
   }
   get minLength() {
-    let min2 = null;
+    let min = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "min") {
-        if (min2 === null || ch.value > min2)
-          min2 = ch.value;
+        if (min === null || ch.value > min)
+          min = ch.value;
       }
     }
-    return min2;
+    return min;
   }
   get maxLength() {
-    let max2 = null;
+    let max = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "max") {
-        if (max2 === null || ch.value < max2)
-          max2 = ch.value;
+        if (max === null || ch.value < max)
+          max = ch.value;
       }
     }
-    return max2;
+    return max;
   }
 };
 ZodString.create = (params) => {
@@ -33541,43 +31695,43 @@ var ZodNumber = class _ZodNumber extends ZodType {
     });
   }
   get minValue() {
-    let min2 = null;
+    let min = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "min") {
-        if (min2 === null || ch.value > min2)
-          min2 = ch.value;
+        if (min === null || ch.value > min)
+          min = ch.value;
       }
     }
-    return min2;
+    return min;
   }
   get maxValue() {
-    let max2 = null;
+    let max = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "max") {
-        if (max2 === null || ch.value < max2)
-          max2 = ch.value;
+        if (max === null || ch.value < max)
+          max = ch.value;
       }
     }
-    return max2;
+    return max;
   }
   get isInt() {
     return !!this._def.checks.find((ch) => ch.kind === "int" || ch.kind === "multipleOf" && util.isInteger(ch.value));
   }
   get isFinite() {
-    let max2 = null;
-    let min2 = null;
+    let max = null;
+    let min = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "finite" || ch.kind === "int" || ch.kind === "multipleOf") {
         return true;
       } else if (ch.kind === "min") {
-        if (min2 === null || ch.value > min2)
-          min2 = ch.value;
+        if (min === null || ch.value > min)
+          min = ch.value;
       } else if (ch.kind === "max") {
-        if (max2 === null || ch.value < max2)
-          max2 = ch.value;
+        if (max === null || ch.value < max)
+          max = ch.value;
       }
     }
-    return Number.isFinite(min2) && Number.isFinite(max2);
+    return Number.isFinite(min) && Number.isFinite(max);
   }
 };
 ZodNumber.create = (params) => {
@@ -33732,24 +31886,24 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
     });
   }
   get minValue() {
-    let min2 = null;
+    let min = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "min") {
-        if (min2 === null || ch.value > min2)
-          min2 = ch.value;
+        if (min === null || ch.value > min)
+          min = ch.value;
       }
     }
-    return min2;
+    return min;
   }
   get maxValue() {
-    let max2 = null;
+    let max = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "max") {
-        if (max2 === null || ch.value < max2)
-          max2 = ch.value;
+        if (max === null || ch.value < max)
+          max = ch.value;
       }
     }
-    return max2;
+    return max;
   }
 };
 ZodBigInt.create = (params) => {
@@ -33866,24 +32020,24 @@ var ZodDate = class _ZodDate extends ZodType {
     });
   }
   get minDate() {
-    let min2 = null;
+    let min = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "min") {
-        if (min2 === null || ch.value > min2)
-          min2 = ch.value;
+        if (min === null || ch.value > min)
+          min = ch.value;
       }
     }
-    return min2 != null ? new Date(min2) : null;
+    return min != null ? new Date(min) : null;
   }
   get maxDate() {
-    let max2 = null;
+    let max = null;
     for (const ch of this._def.checks) {
       if (ch.kind === "max") {
-        if (max2 === null || ch.value < max2)
-          max2 = ch.value;
+        if (max === null || ch.value < max)
+          max = ch.value;
       }
     }
-    return max2 != null ? new Date(max2) : null;
+    return max != null ? new Date(max) : null;
   }
 };
 ZodDate.create = (params) => {
@@ -36851,8 +35005,8 @@ function histogram(image2) {
   });
   return histogram2;
 }
-var normalizeValue = function(value, min2, max2) {
-  return (value - min2) * 255 / (max2 - min2);
+var normalizeValue = function(value, min, max) {
+  return (value - min) * 255 / (max - min);
 };
 var getBounds = function(histogramChannel) {
   return [
@@ -38569,7 +36723,7 @@ var operations = {
       for (let j = 0; j < wDst2; j++) {
         const x2 = j * (wSrc - 1) / wDst2;
         const xPos = Math.floor(x2);
-        const t2 = x2 - xPos;
+        const t = x2 - xPos;
         const srcPos = (i * wSrc + xPos) * 4;
         const buf1Pos = (i * wDst2 + j) * 4;
         for (let k = 0; k < 4; k++) {
@@ -38578,7 +36732,7 @@ var operations = {
           const x1 = bufSrc[kPos];
           const x22 = bufSrc[kPos + 4];
           const x3 = xPos < wSrc - 2 ? bufSrc[kPos + 8] : 2 * bufSrc[kPos + 4] - bufSrc[kPos];
-          buf1[buf1Pos + k] = interpolate(x0, x1, x22, x3, t2);
+          buf1[buf1Pos + k] = interpolate(x0, x1, x22, x3, t);
         }
       }
     }
@@ -38587,7 +36741,7 @@ var operations = {
       for (let j = 0; j < wDst2; j++) {
         const y2 = i * (hSrc - 1) / hDst2;
         const yPos = Math.floor(y2);
-        const t2 = y2 - yPos;
+        const t = y2 - yPos;
         const buf1Pos = (yPos * wDst2 + j) * 4;
         const buf2Pos = (i * wDst2 + j) * 4;
         for (let k = 0; k < 4; k++) {
@@ -38596,7 +36750,7 @@ var operations = {
           const y1 = buf1[kPos];
           const y22 = buf1[kPos + wDst2 * 4];
           const y3 = yPos < hSrc - 2 ? buf1[kPos + wDst2 * 8] : 2 * buf1[kPos + wDst2 * 4] - buf1[kPos];
-          buf2[buf2Pos + k] = interpolate(y0, y1, y22, y3, t2);
+          buf2[buf2Pos + k] = interpolate(y0, y1, y22, y3, t);
         }
       }
     }
@@ -38636,34 +36790,34 @@ var operations = {
     }
   },
   bicubicInterpolation(src, dst, options) {
-    const interpolateCubic = function(x0, x1, x2, x3, t2) {
+    const interpolateCubic = function(x0, x1, x2, x3, t) {
       const a0 = x3 - x2 - x0 + x1;
       const a1 = x0 - x1 - a0;
       const a2 = x2 - x0;
       const a3 = x1;
-      return Math.max(0, Math.min(255, a0 * (t2 * t2 * t2) + a1 * (t2 * t2) + a2 * t2 + a3));
+      return Math.max(0, Math.min(255, a0 * (t * t * t) + a1 * (t * t) + a2 * t + a3));
     };
     return this._interpolate2D(src, dst, options, interpolateCubic);
   },
   hermiteInterpolation(src, dst, options) {
-    const interpolateHermite = function(x0, x1, x2, x3, t2) {
+    const interpolateHermite = function(x0, x1, x2, x3, t) {
       const c0 = x1;
       const c1 = 0.5 * (x2 - x0);
       const c2 = x0 - 2.5 * x1 + 2 * x2 - 0.5 * x3;
       const c3 = 0.5 * (x3 - x0) + 1.5 * (x1 - x2);
-      return Math.max(0, Math.min(255, Math.round(((c3 * t2 + c2) * t2 + c1) * t2 + c0)));
+      return Math.max(0, Math.min(255, Math.round(((c3 * t + c2) * t + c1) * t + c0)));
     };
     return this._interpolate2D(src, dst, options, interpolateHermite);
   },
   bezierInterpolation(src, dst, options) {
-    const interpolateBezier = function(x0, x1, x2, x3, t2) {
+    const interpolateBezier = function(x0, x1, x2, x3, t) {
       const cp1 = x1 + (x2 - x0) / 4;
       const cp2 = x2 - (x3 - x1) / 4;
-      const nt = 1 - t2;
+      const nt = 1 - t;
       const c0 = x1 * nt * nt * nt;
-      const c1 = 3 * cp1 * nt * nt * t2;
-      const c2 = 3 * cp2 * nt * t2 * t2;
-      const c3 = x2 * t2 * t2 * t2;
+      const c1 = 3 * cp1 * nt * nt * t;
+      const c2 = 3 * cp2 * nt * t * t;
+      const c3 = x2 * t * t * t;
       return Math.max(0, Math.min(255, Math.round(c0 + c1 + c2 + c3)));
     };
     return this._interpolate2D(src, dst, options, interpolateBezier);
@@ -39730,10 +37884,10 @@ function advancedRotate(image2, deg, mode) {
     image2.scan((_, __, idx) => {
       image2.bitmap.data.writeUInt32BE(image2.background, idx);
     });
-    const max2 = Math.max(w, h, image2.bitmap.width, image2.bitmap.height);
+    const max = Math.max(w, h, image2.bitmap.width, image2.bitmap.height);
     image2 = methods5.resize(image2, {
-      h: max2,
-      w: max2,
+      h: max,
+      w: max,
       mode: mode === true ? void 0 : mode
     });
     image2 = composite(image2, c2, image2.bitmap.width / 2 - c2.bitmap.width / 2, image2.bitmap.height / 2 - c2.bitmap.height / 2);
@@ -39819,18 +37973,18 @@ var methods17 = {
    */
   threshold(image2, options) {
     let {
-      max: max2,
+      max,
       replace = 255,
       // eslint-disable-next-line prefer-const
       autoGreyscale = true
     } = ThresholdOptionsSchema.parse(options);
-    max2 = limit255(max2);
+    max = limit255(max);
     replace = limit255(replace);
     if (autoGreyscale) {
       methods4.greyscale(image2);
     }
     image2.scan((_, __, idx) => {
-      const grey = image2.bitmap.data[idx] < max2 ? image2.bitmap.data[idx] : replace;
+      const grey = image2.bitmap.data[idx] < max ? image2.bitmap.data[idx] : replace;
       image2.bitmap.data[idx] = grey;
       image2.bitmap.data[idx + 1] = grey;
       image2.bitmap.data[idx + 2] = grey;
@@ -39974,18 +38128,18 @@ function stableSort(arrayToSort, callback) {
   return sorted;
 }
 function rgb2hsl(r, g, b) {
-  const min2 = min3(r, g, b);
-  const max2 = max3(r, g, b);
-  const delta = max2 - min2;
-  const l = (min2 + max2) / 510;
+  const min = min3(r, g, b);
+  const max = max3(r, g, b);
+  const delta = max - min;
+  const l = (min + max) / 510;
   let s = 0;
   if (l > 0 && l < 1)
-    s = delta / (l < 0.5 ? max2 + min2 : 510 - max2 - min2);
+    s = delta / (l < 0.5 ? max + min : 510 - max - min);
   let h = 0;
   if (delta > 0) {
-    if (max2 === r) {
+    if (max === r) {
       h = (g - b) / delta;
-    } else if (max2 === g) {
+    } else if (max === g) {
       h = 2 + (b - r) / delta;
     } else {
       h = 4 + (r - g) / delta;
@@ -40624,15 +38778,15 @@ var HueStatistics = class {
     const b = i32 >>> 16 & 255;
     const hg = r === g && g === b ? 0 : 1 + hueGroup(rgb2hsl(r, g, b).h, this._numGroups);
     const gr = this._stats[hg];
-    const min2 = this._minCols;
+    const min = this._minCols;
     gr.num++;
-    if (gr.num > min2) {
+    if (gr.num > min) {
       return;
     }
-    if (gr.num === min2) {
+    if (gr.num === min) {
       this._groupsFull++;
     }
-    if (gr.num <= min2) {
+    if (gr.num <= min) {
       this._stats[hg].cols.push(i32);
     }
   }
@@ -42647,8 +40801,10 @@ var ScreenshotCollector = class {
     this.page = page;
     this.config = { ...DEFAULT_CONFIG, ...config };
     if (this.config.saveToDirectory) {
-      const sessionTimestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      this.outputDir = path3.join(this.config.saveToDirectory, `session_${sessionTimestamp}`);
+      const now = /* @__PURE__ */ new Date();
+      const pad = (n) => n.toString().padStart(2, "0");
+      const dateTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+      this.outputDir = path3.join(this.config.saveToDirectory, `run_${dateTime}`);
       this.ensureOutputDir();
       console.log(`\u{1F4F8} Debug screenshots will be saved to: ${this.outputDir}`);
     }
@@ -42657,12 +40813,20 @@ var ScreenshotCollector = class {
   getOutputDir() {
     return this.outputDir;
   }
-  /** Get the nav/ subdirectory for debug screenshots (used by VisionAgent). */
+  /** Get the nav/ subdirectory for debug screenshots (used by Scroller — legacy). */
   getNavDir() {
     if (!this.outputDir) return null;
     const navDir = path3.join(this.outputDir, "nav");
     if (!fs4.existsSync(navDir)) fs4.mkdirSync(navDir, { recursive: true });
     return navDir;
+  }
+  /** Get per-agent debug directory (e.g. run_<date>/stories/ or run_<date>/feed/). */
+  getAgentDebugDir(agentName) {
+    if (!this.outputDir) return null;
+    const phaseName = agentName.replace(/Agent$/i, "").toLowerCase();
+    const agentDir = path3.join(this.outputDir, phaseName);
+    if (!fs4.existsSync(agentDir)) fs4.mkdirSync(agentDir, { recursive: true });
+    return agentDir;
   }
   /** Get the digest/ subdirectory for content captures. */
   getDigestDir() {
@@ -42720,8 +40884,8 @@ var ScreenshotCollector = class {
    *   2. Scroll delta: feed-only, minimum 100px since last capture
    *   3. Perceptual hash: 8x8 greyscale image similarity (primary dedup)
    *
-   * @param source - Where this content came from (LLM-declared: feed, story, search, carousel)
-   * @param interest - For search results, which interest triggered this capture
+   * @param source - Where this content came from (LLM-declared: feed, story, carousel)
+   * @param interest - Unused, kept for interface compatibility
    * @param clip - Optional viewport crop region from LLM coordinates
    * @returns true if captured, false if skipped (max reached or duplicate)
    */
@@ -42801,7 +40965,6 @@ var ScreenshotCollector = class {
     const breakdown = {
       feed: 0,
       story: 0,
-      search: 0,
       profile: 0,
       carousel: 0
     };
@@ -42947,294 +41110,15 @@ var ScreenshotCollector = class {
     console.log(`
 \u{1F4F8} Screenshot Collection Summary:`);
     console.log(`   Total: ${this.captures.length} captures`);
-    console.log(`   Feed: ${breakdown.feed}, Stories: ${breakdown.story}, Search: ${breakdown.search}`);
+    console.log(`   Feed: ${breakdown.feed}, Stories: ${breakdown.story}`);
     console.log(`   Memory: ${memoryMB}MB`);
     console.log("");
   }
 };
 
-// src/main/services/Scroller.ts
+// src/main/services/BaseVisionAgent.ts
 var import_fs5 = __toESM(require("fs"), 1);
 var import_path3 = __toESM(require("path"), 1);
-
-// src/shared/modelConfig.ts
-var ModelConfig = {
-  // Navigation — fast model, handles scrolling, clicking, dismissing popups
-  navigation: process.env.KOWALSKI_NAV_MODEL || "claude-sonnet-4-6",
-  // Specialist — powerful model, handles captures, carousels, stuck recovery
-  specialist: process.env.KOWALSKI_SPECIALIST_MODEL || "claude-opus-4-6",
-  // Content extraction from viewport screenshots — called per capture
-  // Needs: strong vision, detailed text extraction from images, caption/comment parsing
-  vision: process.env.KOWALSKI_VISION_MODEL || "claude-opus-4-6",
-  // Image tagging — categorize and describe captured screenshots
-  // Needs: basic vision, simple categorization, fast
-  tagging: process.env.KOWALSKI_TAGGING_MODEL || "claude-opus-4-6",
-  // Batch digest generation — synthesize all captures into a digest
-  // Needs: strong reasoning, long context (many captures), good writing
-  digest: process.env.KOWALSKI_DIGEST_MODEL || "claude-opus-4-6",
-  // Analysis and insights generation
-  // Needs: complex reasoning, pattern recognition, good writing
-  analysis: process.env.KOWALSKI_ANALYSIS_MODEL || "claude-opus-4-6"
-};
-
-// src/main/prompts/navigator-agent.md
-var navigator_agent_default = `You are an autonomous Instagram browsing agent. You see a screenshot of Instagram's desktop website each turn and decide what to do next. Interactive elements on the screenshot are marked with numbered labels [1], [2], [3]... and a text list of all labeled elements is provided below the screenshot.
-
-CRITICAL: You MUST respond with ONLY a valid JSON object. No prose, no explanation, no markdown \u2014 just the JSON object. Every response must be a single JSON object starting with { and ending with }.
-
-You are the navigator. Your job is to move through Instagram efficiently \u2014 scrolling, clicking, dismissing popups, and reaching content worth capturing. When you reach content worth capturing (a post modal is open, a story viewer is active), use handoff \u2014 do NOT try to capture yourself. You will get control back after the specialist finishes.
-
-After a handoff, you will receive a message saying what the specialist did (e.g. "Specialist captured 3 carousel slides, press Escape to continue"). Follow its instructions.
-
-ELEMENT LABELS
-- Interactive elements on the page are marked with numbered labels drawn on the screenshot.
-- Each label is a small badge near the element it refers to, with a thin green border around the element.
-- A text list of all labeled elements is also provided (tag, text, link info).
-- To interact with an element, use its label number.
-
-HOW TO ACT EACH TURN:
-  Step 1. REFLECT \u2014 Compare your current screenshot to what you EXPECTED to see after your last action. Did your action work? If not, note what went wrong in your memory and adjust your approach. If you see something unexpected (a popup, overlay, or error), handle it before continuing your flow.
-  Step 2. VERIFY \u2014 Compare your current screenshot to the reference images for your current phase. Which step of the flow are you at? Does what you see match the expected state? If your screen doesn't match ANY step in the reference flow, check if something unexpected is blocking the view (see UNEXPECTED UI).
-  Step 3. IDENTIFY \u2014 Based on the reference image for your current step, decide what element to interact with.
-  Step 4. FIND \u2014 Look at the screenshot labels and the LABELED ELEMENTS text list. Find the numbered label on or near that element.
-  Step 5. ACT \u2014 Use the label number: click(n), hover(n), or newtab(n). Or use handoff if you've reached a capture-ready state.
-
-ACTIONS (pick one per turn):
-
-  click(n)         Click element [n]. Use for opening posts, tapping stories, buttons, navigation.
-  scroll(dir)      Scroll "up" or "down".
-  type(text)       Type text into the focused input. ONLY use for Search. Never for comments or DMs.
-  press(key)       Press a key: Escape, Enter, ArrowRight, ArrowLeft, Backspace, Tab.
-  hover(n)         Move mouse to element [n] without clicking. Use to reveal hover-triggered UI (carousel arrows).
-  wait(seconds)    Wait 1-5 seconds for content to load.
-  newtab(n)        Open the link at element [n] in a new tab and switch to it.
-  closetab         Close the current tab and switch back to the previous one.
-  handoff          Signal that you've reached a capture-ready state (post modal or story viewer). The specialist agent will take over to handle captures.
-  escalate         You are stuck and cannot figure out what to do. A more powerful agent will look at your screen and help recover.
-  done             End the browsing session.
-
-MISSION
-Browse Instagram to build a content digest of the user's social world. Navigate to interesting content by opening individual posts and stories full-screen. You have EXACTLY three activities: feed browsing, stories, and searching for the user's interests. Balance your time across all three.
-
-ONLY these three activities are allowed. Do NOT navigate to Explore, Reels, or any other section. If you see the Explore page (grid of suggested posts) or the Reels page (full-screen vertical video feed), you are OFF TRACK \u2014 click Home immediately to return to the feed.
-
-STRATEGY
-- Move quickly. Your job is navigation, not content evaluation.
-- To SEARCH for an interest: click the magnifying glass in the left sidebar (find its label number), type in the search field, then click on a search term or account to browse. When done, click the magnifying glass again to start a new search. Do NOT use Messages, DMs, or any other input.
-- When opening a post from the feed, click the TIMESTAMP next to the username (e.g. "8m", "2h", "1d"). Find its label number in the LABELED ELEMENTS list \u2014 it will be an \`a\` tag with text like "6h" or "2d".
-- When a post modal opens (dark overlay, full image in center), use handoff immediately.
-- When the story viewer opens (dark background, story in center), use handoff immediately.
-- After a handoff completes, the specialist will tell you what to do next (e.g. "press Escape to close modal"). Follow its instructions, then continue navigating.
-- After browsing a search term grid or account profile, click the magnifying glass in the sidebar to return to search and start a new query.
-- When selecting stories, posts, or search results from a list, ALWAYS click the LEFTMOST or TOPMOST item first. Check the LABELED ELEMENTS list to find the lowest-numbered label in that group. Do not evaluate or scan the list \u2014 just click the first position. Then work forward sequentially.
-
-REFERENCE IMAGES
-You may be shown annotated reference screenshots before your current-turn screenshot. These are STRUCTURAL GUIDES that show you UI layout, click positions, and workflow steps \u2014 NOT specific content to look for.
-
-CRITICAL: The accounts, usernames, brands, and post content visible in reference images are just whatever happened to be on screen when the reference was captured. Do NOT seek out or match that specific content. Instead, focus ONLY on:
-- The colored annotations (red/orange/pink boxes and circles) showing WHERE to click
-- The relative POSITION of annotated elements (leftmost, topmost, center)
-- The UI PATTERNS being demonstrated (modals, sidebars, buttons, navigation)
-
-Color coding in the reference images:
-- RED box/circle = the primary element to click or the area to capture
-- ORANGE box = supplementary element worth noting \u2014 context varies per image (could be an area to ignore, a UI element to identify, or a button like X/arrow to use after the primary action)
-- BLUE box = a utility button to interact with before the main action (e.g. pause button)
-- PINK box = elements you should NOT click
-
-The images are grouped by task and show step-by-step flows. Some flows (like Search) branch into sub-flows with their own step sequences:
-
-GOING HOME: How to navigate back to the home feed \u2014 click the Instagram logo in the top-left corner of the sidebar (highlighted in red).
-
-POSTS (feed interaction flow):
-1. In the feed, click the TIMESTAMP next to a post's username (e.g. "8m", "2h", "1d") to open the detailed post modal view. Find the timestamp's label number in the element list.
-2. When the post modal opens, use handoff. The specialist will capture it and handle carousels.
-3. After the specialist returns, follow its instructions (usually: press Escape to close the modal, then scroll to find the next post).
-
-STORIES (story interaction flow):
-1. At the top of the home feed, click the LEFTMOST story avatar in the row (highlighted in red circle). It is always the first circle from the left \u2014 do not scan past it. Find the lowest-numbered label in the story avatar row.
-2. When the story viewer opens (dark background), use handoff. The specialist will pause, capture, and advance through all stories.
-3. After the specialist returns, you'll be back at the feed. Continue with other activities.
-
-SEARCH (search interaction flow):
-1. Click the magnifying glass icon in the left sidebar (highlighted in red) to open search.
-2. Type your interest in the search field (highlighted in red). Search one interest at a time \u2014 do not type multiple interests at once. Make sure you are in the search pane, NOT messages or any other input.
-3. WAIT for search results to appear in the search panel (the left-side drawer, as shown in the reference images). Compare what you see to the search reference images \u2014 you should see a dropdown list below the search input matching the layout shown. ONLY click results from this dropdown. Search results appear as two types: broad search terms (red boxes) and individual accounts (orange boxes). For accounts, prioritize official accounts with blue checkmarks. If there is no official account, click the top search results instead. Click at minimum the top search term and the top account.
-
-If you opened a SEARCH TERM (search results grid):
-4a. You'll see a grid of post thumbnails. Click on a post (highlighted in red) to open its modal.
-5a. When the post modal opens, use handoff. After the specialist returns, close the modal (X or Escape) and click another post. Repeat for several posts.
-6a. When done, click the magnifying glass in the sidebar to return to search. Start a new search for a different interest \u2014 do not re-search the same query.
-
-If you opened an ACCOUNT profile:
-4b. You'll see the account's profile page with a grid of posts. Click on a post (highlighted in red) to open its modal.
-5b. When the post modal opens, use handoff. After the specialist returns, close the modal and click another post. Repeat for several posts.
-6b. When done, click the magnifying glass in the sidebar to return to search. Start a new search for a different interest \u2014 do not re-search the same account.
-
-ENDING SEARCH: Once you have searched all the interests listed in INTERESTS TO SEARCH (and reasonable variations/related terms), the search phase is complete. Switch back to feed browsing or stories \u2014 do not keep searching for the same topics.
-
-Use these reference images to understand the UI layout and workflow. Focus on the annotated positions and patterns \u2014 not the specific content shown. When you encounter similar UI states, replicate the same positional targets (e.g. "leftmost avatar" not "this specific account").
-
-HOW INSTAGRAM WORKS
-- The HOME FEED shows posts in a vertical scroll. Each post has: a header (profile pic + username + timestamp), the post image/video, and engagement buttons below.
-- Clicking a post's IMAGE opens it as a detail modal (full image + caption + comments). This is what you want to open for handoff.
-- Clicking a USERNAME navigates to that user's profile page (grid of thumbnails). This is NOT a post detail.
-- Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image and a right arrow on the image. The specialist handles carousel capture.
-- STORY CIRCLES appear at the top of the feed. Clicking one enters full-screen story viewing. The specialist handles story capture.
-- The STORY VIEWER has a distinctive look: dark/black background filling the entire screen, with one story displayed large in the center. You'll see small story preview circles at the top and the username overlaid on the story. If after clicking a story avatar you still see the white feed with multiple posts, the story did NOT open \u2014 try clicking the avatar again or try a different story avatar.
-- The LEFT SIDEBAR has navigation: Home, Search (magnifying glass), Explore, Reels, Messages, etc. You should ONLY use Home and Search from this sidebar. NEVER click Explore, Reels, or Messages.
-- SEARCH: Click the magnifying glass icon in the left sidebar to open search. A search input will appear \u2014 type your query there. Results show search terms and accounts. Click either type to browse, then click the magnifying glass again to return to search.
-- Pressing ESCAPE closes modals and overlays, returning you to the previous view.
-- The MESSAGES/DMs icon is also in the sidebar \u2014 do NOT click it. You have no reason to go there.
-
-SAFETY \u2014 HARD RULES
-- NEVER click Like, Follow, Share, or Save buttons. These elements are excluded from the label list, but if you somehow see one, do NOT click it.
-- NEVER type in comment boxes, reply fields, or direct message inputs.
-- NEVER navigate to Messages, DMs, or Direct Inbox. If you end up there, press Escape or click Home immediately.
-- NEVER navigate to Explore or Reels. If you end up there, click Home immediately. These pages waste time and are off-mission.
-- ONLY click Home or Search (magnifying glass) in the left sidebar. Ignore all other sidebar items.
-- ONLY type in the Search input.
-- This is READ-ONLY browsing. Do not engage with content.
-
-SELF-CORRECTION
-- REFERENCE IMAGE CHECK: Every turn, compare what you see to the reference images for your current phase. If your screen doesn't match any step in the flow, you are OFF TRACK. Use the reference images to recover \u2014 the "end" images for each flow show how to return to the start (e.g. clicking the magnifying glass to restart search, clicking the Instagram logo to go home). Do NOT continue acting if you can't match your screen to a reference step.
-- Check your RECENT HISTORY before acting. If your last 2+ actions resulted in "no change", you are stuck.
-- If your last click didn't change the page, the element might not be clickable or may not be what you expected. Try a different element or a different approach entirely.
-- When stuck: if STUCK_COUNT reaches 3, use escalate to get help from the specialist agent.
-- If you see a message/chat interface (conversation bubbles, text input at bottom, contact names/avatars in a list), you are in DMs \u2014 press Escape or click Home immediately.
-- If you see a full-screen vertical video player or "Reels" label, you are on the Reels page \u2014 click Home immediately.
-- If you see a grid of suggested/trending content that is NOT your home feed, you are on Explore \u2014 click Home immediately.
-- If you've been on the same page for 3+ actions without progress, move on. Scroll past or navigate elsewhere.
-- POSITION BIAS CHECK: You have a tendency to click the SECOND item in a list instead of the first. Before clicking any list item, explicitly verify: "Is this the leftmost/topmost item?" Check the label numbers \u2014 the first item in a row typically has the lowest label number.
-
-UNEXPECTED UI
-If you see ANYTHING blocking the normal Instagram view that is not part of your current flow (popups, notifications, permission dialogs, cookie banners, "Turn on Notifications" prompts, login gates, overlay modals, app install banners, or any UI you don't recognize):
-1. Do NOT panic or give up.
-2. Look for a dismiss button: X, "Not Now", "Cancel", "Close", "Skip", or similar. Find its label number and click it.
-3. If no dismiss button is visible, try press("Escape") to close the overlay.
-4. If Escape doesn't work, try clicking outside the overlay (click on any visible feed content behind it).
-5. If nothing works after 3 attempts, click Home (Instagram logo) as a full reset.
-6. NEVER click "Turn On", "Allow", "Enable", "Accept" on notification/permission prompts \u2014 always dismiss them.
-
-You are a general-purpose visual agent. You can see the screen. If something unexpected appears, use your vision to find the way to dismiss it and get back on track. You do not need to be told about every possible popup \u2014 just dismiss anything that's in your way.
-
-MEMORY
-You have a "memory" field in your response. Use it as a scratchpad. Your notes from the previous turn appear as "YOUR NOTES". Structure your notes like this:
-
-STATE: [what state you're in: feed / stories / search / unexpected_ui]
-STEP: [which step of the current flow you're at]
-LAST_RESULT: [did your last action succeed? what happened?]
-PLAN: [your next 2-3 planned actions]
-STUCK_COUNT: [how many turns without progress \u2014 reset to 0 when you make progress]
-
-If STUCK_COUNT reaches 3, use escalate to get help from the specialist agent.
-
-OUTPUT FORMAT (JSON):
-{
-  "thinking": "I want to click the timestamp '6h' to open the post modal. That's element [15] in the label list.",
-  "action": "click",
-  "element": 15,
-  "phase": "posts",
-  "memory": "STATE: feed\\nSTEP: opening post\\nLAST_RESULT: scrolled down, found a post\\nPLAN: 1) click timestamp 2) handoff when modal opens\\nSTUCK_COUNT: 0"
-}
-
-For handoff:
-{
-  "thinking": "Post modal is open \u2014 dark overlay with full image. Time to hand off to the specialist for capture.",
-  "action": "handoff",
-  "phase": "posts",
-  "memory": "STATE: feed\\nSTEP: post modal open, handing off\\nLAST_RESULT: modal opened successfully\\nPLAN: 1) handoff 2) follow specialist instructions\\nSTUCK_COUNT: 0"
-}
-
-For escalate:
-{
-  "thinking": "I've been stuck for 3 turns. The page isn't responding to my clicks. Escalating to specialist.",
-  "action": "escalate",
-  "phase": "posts",
-  "memory": "STATE: unknown\\nSTEP: stuck\\nLAST_RESULT: clicks not working\\nPLAN: escalate for help\\nSTUCK_COUNT: 3"
-}
-
-The "phase" field tells the system what activity you are currently doing. Set it to:
-- "posts" \u2014 browsing the home feed, opening posts from the feed
-- "search" \u2014 searching for interests, browsing search results or account pages
-- "stories" \u2014 viewing stories in the story viewer
-Always include this field. When you switch activities (e.g. from feed to search), update it immediately.
-`;
-
-// src/main/prompts/specialist-agent.md
-var specialist_agent_default = `You are a specialist agent for Instagram content navigation. You MUST respond with ONLY a valid JSON object \u2014 no prose, no explanation, no markdown. Every response must be a single JSON object starting with { and ending with }.
-
-You are called in two situations:
-
-1. CAPTURE MODE: The navigator agent has reached a post modal or story viewer. Your job is to navigate through all the content (carousel slides, story frames) so that screenshots are captured automatically on each turn.
-2. RESCUE MODE: The navigator agent is stuck and needs you to figure out what's on screen and recover.
-
-ELEMENT LABELS
-- Interactive elements on the page are marked with numbered labels drawn on the screenshot.
-- Each label is a small badge near the element it refers to, with a thin green border around the element.
-- A text list of all labeled elements is also provided (tag, text, link info).
-- To interact with an element, use its label number.
-
-ACTIONS (pick one per turn):
-  click(n)         Click element [n].
-  scroll(dir)      Scroll "up" or "down".
-  press(key)       Press a key: Escape, Enter, ArrowRight, ArrowLeft.
-  hover(n)         Move mouse to element [n] without clicking.
-  wait(seconds)    Wait 1-5 seconds.
-  done             You are finished. Return control to the navigator.
-
-CAPTURE MODE
-When called for a capture, you will see a screenshot of a post modal, story viewer, or search result post. Screenshots are saved automatically every turn \u2014 your job is just to navigate through all the content:
-
-1. VERIFY you are in a capture-ready state (post modal with dark overlay, or story viewer with dark background).
-2. If viewing a STORY: click the pause button first (so the screenshot is clean), then wait 1 second.
-3. Check for CAROUSEL indicators (right arrow on the post image, dot indicators below). If it's a carousel:
-   - Use hover(n) on the post image to reveal the arrow
-   - Click the right arrow to advance to the next slide
-   - Wait 1 second (so the slide loads and a screenshot is taken)
-   - Repeat until no more right arrow appears
-4. If viewing STORIES: after the current story is paused and a turn has passed (screenshot taken), click the right arrow to advance to the next story. Pause it, wait. Repeat until you reach the last story or the story viewer closes.
-5. When you've navigated through everything in the current post/story sequence, use done.
-
-The key insight: you do NOT need to explicitly capture anything. Every turn takes a screenshot automatically. Your job is to make sure the screen shows the right content on each turn.
-
-RESCUE MODE
-When called for rescue, the navigator is stuck. Look at the screenshot and figure out:
-- What state is Instagram in? (feed, modal, story viewer, search, error page, unexpected popup, login page)
-- What is blocking progress?
-- Take 1-3 actions to recover to a known good state (home feed or the state the navigator was trying to reach)
-- When recovered, use done with a result message explaining what you did and what the navigator should do next.
-
-SAFETY \u2014 HARD RULES
-- NEVER click Like, Follow, Share, or Save buttons. These elements are excluded from the label list, but if you somehow see one, do NOT click it.
-- NEVER type in comment boxes, reply fields, or direct message inputs.
-- NEVER navigate to Messages, DMs, or Direct Inbox. If you end up there, press Escape or click Home immediately.
-- NEVER navigate to Explore or Reels. If you end up there, click Home immediately.
-- ONLY click Home or Search (magnifying glass) in the left sidebar. Ignore all other sidebar items.
-- This is READ-ONLY browsing. Do not engage with content.
-
-OUTPUT FORMAT (JSON):
-{
-  "thinking": "Post modal is open showing a landscape photo. I see carousel dots \u2014 I'll hover to reveal the arrow and advance.",
-  "action": "hover",
-  "element": 5,
-  "memory": "Post modal open. Carousel detected, hovering to reveal right arrow."
-}
-
-When using done, include a "result" field describing what you accomplished and what the navigator should do next:
-{
-  "thinking": "Navigated through 3 carousel slides and the story sequence. All content has been shown.",
-  "action": "done",
-  "result": "Navigated 3 carousel slides from feed post. Navigator should press Escape to close modal and continue browsing."
-}
-
-For rescue done:
-{
-  "thinking": "Dismissed a notification popup by clicking Not Now. Feed is now visible.",
-  "action": "done",
-  "result": "Dismissed notification popup. Navigator can continue from the home feed."
-}
-`;
 
 // src/utils/elementLabeler.ts
 var MIN_SIZE = 15;
@@ -43286,7 +41170,8 @@ async function labelElements(page, screenshotBuffer, screenshotWidth, screenshot
       tag: raw.tag,
       text: raw.text,
       ariaLabel: raw.ariaLabel,
-      href: raw.href
+      href: raw.href,
+      role: raw.role
     };
     elements.set(el.id, el);
   }
@@ -43332,26 +41217,31 @@ async function detectElements(page, viewportWidth, viewportHeight) {
         }
       }
       if (isSafety) continue;
-      let inDenseScroller = false;
-      let ancestor = htmlEl.parentElement;
-      for (let depth = 0; depth < 8 && ancestor; depth++) {
-        const aStyle = window.getComputedStyle(ancestor);
-        const scrollable = aStyle.overflowY === "auto" || aStyle.overflowY === "scroll";
-        if (scrollable) {
-          const childCount = ancestor.querySelectorAll("a, button").length;
-          if (childCount > 10) {
-            inDenseScroller = true;
-            break;
+      const href = el.getAttribute("href") || "";
+      const isNavLink = tag === "A" && /^\/(.*\/)?p\/|\/reel\/|\/stories\//.test(href);
+      if (!isNavLink) {
+        let inDenseScroller = false;
+        let ancestor = htmlEl.parentElement;
+        for (let depth = 0; depth < 8 && ancestor; depth++) {
+          const aStyle = window.getComputedStyle(ancestor);
+          const scrollable = aStyle.overflowY === "auto" || aStyle.overflowY === "scroll";
+          if (scrollable) {
+            const childCount = ancestor.querySelectorAll("a, button").length;
+            if (childCount > 10) {
+              inDenseScroller = true;
+              break;
+            }
           }
+          ancestor = ancestor.parentElement;
         }
-        ancestor = ancestor.parentElement;
+        if (inDenseScroller) continue;
       }
-      if (inDenseScroller) continue;
       results.push({
         tag: tag.toLowerCase(),
         text: (el.textContent || "").trim().slice(0, 50),
         ariaLabel: selfLabel,
         href: el.getAttribute("href") || "",
+        role,
         x: rect.x,
         y: rect.y,
         width: rect.width,
@@ -43501,49 +41391,142 @@ function drawDigit(data, imgW, imgH, bitmap, startX, startY, r, g, b) {
   }
 }
 
-// src/main/services/Scroller.ts
+// src/main/prompts/capabilities.md
+var capabilities_default = `You are an autonomous Instagram browsing agent. You see a screenshot of Instagram's desktop website each turn and decide what to do next. Interactive elements on the screenshot are marked with numbered labels [1], [2], [3]... and a text list of all labeled elements is provided below the screenshot.
+
+Every screenshot is automatically saved to disk each turn. A separate downstream process handles filtering and summarization \u2014 you don't know or care about it. Your job is to make sure each turn shows something worth screenshotting.
+
+CRITICAL: You MUST respond with ONLY a valid JSON object. No prose, no explanation, no markdown \u2014 just the JSON object. Every response must be a single JSON object starting with { and ending with }.
+
+ELEMENT LABELS
+- Interactive elements on the page are marked with numbered labels drawn on the screenshot.
+- Each label is a small badge near the element it refers to, with a thin green border around the element.
+- A text list of all labeled elements is also provided (tag, text, link info).
+- To interact with an element, use its label number.
+- Before clicking anything, scan the element list \u2014 not just the screenshot. The text list tells you what each element actually is. An \`a\` tag with a href like \`/p/...\` or \`/reel/...\` is a content link that opens a post modal. A \`div\` or \`img\` with no href is usually not clickable in a useful way. Prefer elements where the list gives you a clear signal \u2014 a link with a path, a button with descriptive text \u2014 over bare \`div\` or \`img\` tags where you'd just be guessing.
+
+ACTIONS (pick one per turn):
+
+  click(n)         Click element [n]. Use for opening posts, tapping stories, buttons, navigation.
+  scroll(dir)      Scroll "up" or "down".
+  type(text)       Type text into the focused input. ONLY for the Search bar if needed. Never for comments or DMs.
+  press(key)       Press a key: Escape, Enter, ArrowRight, ArrowLeft, Backspace, Tab.
+  hover(n)         Move mouse to element [n] without clicking. Use to reveal hover-triggered UI (carousel arrows).
+  wait(seconds)    Wait 1-5 seconds for content to load.
+  newtab(n)        Open the link at element [n] in a new tab and switch to it.
+  closetab         Close the current tab and switch back to the previous one.
+  done             End the browsing session.
+
+SAFETY \u2014 HARD RULES
+- NEVER click Like, Follow, Share, or Save buttons. These elements are excluded from the label list, but if you somehow see one, do NOT click it.
+- NEVER type in comment boxes, reply fields, or direct message inputs.
+- NEVER navigate to Messages, DMs, or Direct Inbox. If you end up there, press Escape or click Home immediately.
+- NEVER navigate to Search, Explore, or Reels. If you end up there, click Home immediately.
+- ONLY click Home in the left sidebar. Ignore all other sidebar items.
+- This is READ-ONLY browsing. Do not engage with content.
+
+UNEXPECTED UI
+If you see ANYTHING blocking the normal Instagram view that is not part of your current flow (popups, notifications, permission dialogs, cookie banners, "Turn on Notifications" prompts, login gates, overlay modals, app install banners, or any UI you don't recognize):
+1. Do NOT panic or give up.
+2. Look for a dismiss button: X, "Not Now", "Cancel", "Close", "Skip", or similar. Find its label number and click it.
+3. If no dismiss button is visible, try press("Escape") to close the overlay.
+4. If Escape doesn't work, try clicking outside the overlay (click on any visible feed content behind it).
+5. If nothing works after 3 attempts, click Home (Instagram logo) as a full reset.
+6. NEVER click "Turn On", "Allow", "Enable", "Accept" on notification/permission prompts \u2014 always dismiss them.
+
+You are a general-purpose visual agent. You can see the screen. If something unexpected appears, use your vision to find the way to dismiss it and get back on track.
+
+INTENT-DRIVEN ACTIONS
+Every action you take must include:
+- intent: what you're trying to accomplish (plain language)
+- expected_state: what the screen should look like after your action succeeds
+- if_wrong: what you'll do if the screen doesn't match your expectation
+
+Before acting each turn, check: does the current screen match your previous expected_state?
+- If YES: your last action worked. Continue with your plan.
+- If NO: execute your recovery plan (if_wrong) FIRST before doing anything new.
+
+Do not skip the recovery step. If you ended up somewhere unexpected, you must undo that before trying something new.
+
+MEMORY
+You have a "memory" field in your response. Use it as a scratchpad. Your notes from the previous turn appear as "YOUR NOTES". Structure your notes like this:
+
+WHAT: [what you're doing]
+PLAN: [your next 2-3 planned actions]
+STUCK: [how many turns without progress \u2014 reset to 0 when you make progress]
+
+If STUCK reaches 3, change strategy entirely. If it reaches 5, click Home to reset.
+
+LESSONS
+If something didn't work as expected, you can include a "lesson" field in your response.
+Lessons are permanently stored and shown to you every turn under LEARNED.
+Use this for discoveries like:
+- "clicking images plays video inline, use timestamp links to open post modal"
+- "the suggestions bar profile pics look like story avatars but open profiles"
+- "'Not Now' dismisses the notification prompt"
+
+Only include a lesson when you've genuinely discovered something new about how the UI works.
+
+OUTPUT FORMAT (JSON):
+{
+  "thinking": "I want to click the timestamp '6h' to open the post modal. That's element [15] in the label list.",
+  "action": "click",
+  "element": 15,
+  "intent": "open post detail modal for this post",
+  "expected_state": "dark overlay with full post image, caption, and comments",
+  "if_wrong": "press Escape to dismiss whatever opened, then try a different timestamp link",
+  "memory": "WHAT: feed\\nPLAN: 1) click timestamp 2) advance carousel 3) escape and scroll\\nSTUCK: 0"
+}`;
+
+// src/main/services/BaseVisionAgent.ts
 var SCREENSHOT_WIDTH = 1280;
-var Scroller = class {
+function elementFingerprint(el) {
+  const href = el.href || "";
+  const hrefPattern = href.replace(/\/stories\/[^/]+\/?.*/, "/stories/").replace(/\/p\/[^/]+\/?.*/, "/p/").replace(/\/reel\/[^/]+\/?.*/, "/reel/").replace(/\/[^/]+\/?$/, "/");
+  return `${el.tag}|${el.ariaLabel}|${hrefPattern}`;
+}
+var BaseVisionAgent = class {
   page;
   ghost;
   scroll;
   collector;
   config;
-  // Screenshot dimensions (updated after each resize)
+  // Screenshot dimensions
   screenshotWidth = SCREENSHOT_WIDTH;
   screenshotHeight = 0;
-  // Viewport dimensions (set once at run() start)
+  // Viewport dimensions
   viewportWidth = 0;
   viewportHeight = 0;
-  // LLM state — dual model
-  model;
-  // Navigator (Sonnet)
-  specialistModel;
-  // Specialist (Opus)
-  activeModel = "navigator";
+  // LLM state
   lastMemory = "";
   actionHistory = [];
   decisionCount = 0;
   lastTokenUsage = null;
   // Session state
   startTime = 0;
-  // Raw screenshot dump for three-agent pipeline
+  // Raw screenshot dump
   rawDir = "";
   rawCount = 0;
-  // Reference example images organized by phase folder (Posts, Search, Stories)
-  referenceImagesByPhase = null;
-  sentPhases = /* @__PURE__ */ new Set();
-  lastDeclaredPhase = "";
-  // Set by LLM on first turn; empty = no phase yet
-  // Tab management — tracks the original tab so closetab can return to it
+  // Reference images
+  referenceImages = null;
+  referenceImagesSent = false;
+  // Tab management
   originalPage = null;
-  // Current turn's labeled elements (for click/hover/newtab execution)
+  // Current turn's labeled elements
   currentElements = /* @__PURE__ */ new Map();
-  // Previous action tracking (for REFLECT step context)
+  // Previous action tracking
   lastAction = null;
-  // Specialist result — fed back to navigator on next turn
-  lastSpecialistResult = "";
-  // External stop signal (set by Cmd+Shift+K)
+  // Intent-driven action state
+  lastIntent = "";
+  lastExpectedState = "";
+  lastRecoveryPlan = "";
+  // Self-enriching element legend
+  elementKnowledge = /* @__PURE__ */ new Map();
+  // Persistent learned lessons
+  learnedLessons = [];
+  // Raw screenshot for debug saving (kept across LLM call)
+  lastRawScreenshot = null;
+  // External stop signal
   stopped = false;
   constructor(page, ghost, scroll, collector, config) {
     this.page = page;
@@ -43551,26 +41534,25 @@ var Scroller = class {
     this.scroll = scroll;
     this.collector = collector;
     this.config = config;
-    this.model = ModelConfig.navigation;
-    this.specialistModel = ModelConfig.specialist;
   }
   // -----------------------------------------------------------------------
-  // Main Loop
+  // Public API
   // -----------------------------------------------------------------------
   /** Stop the agent externally (e.g. Cmd+Shift+K). */
   stop() {
     this.stopped = true;
-    console.log("\u{1F6D1} VisionAgent: external stop signal received");
-    this.collector.appendLog("\u{1F6D1} External stop signal received");
+    console.log(`\u{1F6D1} ${this.getAgentName()}: external stop signal received`);
+    this.collector.appendLog(`\u{1F6D1} ${this.getAgentName()}: external stop signal received`);
   }
   async run() {
     this.startTime = Date.now();
     const vp = this.page.viewportSize();
     this.viewportWidth = vp?.width || 1080;
     this.viewportHeight = vp?.height || 1920;
+    const model = this.getModel();
     console.log(`
-\u{1F441}\uFE0F  VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
-    this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, navigator: ${this.model}, specialist: ${this.specialistModel})`);
+\u{1F441}\uFE0F  ${this.getAgentName()} starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${model})`);
+    this.collector.appendLog(`\u{1F441}\uFE0F ${this.getAgentName()} starting (viewport: ${this.viewportWidth}x${this.viewportHeight}, model: ${model})`);
     if (this.config.rawDir) {
       this.rawDir = this.config.rawDir;
       if (!import_fs5.default.existsSync(this.rawDir)) import_fs5.default.mkdirSync(this.rawDir, { recursive: true });
@@ -43581,17 +41563,18 @@ var Scroller = class {
         if (!import_fs5.default.existsSync(this.rawDir)) import_fs5.default.mkdirSync(this.rawDir, { recursive: true });
       }
     }
+    this.loadReferenceImages();
     while (true) {
       if (this.stopped) {
-        console.log("\u{1F6D1} VisionAgent: stopped by user");
-        this.collector.appendLog("\u{1F6D1} Stopped by user (Cmd+Shift+K)");
+        console.log(`\u{1F6D1} ${this.getAgentName()}: stopped by user`);
+        this.collector.appendLog(`\u{1F6D1} ${this.getAgentName()}: stopped by user (Cmd+Shift+K)`);
         break;
       }
       const elapsed = Date.now() - this.startTime;
       const remaining = this.config.maxDurationMs - elapsed;
       if (remaining <= 0) {
-        console.log("\u23F1\uFE0F  VisionAgent: time limit reached");
-        this.collector.appendLog("\u23F1\uFE0F Time limit reached");
+        console.log(`\u23F1\uFE0F  ${this.getAgentName()}: time limit reached`);
+        this.collector.appendLog(`\u23F1\uFE0F ${this.getAgentName()}: time limit reached`);
         break;
       }
       const rawScreenshot = await this.captureScreenshot();
@@ -43600,17 +41583,24 @@ var Scroller = class {
         continue;
       }
       this.saveRawScreenshot(rawScreenshot);
-      const { buffer: screenshot, elements } = await labelElements(
-        this.page,
-        rawScreenshot,
-        this.screenshotWidth,
-        this.screenshotHeight,
-        this.viewportWidth,
-        this.viewportHeight
-      );
-      this.currentElements = elements;
-      console.log(`  \u{1F3F7}\uFE0F Labeled ${elements.size} interactive elements`);
-      this.activeModel = "navigator";
+      this.lastRawScreenshot = rawScreenshot;
+      let screenshot;
+      if (this.shouldLabelElements()) {
+        const labeled = await labelElements(
+          this.page,
+          rawScreenshot,
+          this.screenshotWidth,
+          this.screenshotHeight,
+          this.viewportWidth,
+          this.viewportHeight
+        );
+        screenshot = labeled.buffer;
+        this.currentElements = labeled.elements;
+        console.log(`  \u{1F3F7}\uFE0F Labeled ${labeled.elements.size} interactive elements`);
+      } else {
+        screenshot = rawScreenshot;
+        this.currentElements = /* @__PURE__ */ new Map();
+      }
       const decision = await this.callLLM(screenshot, remaining);
       this.decisionCount++;
       console.log(`  \u{1F9ED} [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
@@ -43623,56 +41613,33 @@ var Scroller = class {
       }
       await this.saveDebugScreenshot(screenshot, decision);
       if (decision.action === "done") {
-        console.log(`\u2705 VisionAgent: LLM ended session \u2014 ${decision.thinking}`);
-        this.collector.appendLog(`\u2705 LLM ended session \u2014 ${decision.thinking}`);
+        console.log(`\u2705 ${this.getAgentName()}: LLM ended session \u2014 ${decision.thinking}`);
+        this.collector.appendLog(`\u2705 ${this.getAgentName()}: LLM ended session \u2014 ${decision.thinking}`);
         break;
-      }
-      if (decision.action === "handoff") {
-        console.log("  \u{1F504} Handoff to specialist (Opus) for capture");
-        this.collector.appendLog("\u{1F504} Handoff to specialist (Opus) for capture");
-        if (decision.memory) this.lastMemory = decision.memory;
-        if (decision.phase) this.updatePhase(decision.phase);
-        const specialistResult = await this.runSpecialist("capture");
-        this.lastSpecialistResult = specialistResult;
-        this.actionHistory.push({
-          action: "handoff",
-          result: `Specialist: ${specialistResult.slice(0, 100)}`
-        });
-        const tokenStr2 = this.lastTokenUsage ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens` : "";
-        this.collector.appendLog(`[${this.decisionCount}] handoff${tokenStr2}`);
-        this.collector.appendLog(`  \u{1F4AD} ${decision.thinking}`);
-        if (decision.memory) this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
-        continue;
-      }
-      if (decision.action === "escalate") {
-        console.log("  \u{1F198} Escalating to specialist (Opus) for rescue");
-        this.collector.appendLog("\u{1F198} Escalating to specialist (Opus) for rescue");
-        if (decision.memory) this.lastMemory = decision.memory;
-        const specialistResult = await this.runSpecialist("rescue");
-        this.lastSpecialistResult = specialistResult;
-        this.actionHistory.push({
-          action: "escalate",
-          result: `Specialist: ${specialistResult.slice(0, 100)}`
-        });
-        const tokenStr2 = this.lastTokenUsage ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens` : "";
-        this.collector.appendLog(`[${this.decisionCount}] escalate${tokenStr2}`);
-        this.collector.appendLog(`  \u{1F4AD} ${decision.thinking}`);
-        if (decision.memory) this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
-        continue;
       }
       if (decision.memory) {
         this.lastMemory = decision.memory;
       }
-      let phaseChangeDeferred = false;
-      if (decision.phase) {
-        phaseChangeDeferred = this.updatePhase(decision.phase);
+      this.lastIntent = decision.intent || "";
+      this.lastExpectedState = decision.expected_state || "";
+      this.lastRecoveryPlan = decision.if_wrong || "";
+      if (decision.element_notes) {
+        for (const [idStr, description] of Object.entries(decision.element_notes)) {
+          const id = parseInt(idStr, 10);
+          const el = this.currentElements.get(id);
+          if (el) {
+            const fp = elementFingerprint(el);
+            this.elementKnowledge.set(fp, description);
+          }
+        }
       }
-      let result;
-      if (phaseChangeDeferred) {
-        result = `Phase changed to ${this.lastDeclaredPhase.toLowerCase()}. Reference images loading \u2014 review them on the next turn and then act.`;
-      } else {
-        result = await this.executeAction(decision);
+      if (decision.lesson) {
+        this.learnedLessons.push(decision.lesson);
+        if (this.learnedLessons.length > 10) {
+          this.learnedLessons.shift();
+        }
       }
+      const result = await this.executeAction(decision);
       console.log(`     \u2192 ${result}`);
       this.lastAction = decision;
       this.actionHistory.push({
@@ -43691,98 +41658,19 @@ var Scroller = class {
       import_fs5.default.writeFileSync(import_path3.default.join(this.rawDir, "done.marker"), JSON.stringify({
         totalScreenshots: this.rawCount,
         totalDecisions: this.decisionCount,
+        agent: this.getAgentName(),
         timestamp: Date.now()
       }));
     }
     console.log(`
-\u{1F441}\uFE0F  VisionAgent finished: ${this.rawCount} raw screenshots, ${this.decisionCount} decisions
+\u{1F441}\uFE0F  ${this.getAgentName()} finished: ${this.rawCount} raw screenshots, ${this.decisionCount} decisions
 `);
-    this.collector.appendLog(`\u{1F441}\uFE0F VisionAgent finished: ${this.rawCount} raw screenshots, ${this.decisionCount} decisions`);
+    this.collector.appendLog(`\u{1F441}\uFE0F ${this.getAgentName()} finished: ${this.rawCount} raw screenshots, ${this.decisionCount} decisions`);
     return {
       rawScreenshotCount: this.rawCount,
       decisionCount: this.decisionCount,
       actionHistory: [...this.actionHistory]
     };
-  }
-  // -----------------------------------------------------------------------
-  // Specialist Sub-Loop
-  // -----------------------------------------------------------------------
-  async runSpecialist(mode) {
-    this.activeModel = "specialist";
-    let specialistTurns = 0;
-    const maxTurns = mode === "capture" ? 20 : 5;
-    let resultMessage = "";
-    while (specialistTurns < maxTurns) {
-      specialistTurns++;
-      if (this.stopped) {
-        resultMessage = "Stopped by user.";
-        break;
-      }
-      const rawScreenshot = await this.captureScreenshot();
-      if (!rawScreenshot) {
-        await this.delay(500);
-        continue;
-      }
-      this.saveRawScreenshot(rawScreenshot);
-      const { buffer: screenshot, elements } = await labelElements(
-        this.page,
-        rawScreenshot,
-        this.screenshotWidth,
-        this.screenshotHeight,
-        this.viewportWidth,
-        this.viewportHeight
-      );
-      this.currentElements = elements;
-      const decision = await this.callLLM(screenshot, this.config.maxDurationMs - (Date.now() - this.startTime));
-      this.decisionCount++;
-      console.log(`  \u{1F3AF} [Specialist ${specialistTurns}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
-      this.collector.appendLog(`\u{1F3AF} [Specialist ${specialistTurns}] ${this.formatAction(decision)} | ${decision.thinking.slice(0, 80)}`);
-      await this.saveDebugScreenshot(screenshot, decision);
-      if (decision.action === "done") {
-        resultMessage = decision.result || decision.thinking;
-        break;
-      }
-      const result = await this.executeAction(decision);
-      this.lastAction = decision;
-      this.actionHistory.push({ action: `[specialist] ${this.formatAction(decision)}`, result });
-      this.collector.appendLog(`  \u2192 ${result}`);
-      if (decision.memory) {
-        this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
-        this.lastMemory = decision.memory;
-      }
-    }
-    if (!resultMessage && specialistTurns >= maxTurns) {
-      resultMessage = `Specialist timed out after ${maxTurns} turns in ${mode} mode.`;
-    }
-    this.activeModel = "navigator";
-    console.log(`  \u{1F504} Returning to navigator. Specialist result: ${resultMessage.slice(0, 100)}`);
-    this.collector.appendLog(`\u{1F504} Specialist done: ${resultMessage.slice(0, 100)}`);
-    return resultMessage;
-  }
-  // -----------------------------------------------------------------------
-  // Phase Management
-  // -----------------------------------------------------------------------
-  /** Update phase from LLM declaration. Returns true if action should be deferred. */
-  updatePhase(phase) {
-    const phaseMap = { posts: "Posts", search: "Search", stories: "Stories" };
-    const folder = phaseMap[phase];
-    if (!folder || folder === this.lastDeclaredPhase) return false;
-    if (this.lastDeclaredPhase) {
-      console.log(`  \u{1F4C2} Phase changed: ${this.lastDeclaredPhase} \u2192 ${folder}`);
-      this.collector.appendLog(`\u{1F4C2} Phase changed: ${this.lastDeclaredPhase} \u2192 ${folder}`);
-    } else {
-      console.log(`  \u{1F4C2} Starting phase: ${folder}`);
-      this.collector.appendLog(`\u{1F4C2} Starting phase: ${folder}`);
-    }
-    this.lastDeclaredPhase = folder;
-    const allPhaseImages = this.loadReferenceImagesByPhase();
-    const hasUnsentImages = !this.sentPhases.has(folder) && (allPhaseImages.get(folder)?.length ?? 0) > 0;
-    if (hasUnsentImages) {
-      console.log(`  \u{1F4CE} Deferring action \u2014 loading ${folder} reference images first`);
-      this.collector.appendLog(`\u{1F4CE} Deferring action \u2014 loading ${folder} reference images first`);
-      return true;
-    }
-    return false;
   }
   // -----------------------------------------------------------------------
   // Screenshot Capture & Resize
@@ -43810,13 +41698,8 @@ var Scroller = class {
     }
   }
   // -----------------------------------------------------------------------
-  // Raw Screenshot Dump (Three-Agent Pipeline)
+  // Raw Screenshot Dump
   // -----------------------------------------------------------------------
-  /**
-   * Save a raw screenshot to the raw/ directory for the filter agent.
-   * Every navigation screenshot gets saved — no filtering, no dedup.
-   * The filter agent (Agent 2) handles quality decisions.
-   */
   saveRawScreenshot(buffer) {
     if (!this.rawDir) return;
     this.rawCount++;
@@ -43824,9 +41707,8 @@ var Scroller = class {
     import_fs5.default.writeFileSync(import_path3.default.join(this.rawDir, `${padded}.jpg`), buffer);
     import_fs5.default.writeFileSync(import_path3.default.join(this.rawDir, `${padded}.json`), JSON.stringify({
       turn: this.decisionCount,
-      phase: this.lastDeclaredPhase || "unknown",
-      timestamp: Date.now(),
-      agent: this.activeModel
+      phase: this.getAgentName(),
+      timestamp: Date.now()
     }));
   }
   // -----------------------------------------------------------------------
@@ -43868,6 +41750,9 @@ var Scroller = class {
   async executeScroll(d) {
     const direction = d.direction || "down";
     const baseDistance = direction === "up" ? -Math.round(this.viewportHeight * 0.4) : Math.round(this.viewportHeight * 0.4);
+    const feedX = this.viewportWidth * (0.35 + Math.random() * 0.3);
+    const feedY = this.viewportHeight * (0.25 + Math.random() * 0.5);
+    await this.page.mouse.move(feedX, feedY);
     console.log(`  \u{1F4DC} scroll: direction=${direction}, baseDistance=${baseDistance}px`);
     this.collector.appendLog(`\u{1F4DC} scroll: direction=${direction}, baseDistance=${baseDistance}px`);
     const result = await this.scroll.scrollWithIntent({ baseDistance });
@@ -43954,30 +41839,21 @@ var Scroller = class {
   }
   async executeClosetab() {
     if (!this.originalPage) {
-      console.log(`  \u274E closetab: no tab to close \u2014 already on main tab`);
-      this.collector.appendLog(`\u274E closetab: no tab to close \u2014 already on main tab`);
       return "no tab to close \u2014 already on the main tab";
     }
     if (this.page === this.originalPage) {
       this.originalPage = null;
-      console.log(`  \u274E closetab: already on main tab`);
-      this.collector.appendLog(`\u274E closetab: already on main tab`);
       return "already on main tab";
     }
     const closingUrl = this.page.url();
-    console.log(`  \u274E closetab: closing ${closingUrl}`);
-    this.collector.appendLog(`\u274E closetab: closing ${closingUrl}`);
     try {
       await this.page.close();
     } catch {
     }
     this.switchToPage(this.originalPage);
     this.originalPage = null;
-    console.log(`  \u274E closetab: back to ${this.page.url()}`);
-    this.collector.appendLog(`\u274E closetab: back to ${this.page.url()}`);
     return `closed tab (was: ${closingUrl}), back to ${this.page.url()}`;
   }
-  /** Rebind all services to a different page/tab. */
   switchToPage(page) {
     this.page = page;
     this.ghost.setPage(page);
@@ -43990,7 +41866,7 @@ var Scroller = class {
     }
   }
   // -----------------------------------------------------------------------
-  // Safety Guardrail — Input Context Detection
+  // Safety Guardrail
   // -----------------------------------------------------------------------
   async getFocusedInputContext() {
     try {
@@ -44021,50 +41897,44 @@ var Scroller = class {
     const userPrompt = this.buildUserPrompt(remainingMs);
     const visionDetail = process.env.KOWALSKI_VISION_DETAIL || "high";
     const messages = [];
-    if (this.activeModel === "navigator") {
-      const allPhaseImages = this.loadReferenceImagesByPhase();
-      const phase = this.lastDeclaredPhase;
-      if (phase && !this.sentPhases.has(phase)) {
-        const refContent = [];
-        if (this.sentPhases.size === 0) {
-          const generalImages = allPhaseImages.get("general") || [];
-          for (const ref of generalImages) {
-            refContent.push({
-              type: "image",
-              source: this.dataUrlToAnthropicSource(ref.base64)
-            });
-            refContent.push({
-              type: "text",
-              text: `[Reference: ${ref.label}]`
-            });
-          }
-        }
-        const phaseImages = allPhaseImages.get(phase) || [];
-        for (const ref of phaseImages) {
-          refContent.push({
-            type: "image",
-            source: this.dataUrlToAnthropicSource(ref.base64)
-          });
-          refContent.push({
-            type: "text",
-            text: `[Step: ${ref.label}]`
-          });
-        }
-        if (refContent.length > 0) {
-          refContent.push({
-            type: "text",
-            text: `These are step-by-step instructions for how to handle ${phase.toLowerCase()} on Instagram. The images are numbered \u2014 follow them in sequence. Read the annotations in each image carefully.`
-          });
-          messages.push({ role: "user", content: refContent });
-          messages.push({
-            role: "assistant",
-            content: `Understood. I'll follow the ${phase.toLowerCase()} workflow steps shown above.`
-          });
-          console.log(`  \u{1F4CE} Injected ${phase} reference images (${phaseImages.length} images)`);
-          this.collector.appendLog(`\u{1F4CE} Injected ${phase} reference images (${phaseImages.length} images)`);
-        }
-        this.sentPhases.add(phase);
+    if (!this.referenceImagesSent && this.referenceImages && this.referenceImages.length > 0) {
+      const refContent = [];
+      const generalImages = this.loadGeneralReferenceImages();
+      for (const ref of generalImages) {
+        refContent.push({
+          type: "image",
+          source: this.dataUrlToAnthropicSource(ref.base64)
+        });
+        refContent.push({
+          type: "text",
+          text: `[Reference: ${ref.label}]`
+        });
       }
+      for (const ref of this.referenceImages) {
+        refContent.push({
+          type: "image",
+          source: this.dataUrlToAnthropicSource(ref.base64)
+        });
+        refContent.push({
+          type: "text",
+          text: `[Step: ${ref.label}]`
+        });
+      }
+      if (refContent.length > 0) {
+        const folder = this.getReferenceImageFolder() || "this phase";
+        refContent.push({
+          type: "text",
+          text: `These are step-by-step instructions for how to handle ${folder.toLowerCase()} on Instagram. The images are numbered \u2014 follow them in sequence. Read the annotations in each image carefully.`
+        });
+        messages.push({ role: "user", content: refContent });
+        messages.push({
+          role: "assistant",
+          content: `Understood. I'll follow the ${folder.toLowerCase()} workflow steps shown above.`
+        });
+        console.log(`  \u{1F4CE} Injected reference images (${this.referenceImages.length} images)`);
+        this.collector.appendLog(`\u{1F4CE} Injected reference images (${this.referenceImages.length} images)`);
+      }
+      this.referenceImagesSent = true;
     }
     messages.push({
       role: "user",
@@ -44080,16 +41950,12 @@ var Scroller = class {
         { type: "text", text: userPrompt }
       ]
     });
-    const isSpecialist = this.activeModel === "specialist";
     const requestBody = {
-      model: isSpecialist ? this.specialistModel : this.model,
+      model: this.getModel(),
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       messages,
-      max_tokens: isSpecialist ? 16e3 : 2048
+      max_tokens: this.getMaxTokens()
     };
-    if (isSpecialist) {
-      requestBody.thinking = { type: "enabled", budget_tokens: 1e4 };
-    }
     const maxRetries = 4;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -44142,8 +42008,7 @@ var Scroller = class {
           }
           break;
         }
-        const parsed = this.parseJsonResponse(content);
-        return parsed;
+        return this.parseJsonResponse(content);
       } catch (err) {
         console.warn(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}/${maxRetries}):`, err);
         this.collector.appendLog(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}/${maxRetries}): ${err}`);
@@ -44160,9 +42025,9 @@ var Scroller = class {
   // -----------------------------------------------------------------------
   // System Prompt
   // -----------------------------------------------------------------------
-  /**
-   * Convert a data URL (data:image/jpeg;base64,...) to Anthropic image source format.
-   */
+  getSystemPrompt() {
+    return capabilities_default + "\n\n" + this.getInstructionPrompt();
+  }
   dataUrlToAnthropicSource(dataUrl) {
     const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
     if (!match) {
@@ -44170,24 +42035,18 @@ var Scroller = class {
     }
     return { type: "base64", media_type: match[1], data: match[2] };
   }
-  getSystemPrompt() {
-    const prompt = this.activeModel === "navigator" ? navigator_agent_default : specialist_agent_default;
-    return prompt.replace("{{SCREENSHOT_WIDTH}}", String(this.screenshotWidth)).replace("{{SCREENSHOT_HEIGHT}}", String(this.screenshotHeight));
-  }
-  /**
-   * Load reference images from src/main/prompts/examples/, organized by folder.
-   * Returns a Map: 'general' → root images, 'Posts' → Posts/, 'Search' → Search/, etc.
-   * Images within each folder are sorted alphabetically (so numbered files stay in order).
-   * Loaded once and cached for the session.
-   */
-  loadReferenceImagesByPhase() {
-    if (this.referenceImagesByPhase !== null) return this.referenceImagesByPhase;
-    this.referenceImagesByPhase = /* @__PURE__ */ new Map();
+  // -----------------------------------------------------------------------
+  // Reference Images
+  // -----------------------------------------------------------------------
+  loadReferenceImages() {
+    const folder = this.getReferenceImageFolder();
+    if (!folder) return;
     const examplesDir = import_path3.default.join(__dirname, "../../src/main/prompts/examples");
+    const phaseDir = import_path3.default.join(examplesDir, folder);
     try {
-      if (!import_fs5.default.existsSync(examplesDir)) return this.referenceImagesByPhase;
+      if (!import_fs5.default.existsSync(phaseDir)) return;
       const imagePattern = /\.(jpg|jpeg|png|webp)$/i;
-      const loaded = [];
+      const images = [];
       const readImageBase64 = (filePath) => {
         const buffer = import_fs5.default.readFileSync(filePath);
         const ext = import_path3.default.extname(filePath).toLowerCase().replace(".", "");
@@ -44195,50 +42054,54 @@ var Scroller = class {
         return `data:image/${mime2};base64,${buffer.toString("base64")}`;
       };
       const cleanName = (name) => import_path3.default.basename(name, import_path3.default.extname(name)).replace(/[-_.]/g, " ").trim();
-      const rootFiles = import_fs5.default.readdirSync(examplesDir).filter((f) => imagePattern.test(f) && import_fs5.default.statSync(import_path3.default.join(examplesDir, f)).isFile()).sort();
-      if (rootFiles.length > 0) {
-        const generalImages = [];
-        for (const file of rootFiles) {
-          generalImages.push({ label: cleanName(file), base64: readImageBase64(import_path3.default.join(examplesDir, file)) });
-          loaded.push(file);
-        }
-        this.referenceImagesByPhase.set("general", generalImages);
+      const files = import_fs5.default.readdirSync(phaseDir).filter((f) => imagePattern.test(f) && import_fs5.default.statSync(import_path3.default.join(phaseDir, f)).isFile()).sort();
+      for (const file of files) {
+        images.push({
+          label: `${folder} - ${cleanName(file)}`,
+          base64: readImageBase64(import_path3.default.join(phaseDir, file))
+        });
       }
-      const subdirs = import_fs5.default.readdirSync(examplesDir).filter((f) => import_fs5.default.statSync(import_path3.default.join(examplesDir, f)).isDirectory()).sort();
-      for (const dir of subdirs) {
-        const dirPath = import_path3.default.join(examplesDir, dir);
-        const phaseImages = [];
-        const files = import_fs5.default.readdirSync(dirPath).filter((f) => imagePattern.test(f)).sort();
-        for (const file of files) {
-          phaseImages.push({ label: `${dir} - ${cleanName(file)}`, base64: readImageBase64(import_path3.default.join(dirPath, file)) });
-          loaded.push(import_path3.default.join(dir, file));
-        }
-        const nestedDirs = import_fs5.default.readdirSync(dirPath).filter((f) => import_fs5.default.statSync(import_path3.default.join(dirPath, f)).isDirectory()).sort();
-        for (const subdir of nestedDirs) {
-          const subdirPath = import_path3.default.join(dirPath, subdir);
-          const nestedFiles = import_fs5.default.readdirSync(subdirPath).filter((f) => imagePattern.test(f)).sort();
-          for (const file of nestedFiles) {
-            phaseImages.push({
-              label: `${dir} - ${cleanName(subdir)} - ${cleanName(file)}`,
-              base64: readImageBase64(import_path3.default.join(subdirPath, file))
-            });
-            loaded.push(import_path3.default.join(dir, subdir, file));
-          }
-        }
-        if (phaseImages.length > 0) {
-          this.referenceImagesByPhase.set(dir, phaseImages);
+      const nestedDirs = import_fs5.default.readdirSync(phaseDir).filter((f) => import_fs5.default.statSync(import_path3.default.join(phaseDir, f)).isDirectory()).sort();
+      for (const subdir of nestedDirs) {
+        const subdirPath = import_path3.default.join(phaseDir, subdir);
+        const nestedFiles = import_fs5.default.readdirSync(subdirPath).filter((f) => imagePattern.test(f)).sort();
+        for (const file of nestedFiles) {
+          images.push({
+            label: `${folder} - ${cleanName(subdir)} - ${cleanName(file)}`,
+            base64: readImageBase64(import_path3.default.join(subdirPath, file))
+          });
         }
       }
-      if (loaded.length > 0) {
-        const phases = [...this.referenceImagesByPhase.keys()].join(", ");
-        console.log(`  \u{1F4CE} Loaded ${loaded.length} reference image(s) in phases [${phases}]`);
-        this.collector.appendLog(`\u{1F4CE} Loaded ${loaded.length} reference image(s) in phases [${phases}]`);
+      if (images.length > 0) {
+        this.referenceImages = images;
+        console.log(`  \u{1F4CE} Loaded ${images.length} reference image(s) for ${folder}`);
+        this.collector.appendLog(`\u{1F4CE} Loaded ${images.length} reference image(s) for ${folder}`);
       }
     } catch (err) {
       console.warn("  \u26A0\uFE0F Failed to load reference images:", err);
       this.collector.appendLog(`\u26A0\uFE0F Failed to load reference images: ${err}`);
     }
-    return this.referenceImagesByPhase;
+  }
+  loadGeneralReferenceImages() {
+    const examplesDir = import_path3.default.join(__dirname, "../../src/main/prompts/examples");
+    const images = [];
+    try {
+      if (!import_fs5.default.existsSync(examplesDir)) return images;
+      const imagePattern = /\.(jpg|jpeg|png|webp)$/i;
+      const rootFiles = import_fs5.default.readdirSync(examplesDir).filter((f) => imagePattern.test(f) && import_fs5.default.statSync(import_path3.default.join(examplesDir, f)).isFile()).sort();
+      const cleanName = (name) => import_path3.default.basename(name, import_path3.default.extname(name)).replace(/[-_.]/g, " ").trim();
+      for (const file of rootFiles) {
+        const buffer = import_fs5.default.readFileSync(import_path3.default.join(examplesDir, file));
+        const ext = import_path3.default.extname(file).toLowerCase().replace(".", "");
+        const mime2 = ext === "jpg" ? "jpeg" : ext;
+        images.push({
+          label: cleanName(file),
+          base64: `data:image/${mime2};base64,${buffer.toString("base64")}`
+        });
+      }
+    } catch {
+    }
+    return images;
   }
   // -----------------------------------------------------------------------
   // Per-Turn User Prompt
@@ -44248,26 +42111,29 @@ var Scroller = class {
     const elapsedMin = Math.round(elapsedSec / 60);
     const remainingMin = Math.round(remainingMs / 6e4);
     const parts = [];
-    parts.push(`SESSION: ${elapsedMin} min elapsed, ${remainingMin} min remaining. Use done when you've collected enough content across feed, stories, and searches.`);
+    parts.push(`SESSION: ${elapsedMin} min elapsed, ${remainingMin} min remaining.`);
     if (this.originalPage && this.page !== this.originalPage) {
-      parts.push(`TAB: You are in a NEW TAB (opened via newtab). Use closetab to return to the main tab when done here. Do NOT navigate away \u2014 use closetab.`);
+      parts.push(`TAB: You are in a NEW TAB (opened via newtab). Use closetab to return to the main tab when done here.`);
     }
     parts.push(`SCREENSHOTS: ${this.rawCount} raw screenshots saved (filter runs async)`);
-    if (this.config.userInterests.length > 0) {
-      parts.push(`INTERESTS TO SEARCH: ${this.config.userInterests.join(", ")}`);
-    }
-    if (this.lastSpecialistResult) {
-      parts.push(`
-SPECIALIST RESULT: ${this.lastSpecialistResult}`);
-      parts.push("The specialist has finished. Continue navigating based on its result.");
-      this.lastSpecialistResult = "";
-    }
     if (this.lastAction && this.actionHistory.length > 0) {
       const last = this.actionHistory[this.actionHistory.length - 1];
       parts.push(`
-YOUR LAST ACTION: ${JSON.stringify({ action: this.lastAction.action, element: this.lastAction.element, thinking: this.lastAction.thinking })}`);
+YOUR LAST ACTION: ${this.formatAction(this.lastAction)}`);
+      if (this.lastIntent) {
+        parts.push(`YOUR INTENT: ${this.lastIntent}`);
+      }
+      if (this.lastExpectedState) {
+        parts.push(`YOUR EXPECTED STATE: ${this.lastExpectedState}`);
+      }
+      if (this.lastRecoveryPlan) {
+        parts.push(`YOUR RECOVERY PLAN: ${this.lastRecoveryPlan}`);
+      }
       parts.push(`RESULT: ${last.result}`);
-      parts.push(`Did it work? Compare what you see now to what you expected.`);
+      parts.push("");
+      parts.push("Does the current screenshot match your expected state?");
+      parts.push("- If YES: continue with your plan.");
+      parts.push("- If NO: execute your recovery plan FIRST, then reassess.");
     }
     if (this.actionHistory.length > 0) {
       parts.push("\nRECENT HISTORY:");
@@ -44294,7 +42160,17 @@ ${this.lastMemory}`);
       for (const [id, el] of this.currentElements) {
         const desc = el.text || el.ariaLabel || "";
         const descStr = desc ? ` "${desc.slice(0, 50)}"` : "";
-        parts.push(`[${id}] ${el.tag}${descStr}${el.href ? " \u2192 " + el.href.slice(0, 40) : ""}`);
+        const href = el.href ? ` \u2192 ${el.href.slice(0, 40)}` : "";
+        const fp = elementFingerprint(el);
+        const note = this.elementKnowledge.get(fp);
+        const noteStr = note ? ` \u2014 ${note}` : "";
+        parts.push(`[${id}] ${el.tag}${descStr}${href}${noteStr}`);
+      }
+    }
+    if (this.learnedLessons.length > 0) {
+      parts.push("\nLEARNED (persistent):");
+      for (const lesson of this.learnedLessons) {
+        parts.push(`- ${lesson}`);
       }
     }
     parts.push("\nWhat do you do next?");
@@ -44303,17 +42179,14 @@ ${this.lastMemory}`);
   // -----------------------------------------------------------------------
   // Debug Screenshot Saving
   // -----------------------------------------------------------------------
-  /**
-   * Save the screenshot the LLM saw with action overlay drawn on it.
-   * For click/hover/newtab: draws a red crosshair at the element's center in screenshot space.
-   * For capture: draws a red rectangle for the crop region.
-   * Saved to nav/ subdirectory within the session folder.
-   */
-  async saveDebugScreenshot(screenshot, decision) {
-    const outputDir = this.collector.getNavDir();
-    if (!outputDir) return;
+  async saveDebugScreenshot(labeledScreenshot, decision) {
+    const agentDebugDir = this.collector.getAgentDebugDir(this.getAgentName());
+    if (!agentDebugDir) return;
     try {
-      const image2 = await Jimp.read(Buffer.from(screenshot));
+      const turnName = `turn_${String(this.decisionCount).padStart(3, "0")}_${decision.action}`;
+      const turnDir = import_path3.default.join(agentDebugDir, turnName);
+      import_fs5.default.mkdirSync(turnDir, { recursive: true });
+      const image2 = await Jimp.read(Buffer.from(labeledScreenshot));
       const RED = 4278190335;
       if (["click", "hover", "newtab"].includes(decision.action) && decision.element !== void 0) {
         const el = this.currentElements.get(decision.element);
@@ -44344,10 +42217,59 @@ ${this.lastMemory}`);
           }
         }
       }
-      const buffer = await image2.getBuffer("image/jpeg", { quality: 85 });
-      const agentTag = this.activeModel === "specialist" ? "spec_" : "";
-      const filename = `turn_${String(this.decisionCount).padStart(3, "0")}_${agentTag}${decision.action}.jpg`;
-      import_fs5.default.writeFileSync(import_path3.default.join(outputDir, filename), buffer);
+      const labeledBuffer = await image2.getBuffer("image/jpeg", { quality: 85 });
+      import_fs5.default.writeFileSync(import_path3.default.join(turnDir, "labeled.jpg"), labeledBuffer);
+      if (this.lastRawScreenshot) {
+        import_fs5.default.writeFileSync(import_path3.default.join(turnDir, "raw.jpg"), this.lastRawScreenshot);
+      }
+      const clickedEl = decision.element !== void 0 ? (() => {
+        const el = this.currentElements.get(decision.element);
+        return el ? { id: el.id, center_x: Math.round(el.x + el.width / 2), center_y: Math.round(el.y + el.height / 2) } : null;
+      })() : null;
+      const metadata = {
+        turn: this.decisionCount,
+        agent: this.getAgentName(),
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        elapsed_ms: Date.now() - this.startTime,
+        remaining_ms: this.config.maxDurationMs - (Date.now() - this.startTime),
+        decision: {
+          thinking: decision.thinking,
+          action: decision.action,
+          element: decision.element ?? null,
+          direction: decision.direction ?? null,
+          key: decision.key ?? null,
+          text: decision.text ?? null,
+          intent: decision.intent ?? null,
+          expected_state: decision.expected_state ?? null,
+          if_wrong: decision.if_wrong ?? null,
+          memory: decision.memory ?? null,
+          lesson: decision.lesson ?? null
+        },
+        elements: Array.from(this.currentElements.values()).map((el) => ({
+          id: el.id,
+          tag: el.tag,
+          text: el.text,
+          ariaLabel: el.ariaLabel,
+          href: el.href,
+          x: el.x,
+          y: el.y,
+          width: el.width,
+          height: el.height,
+          note: this.elementKnowledge.get(elementFingerprint(el)) ?? null
+        })),
+        clicked_element: clickedEl,
+        action_history: this.actionHistory.slice(-8).map((h) => `${h.action} \u2192 ${h.result}`),
+        learned_lessons: [...this.learnedLessons],
+        element_knowledge_snapshot: Object.fromEntries(this.elementKnowledge),
+        tokens: this.lastTokenUsage ? {
+          input: this.lastTokenUsage.promptTokens,
+          output: this.lastTokenUsage.completionTokens
+        } : null
+      };
+      import_fs5.default.writeFileSync(
+        import_path3.default.join(turnDir, "metadata.json"),
+        JSON.stringify(metadata, null, 2)
+      );
     } catch (err) {
       console.warn(`  \u26A0\uFE0F Debug screenshot save failed:`, err);
     }
@@ -44355,7 +42277,6 @@ ${this.lastMemory}`);
   // -----------------------------------------------------------------------
   // Utilities
   // -----------------------------------------------------------------------
-  /** Parse JSON from LLM response, handling prose wrapper or markdown code blocks. */
   parseJsonResponse(content) {
     const trimmed = content.trim();
     try {
@@ -44393,28 +42314,140 @@ ${this.lastMemory}`);
         return `newtab([${d.element}])`;
       case "closetab":
         return "closetab";
-      case "handoff":
-        return "handoff";
-      case "escalate":
-        return "escalate";
       case "done":
         return "done";
       default:
         return d.action;
     }
   }
-  // Public getters for InstagramScraper session summary
+  // Public getters
   getRawScreenshotCount() {
     return this.rawCount;
-  }
-  getRecordCount() {
-    return 0;
   }
   getDecisionCount() {
     return this.decisionCount;
   }
   getActionHistory() {
     return [...this.actionHistory];
+  }
+};
+
+// src/shared/modelConfig.ts
+var ModelConfig = {
+  // Stories navigation — cheap model, tight mechanical loop (click avatar, advance, escape)
+  stories: process.env.KOWALSKI_STORIES_MODEL || "claude-haiku-4-5-20241022",
+  // Feed navigation — fast model, handles scrolling, clicking, dismissing popups
+  navigation: process.env.KOWALSKI_NAV_MODEL || "claude-sonnet-4-6",
+  // Specialist — powerful model, handles captures, carousels, stuck recovery
+  specialist: process.env.KOWALSKI_SPECIALIST_MODEL || "claude-opus-4-6",
+  // Content extraction from viewport screenshots — called per capture
+  // Needs: strong vision, detailed text extraction from images, caption/comment parsing
+  vision: process.env.KOWALSKI_VISION_MODEL || "claude-opus-4-6",
+  // Image tagging — categorize and describe captured screenshots
+  // Needs: basic vision, simple categorization, fast
+  tagging: process.env.KOWALSKI_TAGGING_MODEL || "claude-opus-4-6",
+  // Batch digest generation — synthesize all captures into a digest
+  // Needs: strong reasoning, long context (many captures), good writing
+  digest: process.env.KOWALSKI_DIGEST_MODEL || "claude-opus-4-6",
+  // Analysis and insights generation
+  // Needs: complex reasoning, pattern recognition, good writing
+  analysis: process.env.KOWALSKI_ANALYSIS_MODEL || "claude-opus-4-6"
+};
+
+// src/main/prompts/stories-instructions.md
+var stories_instructions_default = `MISSION
+Browse Instagram stories to capture content for a digest. You handle ONLY stories \u2014 nothing else.
+
+ONLY stories are allowed. Do NOT scroll the feed, open posts, or navigate to Search, Explore, Reels, or any other section. If you see the Explore page (grid of suggested posts) or the Reels page (full-screen vertical video feed), you are OFF TRACK \u2014 click Home immediately to return to the feed, then resume stories.
+
+STRATEGY
+
+This agent operates WITHOUT element labels. You see the raw screenshot and must use visual recognition to navigate. No numbered badges or element lists are provided.
+
+Your workflow:
+1. FIND story avatars \u2014 look at the top of the feed for circular profile pictures with colored rings (indicating unviewed stories).
+2. CLICK the LEFTMOST story avatar to enter the story viewer. Since there are no element labels, use click with coordinates by describing the position visually in your thinking.
+3. ADVANCE through stories \u2014 press ArrowRight to move to the next story frame. Keep going until stories end.
+4. EXIT when done \u2014 when stories end (Instagram returns you to the feed), you are done. Press Escape if needed to close the viewer, then call done.
+
+HOW INSTAGRAM STORIES WORK
+- STORY CIRCLES appear at the top of the feed. Clicking one enters full-screen story viewing.
+- The STORY VIEWER has a distinctive look: dark/black background filling the entire screen, with one story displayed large in the center. You'll see small story preview circles at the top and the username overlaid on the story.
+- If after clicking a story avatar you still see the white feed with multiple posts, the story did NOT open \u2014 try clicking the avatar again or try a different story avatar.
+- Stories auto-advance, but you should manually press ArrowRight to control the pace and ensure each frame is captured.
+- When all stories are exhausted, the viewer closes and you return to the feed.
+
+NAVIGATION WITHOUT LABELS
+Since you don't have numbered elements, use these actions:
+- press("ArrowRight") to advance to the next story frame \u2014 this is your PRIMARY action
+- press("Escape") to exit the story viewer
+- scroll("down") if you need to scroll the feed to find story avatars
+- For the rare case where you need to click something (dismiss button, story avatar), describe what you see and click it
+
+Most turns should just be press("ArrowRight"). Stories navigation is mechanical.
+
+EXIT CONDITIONS
+- Stories end naturally (Instagram returns to feed) \u2014 call done.
+- You've been in the story viewer for many turns and are looping \u2014 press Escape, then done.
+- If STUCK reaches 5 \u2014 press Escape, click Home, then done.
+
+SELF-CORRECTION
+- Check your RECENT HISTORY before acting. If your last 2+ actions resulted in "no change", you are stuck.
+- If your last action didn't change the page, try a different approach.
+- If STUCK reaches 3, change strategy. If it reaches 5, press Escape and call done.
+- If you see a message/chat interface, you are in DMs \u2014 press Escape or click Home immediately.
+- POSITION BIAS CHECK: You have a tendency to click the SECOND item instead of the first. Before clicking any story avatar, explicitly verify: "Is this the leftmost one?"`;
+
+// src/main/services/StoriesAgent.ts
+var StoriesAgent = class extends BaseVisionAgent {
+  constructor(page, ghost, scroll, collector, config) {
+    super(page, ghost, scroll, collector, config);
+  }
+  getInstructionPrompt() {
+    return stories_instructions_default;
+  }
+  getModel() {
+    return ModelConfig.stories;
+  }
+  getMaxTokens() {
+    return 512;
+  }
+  getReferenceImageFolder() {
+    return null;
+  }
+  getAgentName() {
+    return "StoriesAgent";
+  }
+  shouldLabelElements() {
+    return false;
+  }
+};
+
+// src/main/prompts/feed-instructions.md
+var feed_instructions_default = "MISSION\nBrowse the Instagram feed to capture post content for a digest. You handle ONLY feed browsing \u2014 stories have already been handled by a previous agent.\n\nONLY feed browsing is allowed. Do NOT click story avatars, and do NOT navigate to Search, Explore, Reels, or any other section. If you see the Explore page (grid of suggested posts) or the Reels page (full-screen vertical video feed), you are OFF TRACK \u2014 click Home immediately to return to the feed.\n\nSTRATEGY\n\nYour core loop on the feed:\n1. OPEN a post \u2014 find a `link` element in the LABELED ELEMENTS list with an href containing `/p/` or `/reel/`. Click it. This opens the post modal (dark overlay, full image in center).\n2. VIEW the post \u2014 if it's a carousel, hover on the image to reveal arrow buttons, then click to advance through ALL slides. Each slide is a separate screenshot.\n3. CLOSE the modal \u2014 press Escape to return to the feed.\n4. SCROLL down to reveal the next post, then repeat from step 1.\n\nDo this for every post you encounter. Do not scroll past posts without opening them.\n\nHow to find the right element to click:\n- To open a post, look in the LABELED ELEMENTS list for elements with hrefs like `/p/...` or `/reel/...`. The timestamp text (e.g. \"8h\", \"2d\") next to a username is usually a link to the post. Click that \u2014 NOT the image, NOT the username.\n- If you click something and a profile page opens instead of a modal, you clicked the wrong element. Press back or click Home, and try the timestamp link instead.\n- If something doesn't work, try a different element. Don't click the same one repeatedly.\n\nREFERENCE IMAGES\nYou may be shown annotated reference screenshots before your first-turn screenshot. These are STRUCTURAL GUIDES that show you UI layout, click positions, and workflow steps \u2014 NOT specific content to look for.\n\nCRITICAL: The accounts, usernames, brands, and post content visible in reference images are just whatever happened to be on screen when the reference was captured. Do NOT seek out or match that specific content. Instead, focus ONLY on:\n- The colored annotations (red/orange/pink boxes and circles) showing WHERE to click\n- The relative POSITION of annotated elements (leftmost, topmost, center)\n- The UI PATTERNS being demonstrated (modals, sidebars, buttons, navigation)\n\nColor coding in the reference images:\n- RED box/circle = the primary element to click or the area of interest\n- ORANGE box = supplementary element worth noting \u2014 context varies per image\n- BLUE box = a utility button to interact with before the main action (e.g. pause button)\n- PINK box = elements you should NOT click\n\nHOW INSTAGRAM FEED WORKS\n- The HOME FEED shows posts in a vertical scroll. Each post has: a header (profile pic + username + timestamp), the post image/video, and engagement buttons below.\n- Clicking a post's TIMESTAMP opens it as a detail modal (full image + caption + comments on a dark overlay). This is what you want to open.\n- Clicking a USERNAME navigates to that user's profile page (grid of thumbnails). This is NOT a post detail \u2014 avoid it.\n- Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image and a right arrow on the image. Hover to reveal arrows, click to advance.\n- The LEFT SIDEBAR has navigation: Home, Search, Explore, Reels, Messages, etc. You should ONLY use Home from this sidebar. NEVER click Search, Explore, Reels, or Messages.\n- Pressing ESCAPE closes modals and overlays, returning you to the previous view.\n- The MESSAGES/DMs icon is also in the sidebar \u2014 do NOT click it.\n\nELEMENT NOTES\nIn your response, include an element_notes field describing what you think key elements do.\nYou don't need to annotate every element \u2014 just the ones you actively considered this turn.\nYour notes from previous turns will appear next to elements in the LABELED ELEMENTS list.\n\nIf an element has no note yet, it will appear as:\n  [5] button \u2014 no known function yet\n\nAfter you annotate it, future turns will show:\n  [5] button \u2014 dismisses notification prompt\n\nSELF-CORRECTION\n- Check your RECENT HISTORY before acting. If your last 2+ actions resulted in \"no change\", you are stuck.\n- If your last click didn't change the page, the element might not be clickable or may not be what you expected. Try a different element or a different approach entirely.\n- If STUCK reaches 3, change strategy entirely. If it reaches 5, click Home to reset.\n- If you see a message/chat interface (conversation bubbles, text input at bottom, contact names/avatars in a list), you are in DMs \u2014 press Escape or click Home immediately.\n- If you see a full-screen vertical video player or \"Reels\" label, you are on the Reels page \u2014 click Home immediately.\n- If you see a grid of suggested/trending content that is NOT your home feed, you are on Explore \u2014 click Home immediately.\n- If you've been on the same page for 3+ actions without progress, move on. Scroll past or navigate elsewhere.";
+
+// src/main/services/FeedAgent.ts
+var FeedAgent = class extends BaseVisionAgent {
+  constructor(page, ghost, scroll, collector, config) {
+    super(page, ghost, scroll, collector, config);
+  }
+  getInstructionPrompt() {
+    return feed_instructions_default;
+  }
+  getModel() {
+    return ModelConfig.navigation;
+  }
+  getMaxTokens() {
+    return 2048;
+  }
+  getReferenceImageFolder() {
+    return "Posts";
+  }
+  getAgentName() {
+    return "FeedAgent";
+  }
+  shouldLabelElements() {
+    return true;
   }
 };
 
@@ -44467,6 +42500,17 @@ var SessionMemory = class {
     }
   }
   /**
+   * Reset session memory — delete the file and clear in-memory state.
+   */
+  async resetMemory() {
+    this.summaries = [];
+    try {
+      await import_fs6.default.promises.unlink(this.storagePath);
+      console.log("\u{1F9E0} Session memory reset");
+    } catch {
+    }
+  }
+  /**
    * Generate a compact LLM-ready digest from recent sessions.
    * Returns ~150 tokens summarizing patterns and lessons learned.
    */
@@ -44474,11 +42518,6 @@ var SessionMemory = class {
     const recent = this.summaries.slice(-DIGEST_SUMMARIES);
     if (recent.length === 0) return "";
     const lines = [`SESSION MEMORY (last ${recent.length} sessions):`];
-    const interestStats = this.getInterestStats(recent);
-    if (interestStats.length > 0) {
-      const ranked = interestStats.sort((a, b) => b.avgCaptures - a.avgCaptures).slice(0, 5).map((s) => `"${s.interest}" avg ${s.avgCaptures.toFixed(1)} captures (${s.quality})`).join(", ");
-      lines.push(`- Interest productivity: ${ranked}`);
-    }
     const phaseStats = this.getPhaseStats(recent);
     if (phaseStats.length > 0) {
       const phaseSummary = phaseStats.map((p) => `${p.phase} ${p.avgTimePct.toFixed(0)}% time \u2192 ${p.avgCapturesPct.toFixed(0)}% captures`).join(", ");
@@ -44492,25 +42531,6 @@ var SessionMemory = class {
     const avgActions = recent.reduce((sum, s) => sum + s.totalActions, 0) / recent.length;
     lines.push(`- Avg session: ${avgCaptures.toFixed(1)} captures in ${avgActions.toFixed(0)} actions`);
     return lines.join("\n");
-  }
-  getInterestStats(summaries) {
-    const interestMap = /* @__PURE__ */ new Map();
-    for (const session2 of summaries) {
-      for (const result of session2.interestResults) {
-        const existing = interestMap.get(result.interest) || { totalCaptures: 0, count: 0 };
-        existing.totalCaptures += result.captureCount;
-        existing.count++;
-        interestMap.set(result.interest, existing);
-      }
-    }
-    return Array.from(interestMap.entries()).map(([interest, data]) => {
-      const avg = data.totalCaptures / data.count;
-      return {
-        interest,
-        avgCaptures: avg,
-        quality: avg >= 5 ? "HIGH" : avg >= 2 ? "MEDIUM" : "LOW"
-      };
-    });
   }
   getPhaseStats(summaries) {
     const phaseMap = /* @__PURE__ */ new Map();
@@ -44548,9 +42568,9 @@ var SessionMemory = class {
   }
 };
 
-// src/main/services/InstagramScraper.ts
+// src/main/services/Kowalski.ts
 var path6 = __toESM(require("path"), 1);
-var InstagramScraper = class {
+var Kowalski = class {
   context;
   apiKey;
   usageService;
@@ -44561,29 +42581,29 @@ var InstagramScraper = class {
   screenshotCollector;
   page;
   sessionMemory = new SessionMemory();
-  activeScroller = null;
+  activeAgent = null;
   constructor(context, apiKey, debugMode = false) {
     this.context = context;
     this.apiKey = apiKey;
     this.usageService = UsageService.getInstance();
     this.debugMode = debugMode;
   }
-  /** Stop the active browsing session externally (e.g. Cmd+Shift+K). */
+  /** Stop the active browsing agent externally (e.g. Cmd+Shift+K). */
   stop() {
-    if (this.activeScroller) {
-      this.activeScroller.stop();
+    if (this.activeAgent) {
+      this.activeAgent.stop();
     }
   }
   /**
    * Main entry point — browse Instagram and return captured screenshots.
    */
-  async browseAndCapture(targetMinutes, userInterests, config) {
-    return this.browseWithAINavigation(targetMinutes, userInterests, config);
+  async browseAndCapture(targetMinutes, config) {
+    return this.browseWithAINavigation(targetMinutes, config);
   }
   /**
-   * Browse Instagram using Scroller (pure vision-based LLM navigation).
+   * Browse Instagram using phased agents (StoriesAgent → FeedAgent).
    */
-  async browseWithAINavigation(targetMinutes, userInterests, config) {
+  async browseWithAINavigation(targetMinutes, config) {
     const startTime = Date.now();
     const targetDurationMs = targetMinutes * 60 * 1e3;
     const existingPages = this.context.pages();
@@ -44596,9 +42616,10 @@ var InstagramScraper = class {
       maxCaptures: estimatedMaxCaptures,
       jpegQuality: 85,
       minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.1),
-      saveToDirectory: path6.join(__dirname, "../../debug-screenshots")
+      saveToDirectory: path6.join(import_electron5.app.getPath("downloads"), "kowalski-debug")
     });
-    let visionAgent;
+    let totalRawScreenshots = 0;
+    let totalDecisions = 0;
     try {
       const currentUrl = this.page.url();
       if (!currentUrl.includes("instagram.com") || currentUrl.includes("/accounts/login")) {
@@ -44627,62 +42648,103 @@ var InstagramScraper = class {
         );
       }
       console.log("\n\u{1F441}\uFE0F  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-      console.log("\u{1F441}\uFE0F  VISION AGENT MODE ACTIVE");
+      console.log("\u{1F441}\uFE0F  MULTI-AGENT PIPELINE ACTIVE");
       console.log("\u{1F441}\uFE0F  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
       await this.sessionMemory.loadMemory();
       const sessionMemoryDigest = this.sessionMemory.generateDigest();
       this.screenshotCollector.appendLogRaw(`# Session Log`);
       this.screenshotCollector.appendLogRaw(`**Started:** ${(/* @__PURE__ */ new Date()).toISOString()}`);
       this.screenshotCollector.appendLogRaw(`**Budget:** ${targetMinutes} minutes`);
-      this.screenshotCollector.appendLogRaw(`**Interests:** ${userInterests.join(", ")}`);
-      this.screenshotCollector.appendLogRaw(`**Navigation Model:** ${ModelConfig.navigation}`);
-      this.screenshotCollector.appendLogRaw(`**Mode:** Vision-only (no accessibility tree)`);
+      this.screenshotCollector.appendLogRaw(`**Stories Model:** ${ModelConfig.stories}`);
+      this.screenshotCollector.appendLogRaw(`**Feed Model:** ${ModelConfig.navigation}`);
+      this.screenshotCollector.appendLogRaw(`**Mode:** Multi-agent (StoriesAgent \u2192 FeedAgent)`);
       this.screenshotCollector.appendLogRaw(`
 ---
 `);
-      visionAgent = new Scroller(
+      const baseRawDir = config?.rawDir;
+      const storiesRawDir = baseRawDir ? path6.join(baseRawDir, "stories") : void 0;
+      const feedRawDir = baseRawDir ? path6.join(baseRawDir, "feed") : void 0;
+      const storiesMaxMs = Math.min(3 * 60 * 1e3, targetDurationMs * 0.15);
+      console.log(`
+\u{1F4D6} Phase 1: Stories (budget: ${(storiesMaxMs / 1e3 / 60).toFixed(1)} min, model: ${ModelConfig.stories})`);
+      this.screenshotCollector.appendLogRaw(`
+## Phase 1: Stories
+`);
+      const storiesAgent = new StoriesAgent(
         this.page,
         this.ghost,
         this.scroll,
         this.screenshotCollector,
         {
           apiKey: this.apiKey,
-          maxDurationMs: config?.maxDurationMs || targetDurationMs,
-          userInterests,
+          maxDurationMs: storiesMaxMs,
           debugMode: this.debugMode,
           sessionMemoryDigest,
-          rawDir: config?.rawDir
+          rawDir: storiesRawDir
         }
       );
-      this.activeScroller = visionAgent;
-      const result = await visionAgent.run();
+      this.activeAgent = storiesAgent;
+      const storiesResult = await storiesAgent.run();
+      totalRawScreenshots += storiesResult.rawScreenshotCount;
+      totalDecisions += storiesResult.decisionCount;
+      console.log(`\u{1F4D6} Stories phase complete: ${storiesResult.rawScreenshotCount} screenshots, ${storiesResult.decisionCount} decisions`);
+      const storiesElapsed = Date.now() - startTime;
+      const feedMaxMs = targetDurationMs - storiesElapsed;
+      if (feedMaxMs > 3e4) {
+        console.log(`
+\u{1F4F0} Phase 2: Feed (budget: ${(feedMaxMs / 1e3 / 60).toFixed(1)} min, model: ${ModelConfig.navigation})`);
+        this.screenshotCollector.appendLogRaw(`
+## Phase 2: Feed
+`);
+        const feedAgent = new FeedAgent(
+          this.page,
+          this.ghost,
+          this.scroll,
+          this.screenshotCollector,
+          {
+            apiKey: this.apiKey,
+            maxDurationMs: feedMaxMs,
+            debugMode: this.debugMode,
+            sessionMemoryDigest,
+            rawDir: feedRawDir
+          }
+        );
+        this.activeAgent = feedAgent;
+        const feedResult = await feedAgent.run();
+        totalRawScreenshots += feedResult.rawScreenshotCount;
+        totalDecisions += feedResult.decisionCount;
+        console.log(`\u{1F4F0} Feed phase complete: ${feedResult.rawScreenshotCount} screenshots, ${feedResult.decisionCount} decisions`);
+      } else {
+        console.log("\u{1F4F0} Skipping feed phase \u2014 insufficient time remaining");
+      }
       this.screenshotCollector.appendLogRaw(`
 ---
 
 ## Summary`);
-      this.screenshotCollector.appendLogRaw(`- **Decisions:** ${result.decisionCount}`);
-      this.screenshotCollector.appendLogRaw(`- **Raw Screenshots:** ${result.rawScreenshotCount}`);
+      this.screenshotCollector.appendLogRaw(`- **Total Decisions:** ${totalDecisions}`);
+      this.screenshotCollector.appendLogRaw(`- **Total Raw Screenshots:** ${totalRawScreenshots}`);
       this.screenshotCollector.appendLogRaw(`- **Duration:** ${((Date.now() - startTime) / 1e3 / 60).toFixed(1)} minutes`);
       this.screenshotCollector.flushSessionLog();
-      const screenshotsPerInterest = Math.round(result.rawScreenshotCount / Math.max(userInterests.length, 1));
       const sessionSummary = {
         id: `session-${startTime}`,
         timestamp: startTime,
         durationMs: Date.now() - startTime,
-        interestResults: userInterests.map((interest) => ({
-          interest,
-          captureCount: screenshotsPerInterest,
-          searchTimeMs: 0,
-          quality: screenshotsPerInterest >= 5 ? "high" : screenshotsPerInterest >= 2 ? "medium" : "low"
-        })),
-        phaseBreakdown: [{
-          phase: "feed",
-          durationMs: Date.now() - startTime,
-          capturesProduced: result.rawScreenshotCount
-        }],
+        interestResults: [],
+        phaseBreakdown: [
+          {
+            phase: "stories",
+            durationMs: storiesElapsed,
+            capturesProduced: storiesResult.rawScreenshotCount
+          },
+          {
+            phase: "feed",
+            durationMs: Date.now() - startTime - storiesElapsed,
+            capturesProduced: totalRawScreenshots - storiesResult.rawScreenshotCount
+          }
+        ],
         stagnationEvents: [],
-        totalCaptures: result.rawScreenshotCount,
-        totalActions: result.decisionCount,
+        totalCaptures: totalRawScreenshots,
+        totalActions: totalDecisions,
         uniqueContentRatio: 1
       };
       await this.sessionMemory.saveSession(sessionSummary);
@@ -44692,13 +42754,11 @@ var InstagramScraper = class {
         throw error;
       }
     } finally {
-      this.activeScroller = null;
+      this.activeAgent = null;
       console.log(`
 \u{1F4CA} Session Summary:`);
-      if (visionAgent) {
-        console.log(`   - Decisions: ${visionAgent.getDecisionCount()}`);
-        console.log(`   - Raw screenshots: ${visionAgent.getRawScreenshotCount()}`);
-      }
+      console.log(`   - Total decisions: ${totalDecisions}`);
+      console.log(`   - Total raw screenshots: ${totalRawScreenshots}`);
       this.screenshotCollector.logSummary();
       await this.page.close();
     }
@@ -44707,9 +42767,8 @@ var InstagramScraper = class {
       // No longer populated here — filter agent handles this
       videos: [],
       sessionDuration: Date.now() - startTime,
-      rawScreenshotCount: visionAgent?.getRawScreenshotCount() || 0,
+      rawScreenshotCount: totalRawScreenshots,
       captureCount: 0,
-      // Deprecated
       videoCount: 0,
       scrapedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
@@ -44717,8 +42776,8 @@ var InstagramScraper = class {
   // =========================================================================
   // Utilities
   // =========================================================================
-  humanDelay(min2, max2) {
-    const delay = min2 + Math.random() * (max2 - min2);
+  humanDelay(min, max) {
+    const delay = min + Math.random() * (max - min);
     return new Promise((resolve2) => setTimeout(resolve2, delay));
   }
 };
@@ -44764,28 +42823,46 @@ var DigestGeneration = class {
       { type: "text", text: prompt },
       ...imageContents
     ];
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: ModelConfig.digest,
-        messages: [{
-          role: "user",
-          content: messageContent
-        }],
-        max_tokens: 16384
-      })
-    });
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error("\u274C Digest generation API error:", errorData);
+    const maxRetries = 4;
+    let data;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: ModelConfig.digest,
+          messages: [{
+            role: "user",
+            content: messageContent
+          }],
+          max_tokens: 16384
+        })
+      });
+      if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
+        const baseDelay = response.status === 429 ? 1e4 : 5e3;
+        const backoff = Math.min(baseDelay * Math.pow(2, attempt), 6e4);
+        const jitter = backoff * 0.25 * (Math.random() * 2 - 1);
+        const delay = Math.round(backoff + jitter);
+        console.warn(`  \u23F3 Digest LLM ${response.status} (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1e3).toFixed(1)}s...`);
+        await new Promise((resolve2) => setTimeout(resolve2, delay));
+        continue;
+      }
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("\u274C Digest generation API error:", errorData);
+        throw new Error("DIGEST_GENERATION_FAILED");
+      }
+      data = await response.json();
+      break;
+    }
+    if (!data) {
+      console.error("\u274C Digest generation: all retries exhausted");
       throw new Error("DIGEST_GENERATION_FAILED");
     }
-    const data = await response.json();
     if (data.usage) {
       await this.usageService.incrementUsage(data.usage);
       const totalTokens = (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
@@ -44807,15 +42884,10 @@ var DigestGeneration = class {
    * Build the system prompt for digest generation.
    */
   buildDigestPrompt(config, dayName, dateStr, captures) {
-    const interestsList = config.interests.length > 0 ? config.interests.map((i) => `"${i}"`).join(", ") : "General news and trends";
     const feedCount = captures.filter((c2) => c2.source === "feed").length;
     const storyCount = captures.filter((c2) => c2.source === "story").length;
-    const searchCount = captures.filter((c2) => c2.source === "search").length;
     const profileCount = captures.filter((c2) => c2.source === "profile").length;
     const carouselCount = captures.filter((c2) => c2.source === "carousel").length;
-    const searchInterests = [...new Set(
-      captures.filter((c2) => c2.source === "search" && c2.interest).map((c2) => c2.interest)
-    )];
     return `You are a STRATEGIC INTELLIGENCE ANALYST creating a personalized morning briefing for ${config.userName}.
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
@@ -44825,7 +42897,6 @@ I. YOUR TASK
 You are viewing ${captures.length} Instagram screenshots captured during a browsing session.
 - Feed posts: ${feedCount}
 - Stories: ${storyCount}
-- Search results: ${searchCount}${searchInterests.length > 0 ? ` (searched: ${searchInterests.join(", ")})` : ""}
 - Profile views: ${profileCount}
 - Carousel slides: ${carouselCount}
 
@@ -44836,7 +42907,6 @@ II. USER PROFILE
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
 Name: ${config.userName}
-Priority Interests: ${interestsList}
 Location: ${config.location || "Not specified"}
 Date: ${dayName}, ${dateStr}
 
@@ -44844,11 +42914,11 @@ Date: ${dayName}, ${dateStr}
 III. AD & SPONSORED CONTENT FILTERING
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-Skip ads and sponsored posts UNLESS they are relevant to the user's interests (${interestsList}).
+Skip ads and sponsored posts unless they contain genuinely newsworthy content.
 Skip screenshots that are mostly blank, loading, or unclear.
 
 INCLUDE (even if commercial):
-- Content from brands or organizations relevant to user interests
+- Content from brands or organizations with newsworthy updates
 - News organization updates (even with subscription CTAs)
 - Personal accounts sharing genuine experiences
 - Entertainment/sports content (games, shows, events)
@@ -44872,7 +42942,6 @@ IV. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
    - Level 1 only: Just the facts, one sentence
 
 3. **PRIORITIZATION**:
-   - Search results matching "${interestsList}" = HIGH PRIORITY (feature prominently)
    - Breaking news / time-sensitive content = HIGH PRIORITY
    - Stories from friends/followed accounts = HIGH (personal relevance)
    - Generic lifestyle posts = LOW (brief mention or skip)
@@ -44991,18 +43060,16 @@ var Filterer = class {
   rawDir;
   filteredDir;
   apiKey;
-  interests;
   processed = /* @__PURE__ */ new Set();
   running = false;
   kept = 0;
   rejected = 0;
   tokensUsed = 0;
   usageService;
-  constructor(rawDir, filteredDir, apiKey, interests) {
+  constructor(rawDir, filteredDir, apiKey) {
     this.rawDir = rawDir;
     this.filteredDir = filteredDir;
     this.apiKey = apiKey;
-    this.interests = interests;
     this.usageService = UsageService.getInstance();
     if (!fs7.existsSync(this.filteredDir)) {
       fs7.mkdirSync(this.filteredDir, { recursive: true });
@@ -45096,625 +43163,228 @@ var Filterer = class {
    * Uses the tagging model for speed and low cost.
    */
   async callFilterLLM(base64Image) {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: ModelConfig.tagging,
-        max_tokens: 100,
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: "image/jpeg",
-                data: base64Image
-              }
-            },
-            {
-              type: "text",
-              text: `You are filtering Instagram browsing screenshots for a digest.
+    const maxRetries = 4;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.apiKey,
+            "anthropic-version": "2023-06-01"
+          },
+          body: JSON.stringify({
+            model: ModelConfig.tagging,
+            max_tokens: 100,
+            messages: [{
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/jpeg",
+                    data: base64Image
+                  }
+                },
+                {
+                  type: "text",
+                  text: `You are filtering Instagram browsing screenshots for a digest.
 
 Does this screenshot contain actual Instagram content worth summarizing?
 
-YES if: a post is clearly visible (image with caption), a story frame is showing full-screen, a post modal is open (dark overlay with content centered), a search result post is open, carousel content is displayed, a profile page with visible posts.
+YES if: a post is clearly visible (image with caption), a story frame is showing full-screen, a post modal is open (dark overlay with content centered), carousel content is displayed, a profile page with visible posts.
 
 NO if: this is mid-navigation (home feed scrolling with no post focused), a loading/spinner screen, a search grid showing only tiny thumbnails, a settings/menu page, a login or error screen, mostly UI chrome (sidebar, top bar) with no content, a transitional state between pages, a duplicate of content that looks nearly identical to something you'd expect was just captured (same post, slightly different scroll).
-
-User interests for context: ${this.interests.join(", ")}
 
 Respond with ONLY a JSON object:
 {"keep": true, "reason": "Post modal open showing a landscape photo with caption"}
 or
 {"keep": false, "reason": "Home feed mid-scroll, no post focused"}`
-            }
-          ]
-        }]
-      })
-    });
-    const data = await response.json();
-    if (data.usage) {
-      this.tokensUsed += (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
-      this.usageService.incrementUsage({
-        input_tokens: data.usage.input_tokens || 0,
-        output_tokens: data.usage.output_tokens || 0,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0
-      });
-    }
-    const text = data.content?.[0]?.text || "";
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-    } catch {
-    }
-    return { keep: true, reason: "Failed to parse filter response, keeping by default" };
-  }
-};
-
-// src/main/services/SchedulerService.ts
-var BAKER_LEAD_TIME_MS = 2 * 60 * 1e3;
-var PREP_BUFFER_MS = 15 * 1e3;
-var SchedulerService = class _SchedulerService {
-  static instance;
-  checkInterval = null;
-  mainWindow = null;
-  alignmentTimeout = null;
-  lastWakeTime = /* @__PURE__ */ new Date();
-  // Track when app started/woke
-  suspensionBlockerId = null;
-  // Active debug run scraper and filter (for Cmd+Shift+K stop)
-  activeDebugScraper = null;
-  activeFilter = null;
-  constructor() {
-  }
-  static getInstance() {
-    if (!_SchedulerService.instance) {
-      _SchedulerService.instance = new _SchedulerService();
-    }
-    return _SchedulerService.instance;
-  }
-  getLastWakeTime() {
-    return this.lastWakeTime;
-  }
-  setMainWindow(window2) {
-    this.mainWindow = window2;
-  }
-  storeInstance = null;
-  // Helper to dynamically load electron-store (ESM) with EINTR retry
-  async getStore() {
-    if (this.storeInstance) return this.storeInstance;
-    const maxRetries = 3;
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const { default: Store } = await import("electron-store");
-        this.storeInstance = new Store();
-        return this.storeInstance;
+                }
+              ]
+            }]
+          })
+        });
+        if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
+          const baseDelay = response.status === 429 ? 1e4 : 5e3;
+          const backoff = Math.min(baseDelay * Math.pow(2, attempt), 6e4);
+          const jitter = backoff * 0.25 * (Math.random() * 2 - 1);
+          const delay = Math.round(backoff + jitter);
+          console.warn(`  \u{1F50D} \u23F3 Filter LLM ${response.status} (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1e3).toFixed(1)}s...`);
+          await new Promise((resolve2) => setTimeout(resolve2, delay));
+          continue;
+        }
+        if (!response.ok) {
+          console.warn(`  \u{1F50D} \u26A0\uFE0F Filter LLM error (${response.status})`);
+          return { keep: true, reason: `Filter LLM error (${response.status}), keeping by default` };
+        }
+        const data = await response.json();
+        if (data.usage) {
+          this.tokensUsed += (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
+          this.usageService.incrementUsage({
+            input_tokens: data.usage.input_tokens || 0,
+            output_tokens: data.usage.output_tokens || 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0
+          });
+        }
+        const text = data.content?.[0]?.text || "";
+        try {
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+          }
+        } catch {
+        }
+        return { keep: true, reason: "Failed to parse filter response, keeping by default" };
       } catch (err) {
-        if (err.code === "EINTR" && i < maxRetries - 1) {
-          await new Promise((r) => setTimeout(r, 100));
+        if (attempt < maxRetries - 1) {
+          const delay = 5e3 * Math.pow(2, attempt);
+          console.warn(`  \u{1F50D} \u23F3 Filter LLM network error (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1e3).toFixed(1)}s...`);
+          await new Promise((resolve2) => setTimeout(resolve2, delay));
           continue;
         }
         throw err;
       }
     }
+    return { keep: true, reason: "Filter LLM retries exhausted, keeping by default" };
   }
-  // Format date in LOCAL timezone (avoids UTC conversion issues)
-  formatLocalDate(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+};
+
+// src/main/services/RunManager.ts
+var __filename = new URL(__importMetaUrl).pathname;
+var __dirname2 = import_path5.default.dirname(__filename);
+var RunManager = class _RunManager {
+  static instance;
+  mainWindow = null;
+  status = "idle";
+  // Active run state (for stop support)
+  activeScraper = null;
+  activeFilters = [];
+  constructor() {
   }
-  // Parse time string (e.g., "8:00 AM") into a Date object for the given reference date
-  parseTimeString(timeStr, referenceDate) {
-    const [time, modifier] = timeStr.split(" ");
-    let [hours, minutes] = time.split(":").map(Number);
-    if (modifier === "PM" && hours < 12) hours += 12;
-    if (modifier === "AM" && hours === 12) hours = 0;
-    const result = new Date(referenceDate);
-    result.setHours(hours, minutes, 0, 0);
-    return result;
-  }
-  // Deterministic random offset (0-30 minutes) based on date string hash (djb2 algorithm)
-  // This makes bake time vary day-to-day (stealth) but stay fixed within a single day (predictable)
-  getDeterministicBakeOffset(dateStr) {
-    let hash = 0;
-    for (let i = 0; i < dateStr.length; i++) {
-      hash = (hash << 5) - hash + dateStr.charCodeAt(i);
-      hash = hash & hash;
+  static getInstance() {
+    if (!_RunManager.instance) {
+      _RunManager.instance = new _RunManager();
     }
-    const offsetMinutes = Math.abs(hash) % 31;
-    return offsetMinutes * 60 * 1e3;
+    return _RunManager.instance;
   }
-  stop() {
-    if (this.checkInterval) {
-      clearInterval(this.checkInterval);
-      this.checkInterval = null;
+  setMainWindow(window2) {
+    this.mainWindow = window2;
+  }
+  getStatus() {
+    return this.status;
+  }
+  stopRun() {
+    if (this.activeScraper) {
+      console.log("\u{1F6D1} Stopping active run...");
+      this.activeScraper.stop();
     }
-    if (this.alignmentTimeout) {
-      clearTimeout(this.alignmentTimeout);
-      this.alignmentTimeout = null;
+    for (const f of this.activeFilters) {
+      f.stop();
     }
-    this.disableInsomnia();
-  }
-  async initialize() {
-    console.log("\u23F0 SchedulerService: Initialized.");
-    this.lastWakeTime = /* @__PURE__ */ new Date();
-    console.log("\u23F0 Wake Time set to:", this.lastWakeTime.toLocaleString());
-    this.suspensionBlockerId = import_electron5.powerSaveBlocker.start("prevent-app-suspension");
-    console.log(`\u{1F50B} Power Save Blocker active (ID: ${this.suspensionBlockerId})`);
-    this.startHeartbeat();
-    import_electron5.powerMonitor.on("resume", () => {
-      console.log(`\u26A1\uFE0F System Resumed. Heartbeat active. App Uptime: ${Math.floor(process.uptime() / 60)}m. Last Wake (Start) Time: ${this.lastWakeTime.toLocaleString()}`);
-      this.startHeartbeat();
-    });
-  }
-  startHeartbeat() {
-    if (this.checkInterval) clearInterval(this.checkInterval);
-    if (this.alignmentTimeout) clearTimeout(this.alignmentTimeout);
-    this.handleInsomniaState();
-    import_electron5.powerMonitor.on("on-ac", () => {
-      console.log("\u{1F50C} Power Source: AC. Re-evaluating Insomnia Mode...");
-      this.handleInsomniaState();
-    });
-    import_electron5.powerMonitor.on("on-battery", () => {
-      console.log("\u{1FAAB} Power Source: Battery. Disabling Insomnia Mode...");
-      this.disableInsomnia();
-    });
-    const now = /* @__PURE__ */ new Date();
-    const msUntilNextMinute = 6e4 - now.getTime() % 6e4;
-    this.checkSchedule();
-    this.alignmentTimeout = setTimeout(() => {
-      this.checkSchedule();
-      this.checkInterval = setInterval(() => {
-        this.checkSchedule();
-      }, 6e4);
-    }, msUntilNextMinute);
-  }
-  // --- INSOMNIA MANAGEMENT ---
-  insomniaProcess = null;
-  // Type 'ChildProcess' needs import or 'any'
-  handleInsomniaState() {
-    if (!import_electron5.powerMonitor.isOnBatteryPower()) {
-      this.enableInsomnia();
-    } else {
-      this.disableInsomnia();
+    if (!this.activeScraper && this.activeFilters.length === 0) {
+      console.log("\u{1F6D1} No active run to stop");
     }
   }
-  enableInsomnia() {
-    if (this.insomniaProcess) return;
-    console.log("\u{1F50B} AC Power detected: Insomnia Mode active (Preventing System Sleep)");
-    this.insomniaProcess = (0, import_child_process.spawn)("caffeinate", ["-i", "-s", "-w", process.pid.toString()]);
-    this.insomniaProcess.on("close", (code) => {
-      console.log(`\u2615\uFE0F Insomnia Process exited with code ${code}`);
-      this.insomniaProcess = null;
-    });
-  }
-  disableInsomnia() {
-    if (this.insomniaProcess) {
-      console.log("\u{1FAAB} Battery detected / Stopping: Insomnia Mode disabled");
-      this.insomniaProcess.kill();
-      this.insomniaProcess = null;
-    }
-  }
-  // ---------------------------
-  /**
-   * Ensures the daily schedule snapshot is up-to-date.
-   * - On first run after onboarding: Creates snapshot with activeDate = TOMORROW
-   * - On new calendar day: Refreshes snapshot from current settings
-   * - Otherwise: Returns existing snapshot
-   */
-  async ensureDailySnapshot(store) {
-    const settings = store.get("settings") || {};
-    if (!settings.hasOnboarded) {
-      return null;
-    }
-    const today = this.formatLocalDate(/* @__PURE__ */ new Date());
-    let activeSchedule = store.get("activeSchedule");
-    if (!activeSchedule) {
-      const canHitToday = this.canScheduleForToday(settings.morningTime || "8:00 AM");
-      const nextDate = /* @__PURE__ */ new Date();
-      if (!canHitToday) {
-        nextDate.setDate(nextDate.getDate() + 1);
-      }
-      const activeDateStr = this.formatLocalDate(nextDate);
-      activeSchedule = {
-        morningTime: settings.morningTime || "8:00 AM",
-        eveningTime: settings.eveningTime || "4:00 PM",
-        digestFrequency: settings.digestFrequency || 1,
-        activeDate: activeDateStr
-      };
-      store.set("activeSchedule", activeSchedule);
-      console.log(`\u{1F4C5} First Daily Snapshot Created. Active starting ${activeDateStr}:`, activeSchedule);
-      this.mainWindow?.webContents.send("schedule-updated", activeSchedule);
-      return activeSchedule;
-    }
-    if (activeSchedule.activeDate !== today && activeSchedule.activeDate < today) {
-      activeSchedule = {
-        morningTime: settings.morningTime || "8:00 AM",
-        eveningTime: settings.eveningTime || "4:00 PM",
-        digestFrequency: settings.digestFrequency || 1,
-        activeDate: today
-      };
-      store.set("activeSchedule", activeSchedule);
-      console.log(`\u{1F4C5} Daily Snapshot Refreshed for ${today}:`, activeSchedule);
-      this.mainWindow?.webContents.send("schedule-updated", activeSchedule);
-    }
-    return activeSchedule;
-  }
-  async checkSchedule() {
-    try {
-      const store = await this.getStore();
-      const activeSchedule = await this.ensureDailySnapshot(store);
-      if (!activeSchedule) {
-        return;
-      }
-      const settings = store.get("settings") || {};
-      const now = /* @__PURE__ */ new Date();
-      const todayStr = this.formatLocalDate(now);
-      const analysisStatus = settings.analysisStatus || "idle";
-      if (activeSchedule.activeDate !== todayStr) {
-        return;
-      }
-      this.mainWindow?.webContents.send("schedule-updated", activeSchedule);
-      if (this.shouldTriggerBaker(now, activeSchedule.morningTime, settings.lastBakeDate)) {
-        console.log(`\u{1F950} Baker triggered for Morning slot (Delivery: ${activeSchedule.morningTime})`);
-        await this.triggerBaker(now, store, activeSchedule.morningTime);
-        return;
-      }
-      if (this.shouldTriggerDelivery(now, activeSchedule.morningTime, analysisStatus, settings.lastDeliveryDate)) {
-        console.log(`\u{1F4EC} Delivery Boy triggered for Morning slot`);
-        await this.triggerDelivery(store, activeSchedule.morningTime);
-        return;
-      }
-      if (activeSchedule.digestFrequency === 2) {
-        if (this.shouldTriggerBaker(now, activeSchedule.eveningTime, settings.lastBakeDate)) {
-          console.log(`\u{1F950} Baker triggered for Evening slot (Delivery: ${activeSchedule.eveningTime})`);
-          await this.triggerBaker(now, store, activeSchedule.eveningTime);
-          return;
-        }
-        if (this.shouldTriggerDelivery(now, activeSchedule.eveningTime, analysisStatus, settings.lastDeliveryDate)) {
-          console.log(`\u{1F4EC} Delivery Boy triggered for Evening slot`);
-          await this.triggerDelivery(store, activeSchedule.eveningTime);
-          return;
-        }
-      }
-    } catch (error) {
-      console.error("Scheduler Check Failed:", error);
-    }
-  }
-  // catchUpMissedSlots removed for Daemon Mode (Anti-Burst)
-  /**
-   * Helper to determine if a slot is still viable for TODAY based on time and buffer.
-   */
-  canScheduleForToday(targetTimeStr) {
-    const now = /* @__PURE__ */ new Date();
-    const targetDate = this.parseTimeString(targetTimeStr, now);
-    if (now >= targetDate) return false;
-    const prepTimeMs = targetDate.getTime() - this.lastWakeTime.getTime();
-    const uptimeSeconds = process.uptime();
-    const prepBufferSeconds = PREP_BUFFER_MS / 1e3;
-    if (prepTimeMs < PREP_BUFFER_MS && uptimeSeconds < prepBufferSeconds) {
-      console.log(`\u{1F6E1}\uFE0F Initial Snapshot: Skipping Today. Too close to wake/boot. (${Math.floor(uptimeSeconds)}s uptime)`);
-      return false;
-    }
-    return true;
-  }
-  // ==================== TWO-JOB SCHEDULER (INVISIBLE BUTLER) ====================
-  /**
-   * BAKER: Determines if we should start the preparation phase.
-   * Triggers 2.5-3 hours BEFORE delivery time (with deterministic random offset).
-   */
-  shouldTriggerBaker(now, deliveryTimeStr, lastBakeIso) {
-    if (!deliveryTimeStr) return false;
-    const todayStr = this.formatLocalDate(now);
-    const deliveryTime = this.parseTimeString(deliveryTimeStr, now);
-    const offset = this.getDeterministicBakeOffset(todayStr);
-    const bakeTime = new Date(deliveryTime.getTime() - BAKER_LEAD_TIME_MS + offset);
-    if (now < bakeTime || now >= deliveryTime) return false;
-    if (lastBakeIso) {
-      const lastBake = new Date(lastBakeIso);
-      if (lastBake >= bakeTime) return false;
-    }
-    const prepTimeMs = bakeTime.getTime() - this.lastWakeTime.getTime();
-    const uptimeSeconds = process.uptime();
-    const prepBufferSeconds = PREP_BUFFER_MS / 1e3;
-    if (prepTimeMs < PREP_BUFFER_MS && uptimeSeconds < prepBufferSeconds) {
-      console.log(`\u{1F6E1}\uFE0F Baker: Skipping - machine woke too close to bake time (uptime: ${Math.floor(uptimeSeconds)}s)`);
-      return false;
-    }
-    return true;
-  }
-  /**
-   * DELIVERY BOY: Determines if we should deliver the prepared analysis.
-   * Triggers AT or AFTER the exact delivery time - INFINITE WINDOW (no 30-min tolerance).
-   * If status === 'pending_delivery' and time has passed, deliver it.
-   */
-  shouldTriggerDelivery(now, deliveryTimeStr, analysisStatus, lastDeliveryIso) {
-    if (!deliveryTimeStr) return false;
-    if (analysisStatus !== "pending_delivery") return false;
-    const deliveryTime = this.parseTimeString(deliveryTimeStr, now);
-    if (now < deliveryTime) return false;
-    if (lastDeliveryIso) {
-      const lastDelivery = new Date(lastDeliveryIso);
-      if (lastDelivery >= deliveryTime) return false;
-    }
-    return true;
-  }
-  /**
-   * COLLISION HANDLER: Archives any pending undelivered paper before baking a new one.
-   * This ensures no paper is ever lost - they go to the Archive.
-   */
-  async archivePendingAnalysis(store) {
-    const settings = store.get("settings") || {};
-    if (settings.analysisStatus !== "pending_delivery") return;
-    const analyses = store.get("analyses") || [];
-    if (analyses.length === 0) return;
-    const pendingAnalysis = analyses[0];
-    console.log(`\u{1F4E6} Archiving undelivered paper: ${pendingAnalysis.id}`);
-    store.set("settings", {
-      ...settings,
-      analysisStatus: "idle"
-    });
-    console.log(`\u{1F4E6} Previous paper archived. Ready for new bake.`);
-  }
-  // ==================== END TWO-JOB SCHEDULER ====================
-  // Old shouldTrigger() method removed - replaced by shouldTriggerBaker() and shouldTriggerDelivery()
-  /**
-   * Handle errors with user-facing messages and automatic retry scheduling.
-   * NO FALLBACK GENERATION - either quality content or transparent failure.
-   */
-  handleAnalysisError(errorType, scheduledTime, store, settings) {
-    const errorMap2 = {
-      "SESSION_EXPIRED": {
-        userMessage: "Your Instagram session has expired. Please log in again.",
-        canRetry: false
-      },
-      "CHALLENGE_REQUIRED": {
-        userMessage: "Instagram requires verification. Please log in manually.",
-        canRetry: false
-      },
-      "RATE_LIMITED": {
-        userMessage: "Instagram is temporarily limiting access. We'll try again later.",
-        canRetry: true
-      },
-      "VISION_RATE_LIMITED": {
-        userMessage: "Content analysis service is busy. We'll try again soon.",
-        canRetry: true
-      },
-      "INSUFFICIENT_CONTENT": {
-        userMessage: "Not enough content was collected. We'll try again at the next scheduled time.",
-        canRetry: true
-      },
-      "GENERATION_FAILED": {
-        userMessage: "Unable to generate your analysis. We'll try again later.",
-        canRetry: true
-      },
-      "NO_API_KEY": {
-        userMessage: "API key not found. Please check your settings.",
-        canRetry: false
-      },
-      "NO_CONTEXT": {
-        userMessage: "Browser session not available. Please try again.",
-        canRetry: true
-      },
-      "BUDGET_EXCEEDED": {
-        userMessage: "Monthly API budget reached. Your next digest will be ready when the new month begins.",
-        canRetry: false
-      }
-    };
-    const errorInfo = errorMap2[errorType] || {
-      userMessage: "Something went wrong. We'll try again later.",
-      canRetry: true
-    };
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      if (errorType === "SESSION_EXPIRED" || errorType === "CHALLENGE_REQUIRED") {
-        this.mainWindow.webContents.send("instagram-session-expired", {});
-      } else if (errorType === "RATE_LIMITED") {
-        this.mainWindow.webContents.send("instagram-rate-limited", {
-          nextRetry: this.calculateNextRetryTime()
-        });
-      } else if (errorType === "INSUFFICIENT_CONTENT") {
-        this.mainWindow.webContents.send("analysis-insufficient-content", {
-          collected: 0,
-          // We don't have exact count here
-          required: 5,
-          reason: errorInfo.userMessage,
-          nextRetry: this.calculateNextRetryTime()
-        });
-      } else if (errorType === "BUDGET_EXCEEDED") {
-        this.mainWindow.webContents.send("budget-exceeded", {
-          message: "Monthly API budget reached. Kowalski will resume next month.",
-          canRetry: false
-        });
-      } else {
-        this.mainWindow.webContents.send("analysis-error", {
-          message: errorInfo.userMessage,
-          canRetry: errorInfo.canRetry,
-          nextRetry: errorInfo.canRetry ? this.calculateNextRetryTime() : null
-        });
-      }
-    }
-    store.set("settings", {
-      ...settings,
-      analysisStatus: "idle"
-    });
-    console.log(`\u{1F4E2} Error notification sent: ${errorInfo.userMessage}`);
-  }
-  /**
-   * Calculate human-readable next retry time.
-   */
-  calculateNextRetryTime() {
-    const retryTime = new Date(Date.now() + 30 * 60 * 1e3);
-    return retryTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  }
-  // ==================== BAKER & DELIVERY BOY METHODS ====================
-  /**
-   * BAKER: Silently prepares the analysis (scrapes Instagram, generates content).
-   * CRUCIAL: This phase must be COMPLETELY SILENT - no notifications!
-   */
-  async triggerBaker(now, store, scheduledTime) {
-    console.log(`\u{1F950} Baker starting at ${(/* @__PURE__ */ new Date()).toLocaleString()} for delivery at ${scheduledTime}`);
-    await this.archivePendingAnalysis(store);
-    const settings = store.get("settings") || {};
-    await this.triggerBakerScreenshotFirst(now, store, scheduledTime);
-  }
-  /**
-   * DELIVERY BOY: Delivers the prepared analysis to the user.
-   * This is where we notify the UI - at the user's requested time.
-   */
-  async triggerDelivery(store, scheduledTime) {
-    const settings = store.get("settings") || {};
-    const analyses = store.get("analyses") || [];
-    const latestAnalysis = analyses[0];
-    if (!latestAnalysis) {
-      console.warn("\u{1F4EC} Delivery Boy: No analysis found to deliver");
+  async startRun(options) {
+    if (this.status === "running") {
+      console.log("\u26A0\uFE0F Run already in progress");
       return;
     }
-    store.set("settings", {
-      ...settings,
-      lastDeliveryDate: (/* @__PURE__ */ new Date()).toISOString(),
-      analysisStatus: "ready"
-    });
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      console.log(`\u{1F4EC} Delivering analysis (scheduled: ${scheduledTime}, actual: ${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-      this.mainWindow.webContents.send("analysis-ready", latestAnalysis);
-    }
-    console.log(`\u{1F4EC} Delivery complete! User notified.`);
-  }
-  // ==================== END BAKER & DELIVERY BOY ====================
-  // ==================== DEBUG / TESTING ====================
-  /**
-   * DEBUG RUN: Immediately triggers the full analysis pipeline in VISIBLE mode.
-   * Shortcut: Cmd+Shift+H
-   *
-   * Behavior:
-   * - Bypasses all scheduling logic (Baker/Delivery phases)
-   * - Forces headless: false (visible browser)
-   * - Notifies UI immediately after completion (no pending_delivery state)
-   */
-  async triggerDebugRun() {
-    await this.triggerDebugRunScreenshotFirst();
-  }
-  /** Stop the active debug run (Cmd+Shift+K). */
-  stopDebugRun() {
-    if (this.activeDebugScraper) {
-      console.log("\u{1F6D1} Stopping debug run (Cmd+Shift+K)...");
-      this.activeDebugScraper.stop();
-    }
-    if (this.activeFilter) {
-      this.activeFilter.stop();
-    }
-    if (!this.activeDebugScraper && !this.activeFilter) {
-      console.log("\u{1F6D1} No active debug run to stop");
-    }
-  }
-  /**
-   * DEBUG RUN (Screenshot-First): Uses the new screenshot-based architecture.
-   */
-  async triggerDebugRunScreenshotFirst() {
-    console.log("\u{1F9EA} Debug Run (Screenshot-First): Starting Visible Browsing Pipeline");
-    const store = await this.getStore();
-    const settings = store.get("settings") || {};
-    const now = /* @__PURE__ */ new Date();
-    const scheduledTime = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    this.status = "running";
+    const headless = options?.headless ?? false;
+    console.log(`\u{1F680} Run started (headless: ${headless})`);
     const MAX_DURATION_MS = 90 * 60 * 1e3;
     const browserManager = BrowserManager.getInstance();
     let context = null;
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("debug-run-started", {
+      this.mainWindow.webContents.send("run-started", {
         durationMs: MAX_DURATION_MS,
         startTime: Date.now()
       });
     }
     try {
+      const { default: Store } = await import("electron-store");
+      const store = new Store();
+      const settings = store.get("settings") || {};
       const apiKey = await SecureKeyManager.getInstance().getKey();
       if (!apiKey) {
-        console.error("\u{1F9EA} Debug Run: NO API KEY");
-        this.mainWindow?.webContents.send("analysis-error", { message: "API key not found." });
-        this.mainWindow?.webContents.send("debug-run-complete", {});
+        console.error("\u{1F680} Run: NO API KEY");
+        this.emitError("API key not found.");
+        this.finishRun();
         return;
       }
-      console.log("\u{1F9EA} Launching browser (VISIBLE mode)...");
-      context = await browserManager.launch({ headless: false });
-      console.log("\u{1F9EA} Validating Instagram session...");
+      console.log(`\u{1F680} Launching browser (headless: ${headless})...`);
+      context = await browserManager.launch({ headless });
+      console.log("\u{1F680} Validating Instagram session...");
       const sessionCheck = await browserManager.validateSession();
       if (!sessionCheck.valid) {
         throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
       }
-      const debugScreenshotsDir = import_path5.default.join(__dirname, "../../debug-screenshots");
+      const screenshotsDir = import_path5.default.join(__dirname2, "../../debug-screenshots");
       const sessionTimestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const sessionDir = import_path5.default.join(debugScreenshotsDir, `session_${sessionTimestamp}`);
-      const rawDir = import_path5.default.join(sessionDir, "raw");
-      const filteredDir = import_path5.default.join(sessionDir, "filtered");
-      import_fs7.default.mkdirSync(rawDir, { recursive: true });
-      import_fs7.default.mkdirSync(filteredDir, { recursive: true });
-      console.log("\u{1F9EA} Starting screenshot filter agent (Agent 2)...");
-      const filter = new Filterer(rawDir, filteredDir, apiKey, settings.interests || []);
-      this.activeFilter = filter;
-      const filterPromise = filter.start();
-      console.log("\u{1F9EA} Browsing Instagram (90 min max, stop with Cmd+Shift+K)...");
-      const scraper = new InstagramScraper(context, apiKey, true);
-      this.activeDebugScraper = scraper;
+      const sessionDir = import_path5.default.join(screenshotsDir, `session_${sessionTimestamp}`);
+      const rawStoriesDir = import_path5.default.join(sessionDir, "raw", "stories");
+      const rawFeedDir = import_path5.default.join(sessionDir, "raw", "feed");
+      const filteredStoriesDir = import_path5.default.join(sessionDir, "filtered", "stories");
+      const filteredFeedDir = import_path5.default.join(sessionDir, "filtered", "feed");
+      import_fs7.default.mkdirSync(rawStoriesDir, { recursive: true });
+      import_fs7.default.mkdirSync(rawFeedDir, { recursive: true });
+      import_fs7.default.mkdirSync(filteredStoriesDir, { recursive: true });
+      import_fs7.default.mkdirSync(filteredFeedDir, { recursive: true });
+      console.log("\u{1F680} Starting filter agents...");
+      const storiesFilter = new Filterer(rawStoriesDir, filteredStoriesDir, apiKey);
+      const feedFilter = new Filterer(rawFeedDir, filteredFeedDir, apiKey);
+      this.activeFilters = [storiesFilter, feedFilter];
+      const storiesFilterPromise = storiesFilter.start();
+      const feedFilterPromise = feedFilter.start();
+      console.log("\u{1F680} Browsing Instagram...");
+      const scraper = new Kowalski(context, apiKey, !headless);
+      this.activeScraper = scraper;
       const session2 = await scraper.browseAndCapture(
         MAX_DURATION_MS / 6e4,
-        settings.interests || [],
-        { rawDir }
+        { rawDir: import_path5.default.join(sessionDir, "raw") }
       );
-      this.activeDebugScraper = null;
-      console.log(`\u{1F9EA} Browsing complete: ${session2.rawScreenshotCount} raw screenshots saved`);
+      this.activeScraper = null;
+      console.log(`\u{1F680} Browsing complete: ${session2.rawScreenshotCount} raw screenshots`);
       await browserManager.close();
       context = null;
-      console.log("\u{1F9EA} Waiting for filter agent to finish...");
-      const filterStats = await filterPromise;
-      this.activeFilter = null;
-      console.log(`\u{1F9EA} Filter complete: ${filterStats.kept} kept, ${filterStats.rejected} rejected, ${filterStats.tokensUsed} tokens`);
-      if (filterStats.kept < 3) {
-        console.warn(`\u{1F9EA} Very few filtered captures (${filterStats.kept}), digest quality may be low`);
+      console.log("\u{1F680} Waiting for filter agents...");
+      const [storiesStats, feedStats] = await Promise.all([storiesFilterPromise, feedFilterPromise]);
+      this.activeFilters = [];
+      const totalKept = storiesStats.kept + feedStats.kept;
+      const totalRejected = storiesStats.rejected + feedStats.rejected;
+      console.log(`\u{1F680} Filter complete: ${totalKept} kept, ${totalRejected} rejected`);
+      if (totalKept < 3) {
+        console.warn(`\u{1F680} Very few filtered captures (${totalKept}), digest quality may be low`);
       }
-      console.log("\u{1F9EA} Loading filtered screenshots...");
-      const filteredFiles = import_fs7.default.readdirSync(filteredDir).filter((f) => f.endsWith(".jpg")).sort();
-      const bestCaptures = filteredFiles.map((filename, index) => {
-        const screenshot = import_fs7.default.readFileSync(import_path5.default.join(filteredDir, filename));
-        let source = "feed";
-        const jsonFile = filename.replace(".jpg", ".json");
-        const jsonPath = import_path5.default.join(filteredDir, jsonFile);
-        if (import_fs7.default.existsSync(jsonPath)) {
-          try {
-            const meta = JSON.parse(import_fs7.default.readFileSync(jsonPath, "utf-8"));
-            if (meta.phase === "Stories") source = "story";
-            else if (meta.phase === "Search") source = "search";
-          } catch {
-          }
-        }
-        return {
-          id: index + 1,
-          screenshot,
-          source,
-          interest: void 0,
-          timestamp: Date.now(),
-          scrollPosition: 0
-        };
-      });
-      console.log(`\u{1F9EA} Loaded ${bestCaptures.length} filtered screenshots`);
-      console.log("\u{1F9EA} Generating digest from filtered screenshots...");
+      const loadFiltered = (dir, source) => {
+        if (!import_fs7.default.existsSync(dir)) return [];
+        return import_fs7.default.readdirSync(dir).filter((f) => f.endsWith(".jpg")).sort().map((filename) => ({
+          screenshot: import_fs7.default.readFileSync(import_path5.default.join(dir, filename)),
+          source
+        }));
+      };
+      const allFiltered = [...loadFiltered(filteredStoriesDir, "story"), ...loadFiltered(filteredFeedDir, "feed")];
+      const bestCaptures = allFiltered.map((cap, index) => ({
+        id: index + 1,
+        screenshot: cap.screenshot,
+        source: cap.source,
+        interest: void 0,
+        timestamp: Date.now(),
+        scrollPosition: 0
+      }));
+      console.log(`\u{1F680} Loaded ${bestCaptures.length} filtered screenshots`);
+      console.log("\u{1F680} Generating digest...");
       const digestGenerator = new DigestGeneration(apiKey);
       const analysis = await digestGenerator.generateDigest(bestCaptures, {
         userName: settings.userName || "User",
-        interests: settings.interests || [],
         location: settings.location || ""
       });
       const recordId = (0, import_uuid.v4)();
-      const userDataPath = import_electron5.app.getPath("userData");
+      const userDataPath = import_electron6.app.getPath("userData");
       const recordDir = import_path5.default.join(userDataPath, "analysis_records");
       const imagesDir = import_path5.default.join(recordDir, recordId, "images");
       await import_fs7.default.promises.mkdir(imagesDir, { recursive: true });
@@ -45730,11 +43400,7 @@ var SchedulerService = class _SchedulerService {
           interest: capture.interest
         });
       }
-      console.log(`\u{1F5BC}\uFE0F Saved ${imageMetadata.length} filtered images to ${imagesDir}`);
-      const analysisWithImages = {
-        ...analysis,
-        images: imageMetadata
-      };
+      const analysisWithImages = { ...analysis, images: imageMetadata };
       const newRecord = {
         id: recordId,
         data: analysisWithImages,
@@ -45744,7 +43410,7 @@ var SchedulerService = class _SchedulerService {
       const tempPath = import_path5.default.join(recordDir, `${recordId}.tmp`);
       await import_fs7.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
       await import_fs7.default.promises.rename(tempPath, recordPath);
-      console.log(`\u{1F9EA} Saved digest to disk: ${recordPath}`);
+      console.log(`\u{1F680} Saved digest to disk: ${recordPath}`);
       const metadataRecord = {
         id: newRecord.id,
         data: {
@@ -45757,201 +43423,58 @@ var SchedulerService = class _SchedulerService {
       };
       const currentAnalyses = store.get("analyses") || [];
       store.set("analyses", [metadataRecord, ...currentAnalyses]);
+      const now = /* @__PURE__ */ new Date();
       store.set("settings", {
         ...store.get("settings"),
         lastAnalysisDate: now.toISOString(),
         analysisStatus: "ready"
       });
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        console.log("\u{1F9EA} Notifying UI: analysis-ready");
         this.mainWindow.webContents.send("analysis-ready", metadataRecord);
-        this.mainWindow.webContents.send("debug-run-complete", {});
       }
-      console.log(`\u{1F9EA} Debug Run (Three-Agent Pipeline) Complete! Raw: ${session2.rawScreenshotCount}, Filtered: ${filterStats.kept}`);
+      console.log(`\u{1F680} Run complete! Kept: ${totalKept}, Rejected: ${totalRejected}`);
     } catch (error) {
-      console.error("\u{1F9EA} Debug Run Failed:", error.message);
-      this.activeDebugScraper = null;
+      console.error("\u{1F680} Run failed:", error.message);
+      this.activeScraper = null;
       if (context) {
         await browserManager.close();
       }
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send("analysis-error", {
-          message: `Debug run failed: ${error.message}`,
-          canRetry: true
-        });
-        this.mainWindow.webContents.send("debug-run-complete", {});
-      }
+      this.emitError(`Run failed: ${error.message}`);
+    }
+    this.finishRun();
+  }
+  emitError(message) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("analysis-error", {
+        message,
+        canRetry: true
+      });
     }
   }
-  // ==================== END DEBUG / TESTING ====================
-  /**
-   * BAKER (Screenshot-First Mode): Browse Instagram naturally, capture screenshots,
-   * then batch-send to LLM for comprehensive digest generation.
-   *
-   * This is the new architecture that:
-   * - Takes screenshots of each post/story during browsing
-   * - No Vision API calls during browsing (all analysis at the end)
-   * - LLM sees actual visual content instead of extracted descriptions
-   */
-  async triggerBakerScreenshotFirst(now, store, scheduledTime) {
-    const settings = store.get("settings") || {};
-    console.log(`\u{1F950} Baker (Screenshot-First) - Starting Instagram browsing at ${(/* @__PURE__ */ new Date()).toLocaleString()}`);
-    const browserManager = BrowserManager.getInstance();
-    let context = null;
-    try {
-      const apiKey = await SecureKeyManager.getInstance().getKey();
-      if (!apiKey) {
-        throw new Error("NO_API_KEY");
-      }
-      console.log("\u{1F310} Baker launching browser (headless)...");
-      context = await browserManager.launch({ headless: true });
-      console.log("\u{1F510} Baker validating Instagram session...");
-      const sessionCheck = await browserManager.validateSession();
-      if (!sessionCheck.valid) {
-        throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
-      }
-      const bakerScreenshotsDir = import_path5.default.join(__dirname, "../../debug-screenshots");
-      const bakerSessionTimestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const bakerSessionDir = import_path5.default.join(bakerScreenshotsDir, `session_${bakerSessionTimestamp}`);
-      const bakerRawDir = import_path5.default.join(bakerSessionDir, "raw");
-      const bakerFilteredDir = import_path5.default.join(bakerSessionDir, "filtered");
-      import_fs7.default.mkdirSync(bakerRawDir, { recursive: true });
-      import_fs7.default.mkdirSync(bakerFilteredDir, { recursive: true });
-      console.log("\u{1F50D} Baker starting screenshot filter agent (Agent 2)...");
-      const bakerFilter = new Filterer(bakerRawDir, bakerFilteredDir, apiKey, settings.interests || []);
-      const bakerFilterPromise = bakerFilter.start();
-      console.log("\u{1F4F1} Baker browsing Instagram (Three-Agent Pipeline)...");
-      const scraper = new InstagramScraper(context, apiKey);
-      const session2 = await scraper.browseAndCapture(
-        90,
-        // Normal mode: 90 minutes
-        settings.interests || [],
-        { rawDir: bakerRawDir }
-      );
-      console.log(`\u{1F4F8} Baker browsing complete: ${session2.rawScreenshotCount} raw screenshots saved`);
-      await browserManager.close();
-      context = null;
-      console.log("\u{1F50D} Baker waiting for filter agent to finish...");
-      const bakerFilterStats = await bakerFilterPromise;
-      console.log(`\u{1F50D} Baker filter complete: ${bakerFilterStats.kept} kept, ${bakerFilterStats.rejected} rejected, ${bakerFilterStats.tokensUsed} tokens`);
-      if (bakerFilterStats.kept < 3) {
-        console.warn(`\u26A0\uFE0F Baker: Very few filtered captures (${bakerFilterStats.kept}), digest quality may be low`);
-      }
-      console.log("\u{1F3F7}\uFE0F Baker loading filtered screenshots...");
-      const bakerFilteredFiles = import_fs7.default.readdirSync(bakerFilteredDir).filter((f) => f.endsWith(".jpg")).sort();
-      const bestCaptures = bakerFilteredFiles.map((filename, index) => {
-        const screenshot = import_fs7.default.readFileSync(import_path5.default.join(bakerFilteredDir, filename));
-        let source = "feed";
-        const jsonFile = filename.replace(".jpg", ".json");
-        const jsonPath = import_path5.default.join(bakerFilteredDir, jsonFile);
-        if (import_fs7.default.existsSync(jsonPath)) {
-          try {
-            const meta = JSON.parse(import_fs7.default.readFileSync(jsonPath, "utf-8"));
-            if (meta.phase === "Stories") source = "story";
-            else if (meta.phase === "Search") source = "search";
-          } catch {
-          }
-        }
-        return {
-          id: index + 1,
-          screenshot,
-          source,
-          interest: void 0,
-          timestamp: Date.now(),
-          scrollPosition: 0
-        };
-      });
-      console.log(`\u{1F3F7}\uFE0F Baker loaded ${bestCaptures.length} filtered screenshots`);
-      console.log("\u{1F916} Baker generating digest from filtered screenshots...");
-      const digestGenerator = new DigestGeneration(apiKey);
-      const analysis = await digestGenerator.generateDigest(bestCaptures, {
-        userName: settings.userName || "User",
-        interests: settings.interests || [],
-        location: settings.location || ""
-      });
-      const recordId = (0, import_uuid.v4)();
-      const userDataPath = import_electron5.app.getPath("userData");
-      const recordDir = import_path5.default.join(userDataPath, "analysis_records");
-      const imagesDir = import_path5.default.join(recordDir, recordId, "images");
-      await import_fs7.default.promises.mkdir(imagesDir, { recursive: true });
-      const imageMetadata = [];
-      for (const capture of bestCaptures) {
-        const filename = `${capture.id}.jpg`;
-        const imagePath = import_path5.default.join(imagesDir, filename);
-        await import_fs7.default.promises.writeFile(imagePath, capture.screenshot);
-        imageMetadata.push({
-          id: capture.id,
-          filename,
-          source: capture.source,
-          interest: capture.interest
-        });
-      }
-      console.log(`\u{1F5BC}\uFE0F Baker saved ${imageMetadata.length} filtered images to ${imagesDir}`);
-      const analysisWithImages = {
-        ...analysis,
-        images: imageMetadata
-      };
-      const newRecord = {
-        id: recordId,
-        data: analysisWithImages,
-        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
-      };
-      const recordPath = import_path5.default.join(recordDir, `${recordId}.json`);
-      const tempPath = import_path5.default.join(recordDir, `${recordId}.tmp`);
-      await import_fs7.default.promises.writeFile(tempPath, JSON.stringify(newRecord, null, 2));
-      await import_fs7.default.promises.rename(tempPath, recordPath);
-      console.log(`\u{1F4BE} Baker saved digest to disk: ${recordPath}`);
-      const metadataRecord = {
-        id: newRecord.id,
-        data: {
-          date: newRecord.data.date,
-          title: newRecord.data.title,
-          scheduledTime: newRecord.data.scheduledTime,
-          location: newRecord.data.location
-        },
-        leadStoryPreview: newRecord.leadStoryPreview
-      };
-      const currentAnalyses = store.get("analyses") || [];
-      store.set("analyses", [metadataRecord, ...currentAnalyses]);
-      store.set("settings", {
-        ...store.get("settings"),
-        lastBakeDate: now.toISOString(),
-        analysisStatus: "pending_delivery"
-      });
-      console.log(`\u{1F950} Baker (Three-Agent Pipeline) complete. Digest saved, awaiting delivery at ${scheduledTime}`);
-      console.log(`\u2705 Three-Agent Pipeline Complete. Raw: ${session2.rawScreenshotCount}, Filtered: ${bakerFilterStats.kept}`);
-    } catch (error) {
-      console.error("\u274C Baker (Screenshot-First) pipeline failed:", error.message);
-      if (context) {
-        await browserManager.close();
-      }
-      console.log(`\u{1F950} Baker failed silently. No paper to deliver at ${scheduledTime}`);
+  finishRun() {
+    this.status = "idle";
+    this.activeFilters = [];
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("run-complete", {});
     }
   }
 };
 
 // src/main/main.ts
 var import_module = require("module");
-import_electron6.app.commandLine.appendSwitch("ignore-certificate-errors");
-import_electron6.app.commandLine.appendSwitch("disable-gpu");
-import_electron6.app.commandLine.appendSwitch("disable-software-rasterizer");
-import_electron6.app.commandLine.appendSwitch("disable-dev-shm-usage");
-import_electron6.app.commandLine.appendSwitch("disable-renderer-backgrounding");
-var __filename = (0, import_url.fileURLToPath)(__importMetaUrl);
-var __dirname2 = import_path6.default.dirname(__filename);
+import_electron7.app.commandLine.appendSwitch("ignore-certificate-errors");
+import_electron7.app.commandLine.appendSwitch("disable-gpu");
+import_electron7.app.commandLine.appendSwitch("disable-software-rasterizer");
+import_electron7.app.commandLine.appendSwitch("disable-dev-shm-usage");
+import_electron7.app.commandLine.appendSwitch("disable-renderer-backgrounding");
+var __filename2 = (0, import_url.fileURLToPath)(__importMetaUrl);
+var __dirname3 = import_path6.default.dirname(__filename2);
 var require2 = (0, import_module.createRequire)(__importMetaUrl);
-if (!import_electron6.app.getLoginItemSettings().openAtLogin) {
-  import_electron6.app.setLoginItemSettings({
-    openAtLogin: true,
-    openAsHidden: false
-    // Optional: could be true if we want silent start
-  });
-}
-import_electron6.app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
+import_electron7.app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 if (require2("electron-squirrel-startup")) {
-  import_electron6.app.quit();
+  import_electron7.app.quit();
 }
-import_electron6.protocol.registerSchemesAsPrivileged([
+import_electron7.protocol.registerSchemesAsPrivileged([
   {
     scheme: "kowalski-local",
     privileges: {
@@ -45968,7 +43491,7 @@ var SHARED_PARTITION = "persist:instagram_shared";
 var createWindow = () => {
   const width = 1280 + Math.floor(Math.random() * 100);
   const height = 800 + Math.floor(Math.random() * 100);
-  mainWindow = new import_electron6.BrowserWindow({
+  mainWindow = new import_electron7.BrowserWindow({
     width,
     height,
     title: "Kowalski",
@@ -45977,20 +43500,20 @@ var createWindow = () => {
     frame: true,
     // titleBarStyle property removed to use system default
     webPreferences: {
-      preload: import_path6.default.join(__dirname2, "../preload/preload.cjs"),
+      preload: import_path6.default.join(__dirname3, "../preload/preload.cjs"),
       webviewTag: true,
       partition: SHARED_PARTITION
       // Force main window to check this (though webview usually isolates)
     },
     // Set icon for Windows/Linux (and Mac if packaged)
     // Use the processed, standardized icon
-    icon: import_path6.default.join(__dirname2, "../../build/icon-standard.png")
+    icon: import_path6.default.join(__dirname3, "../../build/icon-standard.png")
   });
   if (process.platform === "darwin" && process.env.VITE_DEV_SERVER_URL) {
-    const iconPath = import_path6.default.join(__dirname2, "../../build/icon-standard.png");
-    import_electron6.app.dock?.setIcon(iconPath);
+    const iconPath = import_path6.default.join(__dirname3, "../../build/icon-standard.png");
+    import_electron7.app.dock?.setIcon(iconPath);
   }
-  SchedulerService.getInstance().setMainWindow(mainWindow);
+  RunManager.getInstance().setMainWindow(mainWindow);
   mainWindow.on("page-title-updated", (e) => {
     e.preventDefault();
   });
@@ -45999,7 +43522,7 @@ var createWindow = () => {
     console.log("Creating window with URL:", url);
     mainWindow.loadURL(url);
   } else {
-    const filePath = import_path6.default.join(__dirname2, "../../dist/index.html");
+    const filePath = import_path6.default.join(__dirname3, "../../dist/index.html");
     console.log("Loading file path:", filePath);
     mainWindow.loadFile(filePath);
   }
@@ -46021,15 +43544,15 @@ var createWindow = () => {
       mainWindow?.hide();
       return false;
     }
-    SchedulerService.getInstance().setMainWindow(null);
+    RunManager.getInstance().setMainWindow(null);
   });
 };
-import_electron6.app.on("ready", () => {
+import_electron7.app.on("ready", () => {
   const protocolHandler = (request, callback) => {
     const url = new URL(request.url);
     const recordId = url.hostname;
     const filePath = url.pathname.startsWith("/") ? url.pathname.slice(1) : url.pathname;
-    const userDataPath2 = import_electron6.app.getPath("userData");
+    const userDataPath2 = import_electron7.app.getPath("userData");
     const fullPath = import_path6.default.join(userDataPath2, "analysis_records", recordId, filePath);
     console.log(`\u{1F4F7} Protocol request: ${request.url}`);
     console.log(`\u{1F4F7} Resolved path: ${fullPath}`);
@@ -46054,9 +43577,9 @@ import_electron6.app.on("ready", () => {
       callback({ error: -6 });
     }
   };
-  import_electron6.protocol.registerFileProtocol("kowalski-local", protocolHandler);
+  import_electron7.protocol.registerFileProtocol("kowalski-local", protocolHandler);
   console.log("\u2705 Registered kowalski-local protocol on default session");
-  import_electron6.session.fromPartition(SHARED_PARTITION).protocol.registerFileProtocol("kowalski-local", protocolHandler);
+  import_electron7.session.fromPartition(SHARED_PARTITION).protocol.registerFileProtocol("kowalski-local", protocolHandler);
   console.log(`\u2705 Registered kowalski-local protocol on partition: ${SHARED_PARTITION}`);
   createWindow();
   console.log("Session persistence enabled.");
@@ -46064,19 +43587,20 @@ import_electron6.app.on("ready", () => {
     UsageService.getInstance().initialize().catch((err) => {
       console.error("UsageService init failed:", err);
     });
-    SchedulerService.getInstance().initialize().catch((err) => {
-      console.error("SchedulerService init failed:", err);
-    });
   }, 2e3);
-  import_electron6.globalShortcut.register("CommandOrControl+Shift+H", () => {
-    console.log("\u{1F9EA} Debug Run Triggered (Cmd+Shift+H)");
-    SchedulerService.getInstance().triggerDebugRun();
+  import_electron7.globalShortcut.register("CommandOrControl+Shift+H", () => {
+    console.log("\u{1F680} Run Triggered (Cmd+Shift+H)");
+    RunManager.getInstance().startRun();
   });
-  import_electron6.globalShortcut.register("CommandOrControl+Shift+K", () => {
-    console.log("\u{1F6D1} Stop Shortcut Triggered (Cmd+Shift+K)");
-    SchedulerService.getInstance().stopDebugRun();
+  import_electron7.globalShortcut.register("CommandOrControl+Shift+K", () => {
+    console.log("\u{1F6D1} Stop Triggered (Cmd+Shift+K)");
+    RunManager.getInstance().stopRun();
   });
-  const userDataPath = import_electron6.app.getPath("userData");
+  import_electron7.globalShortcut.register("CommandOrControl+Shift+R", () => {
+    console.log("\u{1F9E0} Reset Session Memory Triggered (Cmd+Shift+R)");
+    new SessionMemory().resetMemory();
+  });
+  const userDataPath = import_electron7.app.getPath("userData");
   const recordsPath = import_path6.default.join(userDataPath, "analysis_records");
   if (!import_fs8.default.existsSync(recordsPath)) {
     import_fs8.default.mkdirSync(recordsPath, { recursive: true });
@@ -46084,16 +43608,16 @@ import_electron6.app.on("ready", () => {
   }
   setupIPCHandlers();
 });
-import_electron6.app.on("before-quit", () => {
+import_electron7.app.on("before-quit", () => {
   isQuitting = true;
-  import_electron6.globalShortcut.unregisterAll();
-  SchedulerService.getInstance().stop();
+  import_electron7.globalShortcut.unregisterAll();
+  RunManager.getInstance().stopRun();
 });
 function setupIPCHandlers() {
-  import_electron6.ipcMain.handle("reset-session", async () => {
+  import_electron7.ipcMain.handle("reset-session", async () => {
     console.log("\u{1F9F9} Starting session reset...");
     try {
-      const userDataPath = import_electron6.app.getPath("userData");
+      const userDataPath = import_electron7.app.getPath("userData");
       const sessionPath = import_path6.default.join(userDataPath, "session.json");
       if (import_fs8.default.existsSync(sessionPath)) {
         import_fs8.default.unlinkSync(sessionPath);
@@ -46104,13 +43628,13 @@ function setupIPCHandlers() {
       console.error("\u26A0\uFE0F Failed to delete session.json:", e);
     }
     try {
-      await import_electron6.session.defaultSession.clearStorageData();
+      await import_electron7.session.defaultSession.clearStorageData();
       console.log("\u2705 Cleared default session storage");
     } catch (e) {
       console.error("\u26A0\uFE0F Failed to clear default session storage:", e);
     }
     try {
-      await import_electron6.session.fromPartition(SHARED_PARTITION).clearStorageData();
+      await import_electron7.session.fromPartition(SHARED_PARTITION).clearStorageData();
       console.log("\u2705 Cleared shared partition storage");
     } catch (e) {
       console.error("\u26A0\uFE0F Failed to clear shared partition storage:", e);
@@ -46121,14 +43645,13 @@ function setupIPCHandlers() {
       store.clear();
       store.delete("analyses");
       store.delete("settings");
-      store.delete("activeSchedule");
       console.log("\u2705 Cleared electron-store");
     } catch (e) {
       console.error("\u274C Failed to clear electron-store:", e);
       return false;
     }
     try {
-      const userDataPath = import_electron6.app.getPath("userData");
+      const userDataPath = import_electron7.app.getPath("userData");
       const recordsPath = import_path6.default.join(userDataPath, "analysis_records");
       if (import_fs8.default.existsSync(recordsPath)) {
         import_fs8.default.rmSync(recordsPath, { recursive: true, force: true });
@@ -46140,76 +43663,40 @@ function setupIPCHandlers() {
     console.log("\u{1F389} Session reset complete");
     return true;
   });
-  import_electron6.ipcMain.handle("settings:get", async () => {
+  import_electron7.ipcMain.handle("settings:get", async () => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     return store.get("settings") || {};
   });
-  import_electron6.ipcMain.handle("settings:set", async (_event, newSettings) => {
+  import_electron7.ipcMain.handle("settings:set", async (_event, newSettings) => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     store.set("settings", newSettings);
-    if (newSettings.hasOnboarded === false) {
-      store.delete("activeSchedule");
-      console.log("\u{1F9F9} Cleared activeSchedule during reset");
-    } else if (newSettings.hasOnboarded === true) {
-      const activeSchedule = store.get("activeSchedule");
-      if (activeSchedule) {
-        const updatedSchedule = {
-          ...activeSchedule,
-          morningTime: newSettings.morningTime,
-          eveningTime: newSettings.eveningTime,
-          digestFrequency: newSettings.digestFrequency
-        };
-        store.set("activeSchedule", updatedSchedule);
-        const windows = import_electron6.BrowserWindow.getAllWindows();
-        windows.forEach((win) => {
-          win.webContents.send("schedule-updated", updatedSchedule);
-        });
-        console.log("\u{1F525} Hot-Patched Daily Snapshot with new User Settings:", updatedSchedule);
-      }
-    }
     return true;
   });
-  import_electron6.ipcMain.handle("settings:patch", async (_event, updates) => {
+  import_electron7.ipcMain.handle("settings:patch", async (_event, updates) => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     const current = store.get("settings") || {};
     const merged = { ...current, ...updates };
     store.set("settings", merged);
-    if ("morningTime" in updates || "eveningTime" in updates || "digestFrequency" in updates) {
-      const activeSchedule = store.get("activeSchedule");
-      if (activeSchedule) {
-        const updatedSchedule = {
-          ...activeSchedule,
-          morningTime: merged.morningTime,
-          eveningTime: merged.eveningTime,
-          digestFrequency: merged.digestFrequency
-        };
-        store.set("activeSchedule", updatedSchedule);
-        import_electron6.BrowserWindow.getAllWindows().forEach((win) => {
-          win.webContents.send("schedule-updated", updatedSchedule);
-        });
-        console.log("\u{1F525} Hot-Patched Daily Snapshot (via Patch):", updatedSchedule);
-      }
-    }
     return merged;
   });
-  import_electron6.ipcMain.handle("analyses:get", async () => {
+  import_electron7.ipcMain.handle("analyses:get", async () => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     return store.get("analyses") || [];
   });
-  import_electron6.ipcMain.handle("analyses:set", async (_event, analyses) => {
+  import_electron7.ipcMain.handle("analyses:set", async (_event, analyses) => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     store.set("analyses", analyses);
     return true;
     return true;
   });
-  import_electron6.ipcMain.handle("analyses:get-content", async (_event, id) => {
+  import_electron7.ipcMain.handle("analyses:get-content", async (_event, id) => {
     try {
-      const userDataPath = import_electron6.app.getPath("userData");
+      const userDataPath = import_electron7.app.getPath("userData");
       const filePath = import_path6.default.join(userDataPath, "analysis_records", `${id}.json`);
       if (import_fs8.default.existsSync(filePath)) {
         const raw = import_fs8.default.readFileSync(filePath, "utf-8");
@@ -46221,24 +43708,25 @@ function setupIPCHandlers() {
       return null;
     }
   });
-  import_electron6.ipcMain.handle("settings:get-active-schedule", async () => {
-    const { default: Store } = await import("electron-store");
-    const store = new Store();
-    return store.get("activeSchedule") || null;
+  import_electron7.ipcMain.handle("run:start", async () => {
+    await RunManager.getInstance().startRun();
   });
-  import_electron6.ipcMain.handle("settings:get-wake-time", async () => {
-    return SchedulerService.getInstance().getLastWakeTime();
+  import_electron7.ipcMain.handle("run:stop", async () => {
+    RunManager.getInstance().stopRun();
   });
-  import_electron6.ipcMain.handle("settings:set-secure", async (_event, { apiKey }) => {
+  import_electron7.ipcMain.handle("run:status", () => {
+    return RunManager.getInstance().getStatus();
+  });
+  import_electron7.ipcMain.handle("settings:set-secure", async (_event, { apiKey }) => {
     return SecureKeyManager.getInstance().setKey(apiKey);
   });
-  import_electron6.ipcMain.handle("settings:check-key-status", async () => {
+  import_electron7.ipcMain.handle("settings:check-key-status", async () => {
     return SecureKeyManager.getInstance().getKeyStatus();
   });
-  import_electron6.ipcMain.handle("settings:get-secure", async () => {
+  import_electron7.ipcMain.handle("settings:get-secure", async () => {
     return SecureKeyManager.getInstance().getKey();
   });
-  import_electron6.ipcMain.handle("settings:validate-api-key", async (_event, { apiKey }) => {
+  import_electron7.ipcMain.handle("settings:validate-api-key", async (_event, { apiKey }) => {
     try {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -46260,11 +43748,11 @@ function setupIPCHandlers() {
       return { valid: false, error: "network_error" };
     }
   });
-  import_electron6.ipcMain.handle("auth:login", async (_event, bounds) => {
+  import_electron7.ipcMain.handle("auth:login", async (_event, bounds) => {
     if (!mainWindow) return false;
     return BrowserManager.getInstance().login(bounds, mainWindow);
   });
-  import_electron6.ipcMain.handle("test-headless", async () => {
+  import_electron7.ipcMain.handle("test-headless", async () => {
     try {
       console.log("\u{1F916} Starting BrowserManager (Persistent)...");
       const manager = BrowserManager.getInstance();
@@ -46285,15 +43773,15 @@ function setupIPCHandlers() {
       return `Error: ${error.message}`;
     }
   });
-  import_electron6.ipcMain.handle("clear-instagram-session", async () => {
+  import_electron7.ipcMain.handle("clear-instagram-session", async () => {
     console.log("\u{1F9F9} Clearing Instagram Session only...");
     try {
-      const userDataPath = import_electron6.app.getPath("userData");
+      const userDataPath = import_electron7.app.getPath("userData");
       const sessionPath = import_path6.default.join(userDataPath, "session.json");
       if (import_fs8.default.existsSync(sessionPath)) {
         import_fs8.default.unlinkSync(sessionPath);
       }
-      await import_electron6.session.fromPartition(SHARED_PARTITION).clearStorageData();
+      await import_electron7.session.fromPartition(SHARED_PARTITION).clearStorageData();
       await BrowserManager.getInstance().clearData();
       return true;
     } catch (e) {
@@ -46301,9 +43789,9 @@ function setupIPCHandlers() {
       return false;
     }
   });
-  import_electron6.ipcMain.handle("check-instagram-session", async () => {
+  import_electron7.ipcMain.handle("check-instagram-session", async () => {
     try {
-      const userDataPath = import_electron6.app.getPath("userData");
+      const userDataPath = import_electron7.app.getPath("userData");
       const persistentContextPath = import_path6.default.join(userDataPath, "kowalski_browser");
       if (!import_fs8.default.existsSync(persistentContextPath)) {
         return { isActive: false, reason: "no_profile" };
@@ -46363,13 +43851,13 @@ function setupIPCHandlers() {
     }
   });
 }
-import_electron6.app.on("window-all-closed", () => {
+import_electron7.app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    import_electron6.app.quit();
+    import_electron7.app.quit();
   }
 });
-import_electron6.app.on("activate", () => {
-  if (import_electron6.BrowserWindow.getAllWindows().length === 0) {
+import_electron7.app.on("activate", () => {
+  if (import_electron7.BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   } else {
     mainWindow?.show();

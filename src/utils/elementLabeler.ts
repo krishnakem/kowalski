@@ -28,6 +28,7 @@ export interface LabeledElement {
     text: string;
     ariaLabel: string;
     href: string;
+    role: string;  // ARIA role (e.g., "button", "link", "img")
 }
 
 export interface LabelResult {
@@ -41,6 +42,7 @@ interface RawElement {
     text: string;
     ariaLabel: string;
     href: string;
+    role: string;
     x: number;
     y: number;
     width: number;
@@ -119,6 +121,7 @@ export async function labelElements(
             text: raw.text,
             ariaLabel: raw.ariaLabel,
             href: raw.href,
+            role: raw.role,
         };
         elements.set(el.id, el);
     }
@@ -200,27 +203,34 @@ async function detectElements(
             // Comment sections, tagged-user lists, and similar repeating UI have a
             // scrollable ancestor packed with interactive children. Navigation buttons,
             // close buttons, and sidebar items are never inside such containers.
-            let inDenseScroller = false;
-            let ancestor = htmlEl.parentElement;
-            for (let depth = 0; depth < 8 && ancestor; depth++) {
-                const aStyle = window.getComputedStyle(ancestor);
-                const scrollable = aStyle.overflowY === 'auto' || aStyle.overflowY === 'scroll';
-                if (scrollable) {
-                    const childCount = ancestor.querySelectorAll('a, button').length;
-                    if (childCount > 10) {
-                        inDenseScroller = true;
-                        break;
+            // Exception: <a> tags linking to posts, reels, or stories are always kept —
+            // these are high-value navigation links (e.g. timestamp links to open post modals).
+            const href = el.getAttribute('href') || '';
+            const isNavLink = tag === 'A' && /^\/(.*\/)?p\/|\/reel\/|\/stories\//.test(href);
+            if (!isNavLink) {
+                let inDenseScroller = false;
+                let ancestor = htmlEl.parentElement;
+                for (let depth = 0; depth < 8 && ancestor; depth++) {
+                    const aStyle = window.getComputedStyle(ancestor);
+                    const scrollable = aStyle.overflowY === 'auto' || aStyle.overflowY === 'scroll';
+                    if (scrollable) {
+                        const childCount = ancestor.querySelectorAll('a, button').length;
+                        if (childCount > 10) {
+                            inDenseScroller = true;
+                            break;
+                        }
                     }
+                    ancestor = ancestor.parentElement;
                 }
-                ancestor = ancestor.parentElement;
+                if (inDenseScroller) continue;
             }
-            if (inDenseScroller) continue;
 
             results.push({
                 tag: tag.toLowerCase(),
                 text: (el.textContent || '').trim().slice(0, 50),
                 ariaLabel: selfLabel,
                 href: el.getAttribute('href') || '',
+                role: role,
                 x: rect.x,
                 y: rect.y,
                 width: rect.width,

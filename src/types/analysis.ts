@@ -9,8 +9,7 @@ export interface AnalysisSection {
 export interface DigestImage {
     id: number;
     filename: string;          // "1.jpg"
-    source: 'feed' | 'story' | 'search' | 'profile' | 'carousel';
-    interest?: string;         // For search results - which interest triggered this
+    source: 'feed' | 'story' | 'profile' | 'carousel';
 }
 
 /**

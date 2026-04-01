@@ -1,91 +1,94 @@
 import { useEffect, useCallback, memo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Settings, Archive } from "lucide-react";
+import { Settings, Archive, Search, Square, Eye, RotateCcw } from "lucide-react";
 import { AnimatedPixelPenguin } from "../icons/PixelIcons";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
-import { useDailySnapshot } from "@/hooks/useDailySnapshot";
-import { useSystemWakeTime } from "@/hooks/useSystemWakeTime";
 import { ease, duration, spring } from "@/lib/animations";
-import { getNextAnalysisTime } from "@/lib/timeUtils";
 
 interface AgentActiveScreenProps {
   onComplete: () => void;
   autoComplete?: boolean;
 }
 
+type RunState = "idle" | "running" | "done";
+
 // Animation transitions defined outside component
 const buttonEntranceTransition = { delay: 0.4, duration: duration.slow, ease: ease.cinematic };
 const contentEntranceTransition = { delay: 0.25, duration: duration.slow, ease: ease.cinematic };
-const subtextTransition = { delay: 0.5, duration: duration.slow, ease: ease.cinematic };
 
 const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
   const { settings, patchSettings } = useSettings();
   const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
-  const { snapshot: activeSchedule, refresh: refreshSnapshot } = useDailySnapshot();
-  const { wakeTime } = useSystemWakeTime();
 
-  // If no past analyses AND active schedule is not for today, then it's the first day (onboarding day)
-  // Fix: If activeSchedule.activeDate IS today, then we are LIVE, regardless of past analyses.
-  const todayStr = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
-  const isActiveToday = activeSchedule?.activeDate === todayStr;
+  const [runState, setRunState] = useState<RunState>("idle");
+  const [endTime, setEndTime] = useState<number | null>(null);
+  const [remaining, setRemaining] = useState(0);
 
-  // Logic: It is "First Day" (show tomorrow) ONLY IF:
-  // 1. We have no archives (new user)
-  // 2. AND The active schedule is NOT for today (meaning we onboarded today and wait for tomorrow)
-  const isFirstDay = archivesLoaded && !hasPastAnalyses && !isActiveToday;
-  const nextAnalysis = getNextAnalysisTime(settings, activeSchedule, isFirstDay, wakeTime);
-
-  // DEBUG LOGGING
-  console.log("🔍 UI DEBUG:", {
-    now: new Date().toLocaleString(),
-    todayStr,
-    activeDate: activeSchedule?.activeDate,
-    isActiveToday,
-    isFirstDay,
-    wakeTime: wakeTime?.toLocaleString(),
-    nextAnalysis
-  });
-
-  const showArchiveButton = archivesLoaded && hasPastAnalyses;
-
-  // Purely visual component - navigation is handled by global listeners in Index.tsx
-
-  // UI PULSE: Force re-render every minute to keep relative time strings ("Tomorrow" vs "Today") accurate.
-  // This fixes the bug where jumping the system clock leaves the UI stale.
-  const [, setTick] = useState(0);
-
+  // Check initial run status on mount
   useEffect(() => {
-    // 1. Minute Ticker
-    const interval = setInterval(() => {
-      setTick(t => t + 1);
-    }, 60000); // 1 minute
+    window.api.run.getStatus().then((status) => {
+      if (status === 'running') {
+        setRunState('running');
+      }
+    });
+  }, []);
 
-    // 2. Focus Trigger (Updates immediately when user wakes/tabs back to app)
-    const onFocus = () => {
-      setTick(t => t + 1);
-      refreshSnapshot(); // FORCE RE-FETCH from Backend
-    };
+  // Listen for run events
+  useEffect(() => {
+    const unsubStart = window.api.settings.onRunStarted(({ durationMs, startTime }) => {
+      setRunState("running");
+      setEndTime(startTime + durationMs);
+      setRemaining(durationMs);
+    });
 
-    window.addEventListener('focus', onFocus);
+    const unsubComplete = window.api.settings.onRunComplete(() => {
+      setRunState("idle");
+      setEndTime(null);
+    });
 
     return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
+      unsubStart();
+      unsubComplete();
     };
   }, []);
 
-  // FAIL-SAFE NAVIGATION:
-  // If the 'analysis-ready' event was missed but the store updated, navigate anyway.
+  // Countdown ticker
+  useEffect(() => {
+    if (runState !== "running" || !endTime) return;
+
+    const interval = setInterval(() => {
+      const left = Math.max(0, endTime - Date.now());
+      setRemaining(left);
+      if (left === 0) {
+        setRunState("idle");
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [runState, endTime]);
+
+  // Navigate to Gazette when analysis is ready
   useEffect(() => {
     if (settings.analysisStatus === 'ready') {
-      console.log("Stale 'AgentActive' screen detected (Status is Ready). Navigating to Gazette...");
-      onComplete(); // Triggers parent navigation
+      onComplete();
     }
   }, [settings.analysisStatus, onComplete]);
+
+  const showArchiveButton = archivesLoaded && hasPastAnalyses;
+
+  const handleRunNow = useCallback(async () => {
+    setRunState("running");
+    await window.api.run.start();
+  }, []);
+
+  const handleStop = useCallback(async () => {
+    await window.api.run.stop();
+    setRunState("idle");
+  }, []);
 
   const handleNavigateToArchive = useCallback(() => {
     navigate("/archive", { state: { from: "agent" } });
@@ -95,11 +98,19 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
     navigate("/settings", { state: { from: "agent" } });
   }, [navigate]);
 
+  // Format milliseconds as MM:SS
+  const formatTime = (ms: number) => {
+    const totalSeconds = Math.ceil(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
 
-      {/* Archive Button - Always show for navigation/testing */}
-      {archivesLoaded && (
+      {/* Archive Button */}
+      {showArchiveButton && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -133,6 +144,7 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
           <Settings className="w-8 h-8" />
         </Button>
       </motion.div>
+
       {/* Animated Pixel Penguin */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -143,28 +155,59 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
         <AnimatedPixelPenguin size={200} />
       </motion.div>
 
-      {/* Status Text */}
+      {/* Content */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={contentEntranceTransition}
-        className="text-center max-w-sm"
+        className="text-center max-w-sm space-y-6"
       >
-        <p className="text-foreground font-sans text-lg leading-relaxed">
-          Kowalski is working on curating your analysis.
-        </p>
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={subtextTransition}
-          className="text-muted-foreground text-base mt-4"
-        >
-          Your analysis will be ready {nextAnalysis.toLowerCase()}.
-        </motion.p>
+        {/* Idle State */}
+        {runState === "idle" && (
+          <>
+            <p className="text-foreground font-sans text-lg leading-relaxed">
+              Ready when you are.
+            </p>
+            <button
+              onClick={handleRunNow}
+              className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
+                         text-foreground font-sans text-sm tracking-wider uppercase
+                         hover:bg-foreground hover:text-background transition-all duration-200"
+            >
+              <Search className="w-4 h-4" />
+              <span>Run Now</span>
+            </button>
+            {hasPastAnalyses && (
+              <p className="text-muted-foreground text-sm">
+                Press Cmd+Shift+H to run anytime.
+              </p>
+            )}
+          </>
+        )}
+
+        {/* Running State */}
+        {runState === "running" && (
+          <>
+            <div className="flex items-center justify-center gap-2 text-foreground">
+              <span className="animate-pulse">
+                <Search className="w-5 h-5" />
+              </span>
+              <span className="font-mono text-2xl font-semibold">
+                Browsing: {formatTime(remaining)}
+              </span>
+            </div>
+            <button
+              onClick={handleStop}
+              className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground/40
+                         text-foreground/60 font-sans text-sm tracking-wider uppercase
+                         hover:border-foreground hover:text-foreground transition-all duration-200"
+            >
+              <Square className="w-4 h-4" />
+              <span>Stop</span>
+            </button>
+          </>
+        )}
       </motion.div>
-
-
-
     </div>
   );
 });
