@@ -154,8 +154,8 @@ export class Kowalski {
             // ═══════════════════════════════════════════
             // Phase 1: Stories (Haiku — bounded, cheap)
             // ═══════════════════════════════════════════
-            const storiesMaxMs = Math.min(3 * 60 * 1000, targetDurationMs * 0.15);
-            console.log(`\n📖 Phase 1: Stories (budget: ${(storiesMaxMs / 1000 / 60).toFixed(1)} min, model: ${ModelConfig.stories})`);
+            const storiesMaxMs = Infinity; // No time limit — stories end when the ArrowRight button disappears
+            console.log(`\n📖 Phase 1: Stories (no time limit — exits when stories end, model: ${ModelConfig.stories})`);
             this.screenshotCollector.appendLogRaw(`\n## Phase 1: Stories\n`);
 
             const storiesAgent = new StoriesAgent(

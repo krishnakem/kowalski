@@ -21,6 +21,7 @@ ACTIONS (pick one per turn):
   wait(seconds)    Wait 1-5 seconds for content to load.
   newtab(n)        Open the link at element [n] in a new tab and switch to it.
   closetab         Close the current tab and switch back to the previous one.
+  goback           Navigate back (browser back button). Use after viewing a post page to return to the feed at your previous scroll position.
   done             End the browsing session.
 
 SAFETY — HARD RULES
@@ -74,6 +75,8 @@ Use this for discoveries like:
 Only include a lesson when you've genuinely discovered something new about how the UI works.
 
 OUTPUT FORMAT (JSON):
+
+Example 1 — clicking an element:
 {
   "thinking": "I want to click the timestamp '6h' to open the post modal. That's element [15] in the label list.",
   "action": "click",
@@ -82,4 +85,15 @@ OUTPUT FORMAT (JSON):
   "expected_state": "dark overlay with full post image, caption, and comments",
   "if_wrong": "press Escape to dismiss whatever opened, then try a different timestamp link",
   "memory": "WHAT: feed\nPLAN: 1) click timestamp 2) advance carousel 3) escape and scroll\nSTUCK: 0"
+}
+
+Example 2 — pressing a key (note: the key goes in the "key" field, NOT "element"):
+{
+  "thinking": "I need to advance to the next story frame by pressing the right arrow key.",
+  "action": "press",
+  "key": "ArrowRight",
+  "intent": "advance to next story frame",
+  "expected_state": "story viewer shows the next frame with new content",
+  "if_wrong": "try clicking the Next button instead",
+  "memory": "WHAT: stories\nPLAN: 1) press ArrowRight 2) continue advancing 3) exit when done\nSTUCK: 0"
 }

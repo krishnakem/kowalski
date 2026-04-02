@@ -25,7 +25,7 @@ import capabilitiesPrompt from '../prompts/capabilities.md';
 /** LLM response schema — the complete output format. */
 export interface VisionAction {
     thinking: string;
-    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'wait' | 'done' | 'newtab' | 'closetab';
+    action: 'click' | 'scroll' | 'type' | 'press' | 'hover' | 'wait' | 'done' | 'newtab' | 'closetab' | 'goback';
     element?: number;
     direction?: 'up' | 'down';
     text?: string;
@@ -181,6 +181,11 @@ export abstract class BaseVisionAgent {
     /** Whether this agent needs element labeling (DOM detection + badge drawing). */
     protected abstract shouldLabelElements(): boolean;
 
+    /** Return a structured workflow summary for the assistant response after reference images. */
+    protected getWorkflowSummary(): string | null {
+        return null;
+    }
+
     // -----------------------------------------------------------------------
     // Public API
     // -----------------------------------------------------------------------
@@ -217,124 +222,126 @@ export abstract class BaseVisionAgent {
         // Load reference images
         this.loadReferenceImages();
 
-        while (true) {
-            if (this.stopped) {
-                console.log(`🛑 ${this.getAgentName()}: stopped by user`);
-                this.collector.appendLog(`🛑 ${this.getAgentName()}: stopped by user (Cmd+Shift+K)`);
-                break;
-            }
-
+        // === FIRST TURN: observe initial state, get first decision ===
+        let decision: VisionAction | null = null;
+        while (!decision) {
+            if (this.stopped) break;
             const elapsed = Date.now() - this.startTime;
-            const remaining = this.config.maxDurationMs - elapsed;
-            if (remaining <= 0) {
-                console.log(`⏱️  ${this.getAgentName()}: time limit reached`);
-                this.collector.appendLog(`⏱️ ${this.getAgentName()}: time limit reached`);
-                break;
-            }
+            if (this.config.maxDurationMs - elapsed <= 0) break;
+            decision = await this.captureAndDecide(this.config.maxDurationMs - elapsed);
+            if (!decision) await this.delay(500); // screenshot failed, retry
+        }
 
-            // 1. Take and resize screenshot
-            const rawScreenshot = await this.captureScreenshot();
-            if (!rawScreenshot) {
-                await this.delay(500);
-                continue;
-            }
-
-            // Save raw screenshot for filter agent + debug
-            this.saveRawScreenshot(rawScreenshot);
-            this.lastRawScreenshot = rawScreenshot;
-
-            // 1b. Detect interactive elements and draw labels (skip for agents that don't need it)
-            let screenshot: Buffer;
-            if (this.shouldLabelElements()) {
-                const labeled = await labelElements(
-                    this.page, rawScreenshot,
-                    this.screenshotWidth, this.screenshotHeight,
-                    this.viewportWidth, this.viewportHeight
-                );
-                screenshot = labeled.buffer;
-                this.currentElements = labeled.elements;
-                console.log(`  🏷️ Labeled ${labeled.elements.size} interactive elements`);
-            } else {
-                screenshot = rawScreenshot;
-                this.currentElements = new Map();
-            }
-
-            // 2. Call LLM
-            const decision = await this.callLLM(screenshot, remaining);
-            this.decisionCount++;
-
-            console.log(`  🧭 [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
-
-            // 2b. Log element-based actions
-            if (['click', 'hover', 'newtab'].includes(decision.action) && decision.element !== undefined) {
-                const el = this.currentElements.get(decision.element);
-                const desc = el ? `"${el.text || el.ariaLabel || el.tag}"` : 'unknown';
-                const coordLog = `[${this.decisionCount}] ${decision.action}([${decision.element}] ${desc}) — ${decision.thinking}`;
-                console.log(`  📍 ${coordLog}`);
-                this.collector.appendLog(`📍 ${coordLog}`);
-            }
-
-            // 2c. Save debug screenshot
-            await this.saveDebugScreenshot(screenshot, decision);
-
-            // 3. Handle "done"
-            if (decision.action === 'done') {
+        if (!decision || decision.action === 'done') {
+            // Edge case: LLM said done on first turn or we timed out/stopped
+            if (decision) {
                 console.log(`✅ ${this.getAgentName()}: LLM ended session — ${decision.thinking}`);
                 this.collector.appendLog(`✅ ${this.getAgentName()}: LLM ended session — ${decision.thinking}`);
-                break;
             }
+            // fall through to cleanup
+        } else {
+            // === MAIN LOOP: execute decision, observe result, get next ===
+            while (true) {
+                if (this.stopped) {
+                    console.log(`🛑 ${this.getAgentName()}: stopped by user`);
+                    this.collector.appendLog(`🛑 ${this.getAgentName()}: stopped by user (Cmd+Shift+K)`);
+                    break;
+                }
 
-            // 4. Persist memory and intent-driven state
-            if (decision.memory) {
-                this.lastMemory = decision.memory;
-            }
-
-            // Store intent fields for next turn's feedback
-            this.lastIntent = decision.intent || '';
-            this.lastExpectedState = decision.expected_state || '';
-            this.lastRecoveryPlan = decision.if_wrong || '';
-
-            // Process element notes into persistent knowledge map
-            if (decision.element_notes) {
-                for (const [idStr, description] of Object.entries(decision.element_notes)) {
-                    const id = parseInt(idStr, 10);
-                    const el = this.currentElements.get(id);
-                    if (el) {
-                        const fp = elementFingerprint(el);
-                        this.elementKnowledge.set(fp, description);
+                // Persist state from current decision
+                if (decision.memory) this.lastMemory = decision.memory;
+                this.lastIntent = decision.intent || '';
+                this.lastExpectedState = decision.expected_state || '';
+                this.lastRecoveryPlan = decision.if_wrong || '';
+                if (decision.element_notes) {
+                    for (const [idStr, description] of Object.entries(decision.element_notes)) {
+                        const id = parseInt(idStr, 10);
+                        const el = this.currentElements.get(id);
+                        if (el) this.elementKnowledge.set(elementFingerprint(el), description);
                     }
                 }
-            }
-
-            // Capture persistent lessons
-            if (decision.lesson) {
-                this.learnedLessons.push(decision.lesson);
-                if (this.learnedLessons.length > 10) {
-                    this.learnedLessons.shift();
+                if (decision.lesson) {
+                    this.learnedLessons.push(decision.lesson);
+                    if (this.learnedLessons.length > 10) this.learnedLessons.shift();
                 }
-            }
 
-            // 5. Execute action
-            const result = await this.executeAction(decision);
-            console.log(`     → ${result}`);
+                // 1. EXECUTE the action
+                const result = await this.executeAction(decision);
+                console.log(`     → ${result}`);
+                this.lastAction = decision;
 
-            this.lastAction = decision;
+                // Record history + log
+                this.actionHistory.push({ action: this.formatAction(decision), result });
+                const tokenStr = this.lastTokenUsage
+                    ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens`
+                    : '';
+                this.collector.appendLog(`[${this.decisionCount}] ${this.formatAction(decision)}${tokenStr}`);
+                this.collector.appendLog(`  💭 ${decision.thinking}`);
+                this.collector.appendLog(`  → ${result}`);
+                if (decision.memory) this.collector.appendLog(`  📝 Memory: ${decision.memory}`);
 
-            // 6. Record to history
-            this.actionHistory.push({
-                action: this.formatAction(decision),
-                result
-            });
+                // Check time
+                const elapsed = Date.now() - this.startTime;
+                const remaining = this.config.maxDurationMs - elapsed;
+                if (remaining <= 0) {
+                    console.log(`⏱️  ${this.getAgentName()}: time limit reached`);
+                    this.collector.appendLog(`⏱️ ${this.getAgentName()}: time limit reached`);
+                    break;
+                }
 
-            // 7. Log to session file
-            const tokenStr = this.lastTokenUsage
-                ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens`
-                : '';
-            this.collector.appendLog(`[${this.decisionCount}] ${this.formatAction(decision)}${tokenStr}`);
-            this.collector.appendLog(`  💭 ${decision.thinking}`);
-            this.collector.appendLog(`  → ${result}`);
-            if (decision.memory) {
-                this.collector.appendLog(`  📝 Memory: ${decision.memory}`);
+                // 2. SETTLE — wait for page to stabilize after action
+                await this.delay(300);
+
+                // 3. SCREENSHOT — one screenshot, dual purpose
+                const rawScreenshot = await this.captureScreenshot();
+                if (!rawScreenshot) {
+                    await this.delay(500);
+                    continue;
+                }
+
+                // 3a. Save raw for analysis/filtering
+                this.saveRawScreenshot(rawScreenshot);
+                this.lastRawScreenshot = rawScreenshot;
+
+                // 3b. Label the SAME screenshot for LLM
+                let screenshot: Buffer;
+                if (this.shouldLabelElements()) {
+                    const labeled = await labelElements(
+                        this.page, rawScreenshot,
+                        this.screenshotWidth, this.screenshotHeight,
+                        this.viewportWidth, this.viewportHeight
+                    );
+                    screenshot = labeled.buffer;
+                    this.currentElements = labeled.elements;
+                    console.log(`  🏷️ Labeled ${labeled.elements.size} interactive elements`);
+                } else {
+                    screenshot = rawScreenshot;
+                    this.currentElements = new Map();
+                }
+
+                // 4. DECIDE — send labeled screenshot to LLM
+                const nextDecision = await this.callLLM(screenshot, remaining);
+                this.decisionCount++;
+                console.log(`  🧭 [${this.decisionCount}] action=${nextDecision.action} | ${nextDecision.thinking.slice(0, 80)}`);
+
+                if (['click', 'hover', 'newtab'].includes(nextDecision.action) && nextDecision.element !== undefined) {
+                    const el = this.currentElements.get(nextDecision.element);
+                    const desc = el ? `"${el.text || el.ariaLabel || el.tag}"` : 'unknown';
+                    const coordLog = `[${this.decisionCount}] ${nextDecision.action}([${nextDecision.element}] ${desc}) — ${nextDecision.thinking}`;
+                    console.log(`  📍 ${coordLog}`);
+                    this.collector.appendLog(`📍 ${coordLog}`);
+                }
+
+                await this.saveDebugScreenshot(screenshot, nextDecision);
+
+                // Check if done
+                if (nextDecision.action === 'done') {
+                    console.log(`✅ ${this.getAgentName()}: LLM ended session — ${nextDecision.thinking}`);
+                    this.collector.appendLog(`✅ ${this.getAgentName()}: LLM ended session — ${nextDecision.thinking}`);
+                    break;
+                }
+
+                decision = nextDecision;
             }
         }
 
@@ -356,6 +363,49 @@ export abstract class BaseVisionAgent {
             decisionCount: this.decisionCount,
             actionHistory: [...this.actionHistory]
         };
+    }
+
+    // -----------------------------------------------------------------------
+    // Screenshot + LLM decision helper
+    // -----------------------------------------------------------------------
+
+    private async captureAndDecide(remainingMs: number): Promise<VisionAction | null> {
+        const rawScreenshot = await this.captureScreenshot();
+        if (!rawScreenshot) return null;
+
+        this.saveRawScreenshot(rawScreenshot);
+        this.lastRawScreenshot = rawScreenshot;
+
+        let screenshot: Buffer;
+        if (this.shouldLabelElements()) {
+            const labeled = await labelElements(
+                this.page, rawScreenshot,
+                this.screenshotWidth, this.screenshotHeight,
+                this.viewportWidth, this.viewportHeight
+            );
+            screenshot = labeled.buffer;
+            this.currentElements = labeled.elements;
+            console.log(`  🏷️ Labeled ${labeled.elements.size} interactive elements`);
+        } else {
+            screenshot = rawScreenshot;
+            this.currentElements = new Map();
+        }
+
+        const decision = await this.callLLM(screenshot, remainingMs);
+        this.decisionCount++;
+        console.log(`  🧭 [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
+
+        // Log element-based actions
+        if (['click', 'hover', 'newtab'].includes(decision.action) && decision.element !== undefined) {
+            const el = this.currentElements.get(decision.element);
+            const desc = el ? `"${el.text || el.ariaLabel || el.tag}"` : 'unknown';
+            const coordLog = `[${this.decisionCount}] ${decision.action}([${decision.element}] ${desc}) — ${decision.thinking}`;
+            console.log(`  📍 ${coordLog}`);
+            this.collector.appendLog(`📍 ${coordLog}`);
+        }
+
+        await this.saveDebugScreenshot(screenshot, decision);
+        return decision;
     }
 
     // -----------------------------------------------------------------------
@@ -415,6 +465,7 @@ export abstract class BaseVisionAgent {
             case 'wait': return this.executeWait(decision);
             case 'newtab': return this.executeNewtab(decision);
             case 'closetab': return this.executeClosetab();
+            case 'goback': return this.executeGoback();
             default: return `unknown action: ${decision.action}`;
         }
     }
@@ -540,6 +591,18 @@ export abstract class BaseVisionAgent {
         }
     }
 
+    private async executeGoback(): Promise<string> {
+        const beforeUrl = this.page.url();
+        console.log(`  ↩️ goback: from ${beforeUrl}`);
+        this.collector.appendLog(`↩️ goback: from ${beforeUrl}`);
+        await this.page.goBack({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+        await this.delay(500);
+        const afterUrl = this.page.url();
+        console.log(`  ↩️ goback: now at ${afterUrl}`);
+        this.collector.appendLog(`↩️ goback: now at ${afterUrl}`);
+        return `navigated back from ${beforeUrl} → ${afterUrl}`;
+    }
+
     private async executeClosetab(): Promise<string> {
         if (!this.originalPage) {
             return 'no tab to close — already on the main tab';
@@ -619,20 +682,7 @@ export abstract class BaseVisionAgent {
         if (!this.referenceImagesSent && this.referenceImages && this.referenceImages.length > 0) {
             const refContent: Array<Record<string, unknown>> = [];
 
-            // Include general images (e.g. goinghome.png)
-            const generalImages = this.loadGeneralReferenceImages();
-            for (const ref of generalImages) {
-                refContent.push({
-                    type: 'image',
-                    source: this.dataUrlToAnthropicSource(ref.base64)
-                });
-                refContent.push({
-                    type: 'text',
-                    text: `[Reference: ${ref.label}]`
-                });
-            }
-
-            // Include phase-specific images
+            // Include phase-specific reference images
             for (const ref of this.referenceImages) {
                 refContent.push({
                     type: 'image',
@@ -651,9 +701,10 @@ export abstract class BaseVisionAgent {
                     text: `These are step-by-step instructions for how to handle ${folder.toLowerCase()} on Instagram. The images are numbered — follow them in sequence. Read the annotations in each image carefully.`
                 });
                 messages.push({ role: 'user', content: refContent });
+                const summary = this.getWorkflowSummary();
                 messages.push({
                     role: 'assistant',
-                    content: `Understood. I'll follow the ${folder.toLowerCase()} workflow steps shown above.`
+                    content: summary || `Understood. I'll follow the ${folder.toLowerCase()} workflow steps shown above.`
                 });
                 console.log(`  📎 Injected reference images (${this.referenceImages.length} images)`);
                 this.collector.appendLog(`📎 Injected reference images (${this.referenceImages.length} images)`);
@@ -838,37 +889,6 @@ export abstract class BaseVisionAgent {
         }
     }
 
-    private loadGeneralReferenceImages(): Array<{ label: string; base64: string }> {
-        const examplesDir = path.join(__dirname, '../../src/main/prompts/examples');
-        const images: Array<{ label: string; base64: string }> = [];
-
-        try {
-            if (!fs.existsSync(examplesDir)) return images;
-
-            const imagePattern = /\.(jpg|jpeg|png|webp)$/i;
-            const rootFiles = fs.readdirSync(examplesDir)
-                .filter(f => imagePattern.test(f) && fs.statSync(path.join(examplesDir, f)).isFile())
-                .sort();
-
-            const cleanName = (name: string) =>
-                path.basename(name, path.extname(name)).replace(/[-_.]/g, ' ').trim();
-
-            for (const file of rootFiles) {
-                const buffer = fs.readFileSync(path.join(examplesDir, file));
-                const ext = path.extname(file).toLowerCase().replace('.', '');
-                const mime = ext === 'jpg' ? 'jpeg' : ext;
-                images.push({
-                    label: cleanName(file),
-                    base64: `data:image/${mime};base64,${buffer.toString('base64')}`
-                });
-            }
-        } catch {
-            // Non-critical
-        }
-
-        return images;
-    }
-
     // -----------------------------------------------------------------------
     // Per-Turn User Prompt
     // -----------------------------------------------------------------------
@@ -953,6 +973,11 @@ export abstract class BaseVisionAgent {
             for (const lesson of this.learnedLessons) {
                 parts.push(`- ${lesson}`);
             }
+        }
+
+        // Periodic workflow reminder (every 10 turns)
+        if (this.decisionCount > 0 && this.decisionCount % 10 === 0) {
+            parts.push('\nREMINDER: Stay on workflow. Which reference image scenario matches what you see right now? Follow that scenario\'s steps.');
         }
 
         parts.push('\nWhat do you do next?');
@@ -1122,6 +1147,7 @@ export abstract class BaseVisionAgent {
             case 'wait': return `wait(${d.seconds || 2}s)`;
             case 'newtab': return `newtab([${d.element}])`;
             case 'closetab': return 'closetab';
+            case 'goback': return 'goback';
             case 'done': return 'done';
             default: return d.action;
         }

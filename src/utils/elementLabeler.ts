@@ -145,12 +145,13 @@ async function detectElements(
     viewportWidth: number,
     viewportHeight: number
 ): Promise<RawElement[]> {
-    return page.evaluate(({ selector, vpW, vpH, safetyPattern }) => {
+    const { results, debug } = await page.evaluate(({ selector, vpW, vpH, safetyPattern }) => {
         const els = document.querySelectorAll(selector);
         const results: Array<{
             tag: string; text: string; ariaLabel: string; href: string;
             x: number; y: number; width: number; height: number;
         }> = [];
+        const debug: string[] = [];
 
         // Tags that are inherently interactive (don't need extra checks)
         const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
@@ -206,6 +207,9 @@ async function detectElements(
             // Exception: <a> tags linking to posts, reels, or stories are always kept —
             // these are high-value navigation links (e.g. timestamp links to open post modals).
             const href = el.getAttribute('href') || '';
+            if (tag === 'A' && (/\/p\//.test(href) || /\/reel\//.test(href))) {
+                debug.push(`Found /p/ link: href="${href}" text="${(el.textContent||'').trim().slice(0,30)}" size=${rect.width}x${rect.height}`);
+            }
             const isNavLink = tag === 'A' && /^\/(.*\/)?p\/|\/reel\/|\/stories\//.test(href);
             if (!isNavLink) {
                 let inDenseScroller = false;
@@ -237,8 +241,19 @@ async function detectElements(
                 height: rect.height,
             });
         }
-        return results;
+        return { results, debug };
     }, { selector: SELECTOR, vpW: viewportWidth, vpH: viewportHeight, safetyPattern: SAFETY_LABEL_RE.source });
+
+    if (debug.length > 0) {
+        console.log(`  🔍 detectElements debug (${debug.length} /p/ or /reel/ links found in DOM):`);
+        for (const line of debug) {
+            console.log(`     ${line}`);
+        }
+    } else {
+        console.log('  🔍 detectElements debug: NO /p/ or /reel/ links found in DOM');
+    }
+
+    return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,10 +261,11 @@ async function detectElements(
 // ---------------------------------------------------------------------------
 
 function filterAndDedup(elements: RawElement[]): RawElement[] {
-    // Size filter
-    let filtered = elements.filter(el =>
-        el.width >= MIN_SIZE && el.height >= MIN_SIZE
-    );
+    // Size filter — exempt /p/ and /reel/ links (timestamp links are small but critical)
+    let filtered = elements.filter(el => {
+        const isPostLink = el.tag === 'a' && (/\/p\//.test(el.href) || /\/reel\//.test(el.href));
+        return isPostLink || (el.width >= MIN_SIZE && el.height >= MIN_SIZE);
+    });
 
     // Nested element dedup: when two elements overlap >80%, keep the inner (smaller) one
     const kept: RawElement[] = [];

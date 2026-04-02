@@ -8,7 +8,7 @@ import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { lazy, Suspense, useEffect } from "react";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
-import { RunTimer } from "@/components/ui/RunTimer";
+
 
 // Lazy-loaded routes for better initial bundle size
 // Direct imports (Critical Paths)
@@ -79,7 +79,6 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <RunTimer />
       <ErrorBoundary>
         <SettingsProvider>
           <BrowserRouter>

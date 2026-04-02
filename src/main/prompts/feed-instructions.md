@@ -8,14 +8,15 @@ STRATEGY
 Your core loop on the feed:
 1. OPEN a post — find a `link` element in the LABELED ELEMENTS list with an href containing `/p/` or `/reel/`. Click it. This opens the post modal (dark overlay, full image in center).
 2. VIEW the post — if it's a carousel, hover on the image to reveal arrow buttons, then click to advance through ALL slides. Each slide is a separate screenshot.
-3. CLOSE the modal — press Escape to return to the feed.
+3. CLOSE the post — use goback to return to the feed. This preserves your scroll position. Do NOT press Escape (it doesn't close post pages). Do NOT click Home (it resets scroll position to the top).
 4. SCROLL down to reveal the next post, then repeat from step 1.
 
 Do this for every post you encounter. Do not scroll past posts without opening them.
+- A list of already-captured post IDs is provided each turn under ALREADY CAPTURED. If a post's /p/ or /reel/ URL matches one in the list, skip it — scroll past to find new posts.
 
 How to find the right element to click:
 - To open a post, look in the LABELED ELEMENTS list for elements with hrefs like `/p/...` or `/reel/...`. The timestamp text (e.g. "8h", "2d") next to a username is usually a link to the post. Click that — NOT the image, NOT the username.
-- If you click something and a profile page opens instead of a modal, you clicked the wrong element. Press back or click Home, and try the timestamp link instead.
+- If you click something and a profile page opens instead of a modal, use goback to return, then try the timestamp link instead.
 - If something doesn't work, try a different element. Don't click the same one repeatedly.
 
 REFERENCE IMAGES
@@ -38,8 +39,20 @@ HOW INSTAGRAM FEED WORKS
 - Clicking a USERNAME navigates to that user's profile page (grid of thumbnails). This is NOT a post detail — avoid it.
 - Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image and a right arrow on the image. Hover to reveal arrows, click to advance.
 - The LEFT SIDEBAR has navigation: Home, Search, Explore, Reels, Messages, etc. You should ONLY use Home from this sidebar. NEVER click Search, Explore, Reels, or Messages.
-- Pressing ESCAPE closes modals and overlays, returning you to the previous view.
+- After viewing a post, use goback to return to the feed. Pressing Escape does NOT close post pages (only overlays/popups). Clicking Home resets your scroll position — avoid it.
 - The MESSAGES/DMs icon is also in the sidebar — do NOT click it.
+
+WORKFLOW SCENARIOS
+You were shown 4 reference images at the start of this session. Use them as your guide:
+
+- "posts1 scenario" — You see the feed with posts. Find a timestamp link and click it.
+- "posts2 scenario" — You see the post modal open. Screenshot the content, ignore related posts below, press Escape.
+- "posts3 scenario" — You're in a modal and see carousel indicators. Advance through all slides, screenshot each one.
+- "goinghome scenario" — You're lost or off-track. Click the Instagram logo in the top-left sidebar.
+
+When deciding what to do, identify which scenario matches your current screen. If none match, you may be seeing unexpected UI — follow the UNEXPECTED UI recovery steps.
+
+When writing your "intent" field, reference the scenario name if one applies (e.g., "posts2 scenario — closing modal after screenshot"). This helps you stay on track.
 
 ELEMENT NOTES
 In your response, include an element_notes field describing what you think key elements do.

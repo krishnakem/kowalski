@@ -306,21 +306,45 @@ export class HumanScroll {
         const vh = await this.cdpEvaluate<number>('window.innerHeight') ?? 1920;
         const { baseDistance = Math.round(vh * 0.4) } = config;
 
-        // Capture scroll position BEFORE
+        // Capture scroll position BEFORE (window + nested container)
         const scrollYBefore = await this.getScrollPosition();
+        const scrollInfoBefore = await this.cdpEvaluate<{windowScrollY: number, mainScrollY: number, mainScrollHeight: number}>(`(function() {
+            const main = document.querySelector('main') || document.querySelector('[role="main"]');
+            return {
+                windowScrollY: window.scrollY,
+                mainScrollY: main ? main.scrollTop : -1,
+                mainScrollHeight: main ? main.scrollHeight : -1
+            };
+        })()`);
+        console.log('  📜 SCROLL DEBUG BEFORE:', JSON.stringify(scrollInfoBefore));
 
         // Single wheel call
         await this.page.mouse.wheel(0, baseDistance);
 
-        // Capture scroll position AFTER
+        // Small delay to let scroll settle
+        await new Promise(r => setTimeout(r, 100));
+
+        // Capture scroll position AFTER (window + nested container)
         const scrollYAfter = await this.getScrollPosition();
+        const scrollInfoAfter = await this.cdpEvaluate<{windowScrollY: number, mainScrollY: number, mainScrollHeight: number}>(`(function() {
+            const main = document.querySelector('main') || document.querySelector('[role="main"]');
+            return {
+                windowScrollY: window.scrollY,
+                mainScrollY: main ? main.scrollTop : -1,
+                mainScrollHeight: main ? main.scrollHeight : -1
+            };
+        })()`);
+        console.log('  📜 SCROLL DEBUG AFTER:', JSON.stringify(scrollInfoAfter));
+
         const actualDelta = scrollYAfter - scrollYBefore;
+        const mainDelta = (scrollInfoAfter?.mainScrollY ?? 0) - (scrollInfoBefore?.mainScrollY ?? 0);
 
-        console.log(`  📜 SCROLL: Target=${baseDistance}px, Actual=${actualDelta}px`);
+        console.log(`  📜 SCROLL: Target=${baseDistance}px, window.scrollY delta=${actualDelta}px, main.scrollTop delta=${mainDelta}px`);
 
-        // Scroll failure detection
+        // Scroll failure detection — check both window and nested container
+        const effectiveDelta = actualDelta !== 0 ? actualDelta : mainDelta;
         let scrollFailed = false;
-        if (actualDelta === 0 && Math.abs(baseDistance) > 50) {
+        if (effectiveDelta === 0 && Math.abs(baseDistance) > 50) {
             console.log('  ⚠️ Scroll Failed - Page may be stuck or reached bottom!');
             scrollFailed = true;
         }
@@ -328,7 +352,7 @@ export class HumanScroll {
         return {
             contentType: 'mixed',
             scrollDistance: baseDistance,
-            actualDelta,
+            actualDelta: effectiveDelta,
             scrollFailed,
             pauseDurationMs: 0
         };

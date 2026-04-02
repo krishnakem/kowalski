@@ -27986,19 +27986,40 @@ var HumanScroll = class {
     const vh = await this.cdpEvaluate("window.innerHeight") ?? 1920;
     const { baseDistance = Math.round(vh * 0.4) } = config;
     const scrollYBefore = await this.getScrollPosition();
+    const scrollInfoBefore = await this.cdpEvaluate(`(function() {
+            const main = document.querySelector('main') || document.querySelector('[role="main"]');
+            return {
+                windowScrollY: window.scrollY,
+                mainScrollY: main ? main.scrollTop : -1,
+                mainScrollHeight: main ? main.scrollHeight : -1
+            };
+        })()`);
+    console.log("  \u{1F4DC} SCROLL DEBUG BEFORE:", JSON.stringify(scrollInfoBefore));
     await this.page.mouse.wheel(0, baseDistance);
+    await new Promise((r) => setTimeout(r, 100));
     const scrollYAfter = await this.getScrollPosition();
+    const scrollInfoAfter = await this.cdpEvaluate(`(function() {
+            const main = document.querySelector('main') || document.querySelector('[role="main"]');
+            return {
+                windowScrollY: window.scrollY,
+                mainScrollY: main ? main.scrollTop : -1,
+                mainScrollHeight: main ? main.scrollHeight : -1
+            };
+        })()`);
+    console.log("  \u{1F4DC} SCROLL DEBUG AFTER:", JSON.stringify(scrollInfoAfter));
     const actualDelta = scrollYAfter - scrollYBefore;
-    console.log(`  \u{1F4DC} SCROLL: Target=${baseDistance}px, Actual=${actualDelta}px`);
+    const mainDelta = (scrollInfoAfter?.mainScrollY ?? 0) - (scrollInfoBefore?.mainScrollY ?? 0);
+    console.log(`  \u{1F4DC} SCROLL: Target=${baseDistance}px, window.scrollY delta=${actualDelta}px, main.scrollTop delta=${mainDelta}px`);
+    const effectiveDelta = actualDelta !== 0 ? actualDelta : mainDelta;
     let scrollFailed = false;
-    if (actualDelta === 0 && Math.abs(baseDistance) > 50) {
+    if (effectiveDelta === 0 && Math.abs(baseDistance) > 50) {
       console.log("  \u26A0\uFE0F Scroll Failed - Page may be stuck or reached bottom!");
       scrollFailed = true;
     }
     return {
       contentType: "mixed",
       scrollDistance: baseDistance,
-      actualDelta,
+      actualDelta: effectiveDelta,
       scrollFailed,
       pauseDurationMs: 0
     };
@@ -41186,9 +41207,10 @@ async function labelElements(page, screenshotBuffer, screenshotWidth, screenshot
   return { buffer, elements };
 }
 async function detectElements(page, viewportWidth, viewportHeight) {
-  return page.evaluate(({ selector, vpW, vpH, safetyPattern }) => {
+  const { results, debug } = await page.evaluate(({ selector, vpW, vpH, safetyPattern }) => {
     const els = document.querySelectorAll(selector);
-    const results = [];
+    const results2 = [];
+    const debug2 = [];
     const INTERACTIVE_TAGS = /* @__PURE__ */ new Set(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA"]);
     const safetyRe = new RegExp(safetyPattern, "i");
     for (const el of els) {
@@ -41218,6 +41240,9 @@ async function detectElements(page, viewportWidth, viewportHeight) {
       }
       if (isSafety) continue;
       const href = el.getAttribute("href") || "";
+      if (tag === "A" && (/\/p\//.test(href) || /\/reel\//.test(href))) {
+        debug2.push(`Found /p/ link: href="${href}" text="${(el.textContent || "").trim().slice(0, 30)}" size=${rect.width}x${rect.height}`);
+      }
       const isNavLink = tag === "A" && /^\/(.*\/)?p\/|\/reel\/|\/stories\//.test(href);
       if (!isNavLink) {
         let inDenseScroller = false;
@@ -41236,7 +41261,7 @@ async function detectElements(page, viewportWidth, viewportHeight) {
         }
         if (inDenseScroller) continue;
       }
-      results.push({
+      results2.push({
         tag: tag.toLowerCase(),
         text: (el.textContent || "").trim().slice(0, 50),
         ariaLabel: selfLabel,
@@ -41248,13 +41273,23 @@ async function detectElements(page, viewportWidth, viewportHeight) {
         height: rect.height
       });
     }
-    return results;
+    return { results: results2, debug: debug2 };
   }, { selector: SELECTOR, vpW: viewportWidth, vpH: viewportHeight, safetyPattern: SAFETY_LABEL_RE.source });
+  if (debug.length > 0) {
+    console.log(`  \u{1F50D} detectElements debug (${debug.length} /p/ or /reel/ links found in DOM):`);
+    for (const line of debug) {
+      console.log(`     ${line}`);
+    }
+  } else {
+    console.log("  \u{1F50D} detectElements debug: NO /p/ or /reel/ links found in DOM");
+  }
+  return results;
 }
 function filterAndDedup(elements) {
-  let filtered = elements.filter(
-    (el) => el.width >= MIN_SIZE && el.height >= MIN_SIZE
-  );
+  let filtered = elements.filter((el) => {
+    const isPostLink = el.tag === "a" && (/\/p\//.test(el.href) || /\/reel\//.test(el.href));
+    return isPostLink || el.width >= MIN_SIZE && el.height >= MIN_SIZE;
+  });
   const kept = [];
   for (const el of filtered) {
     let isRedundantOuter = false;
@@ -41415,6 +41450,7 @@ ACTIONS (pick one per turn):
   wait(seconds)    Wait 1-5 seconds for content to load.
   newtab(n)        Open the link at element [n] in a new tab and switch to it.
   closetab         Close the current tab and switch back to the previous one.
+  goback           Navigate back (browser back button). Use after viewing a post page to return to the feed at your previous scroll position.
   done             End the browsing session.
 
 SAFETY \u2014 HARD RULES
@@ -41468,6 +41504,8 @@ Use this for discoveries like:
 Only include a lesson when you've genuinely discovered something new about how the UI works.
 
 OUTPUT FORMAT (JSON):
+
+Example 1 \u2014 clicking an element:
 {
   "thinking": "I want to click the timestamp '6h' to open the post modal. That's element [15] in the label list.",
   "action": "click",
@@ -41476,6 +41514,17 @@ OUTPUT FORMAT (JSON):
   "expected_state": "dark overlay with full post image, caption, and comments",
   "if_wrong": "press Escape to dismiss whatever opened, then try a different timestamp link",
   "memory": "WHAT: feed\\nPLAN: 1) click timestamp 2) advance carousel 3) escape and scroll\\nSTUCK: 0"
+}
+
+Example 2 \u2014 pressing a key (note: the key goes in the "key" field, NOT "element"):
+{
+  "thinking": "I need to advance to the next story frame by pressing the right arrow key.",
+  "action": "press",
+  "key": "ArrowRight",
+  "intent": "advance to next story frame",
+  "expected_state": "story viewer shows the next frame with new content",
+  "if_wrong": "try clicking the Next button instead",
+  "memory": "WHAT: stories\\nPLAN: 1) press ArrowRight 2) continue advancing 3) exit when done\\nSTUCK: 0"
 }`;
 
 // src/main/services/BaseVisionAgent.ts
@@ -41535,6 +41584,10 @@ var BaseVisionAgent = class {
     this.collector = collector;
     this.config = config;
   }
+  /** Return a structured workflow summary for the assistant response after reference images. */
+  getWorkflowSummary() {
+    return null;
+  }
   // -----------------------------------------------------------------------
   // Public API
   // -----------------------------------------------------------------------
@@ -41564,94 +41617,99 @@ var BaseVisionAgent = class {
       }
     }
     this.loadReferenceImages();
-    while (true) {
-      if (this.stopped) {
-        console.log(`\u{1F6D1} ${this.getAgentName()}: stopped by user`);
-        this.collector.appendLog(`\u{1F6D1} ${this.getAgentName()}: stopped by user (Cmd+Shift+K)`);
-        break;
-      }
+    let decision = null;
+    while (!decision) {
+      if (this.stopped) break;
       const elapsed = Date.now() - this.startTime;
-      const remaining = this.config.maxDurationMs - elapsed;
-      if (remaining <= 0) {
-        console.log(`\u23F1\uFE0F  ${this.getAgentName()}: time limit reached`);
-        this.collector.appendLog(`\u23F1\uFE0F ${this.getAgentName()}: time limit reached`);
-        break;
-      }
-      const rawScreenshot = await this.captureScreenshot();
-      if (!rawScreenshot) {
-        await this.delay(500);
-        continue;
-      }
-      this.saveRawScreenshot(rawScreenshot);
-      this.lastRawScreenshot = rawScreenshot;
-      let screenshot;
-      if (this.shouldLabelElements()) {
-        const labeled = await labelElements(
-          this.page,
-          rawScreenshot,
-          this.screenshotWidth,
-          this.screenshotHeight,
-          this.viewportWidth,
-          this.viewportHeight
-        );
-        screenshot = labeled.buffer;
-        this.currentElements = labeled.elements;
-        console.log(`  \u{1F3F7}\uFE0F Labeled ${labeled.elements.size} interactive elements`);
-      } else {
-        screenshot = rawScreenshot;
-        this.currentElements = /* @__PURE__ */ new Map();
-      }
-      const decision = await this.callLLM(screenshot, remaining);
-      this.decisionCount++;
-      console.log(`  \u{1F9ED} [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
-      if (["click", "hover", "newtab"].includes(decision.action) && decision.element !== void 0) {
-        const el = this.currentElements.get(decision.element);
-        const desc = el ? `"${el.text || el.ariaLabel || el.tag}"` : "unknown";
-        const coordLog = `[${this.decisionCount}] ${decision.action}([${decision.element}] ${desc}) \u2014 ${decision.thinking}`;
-        console.log(`  \u{1F4CD} ${coordLog}`);
-        this.collector.appendLog(`\u{1F4CD} ${coordLog}`);
-      }
-      await this.saveDebugScreenshot(screenshot, decision);
-      if (decision.action === "done") {
+      if (this.config.maxDurationMs - elapsed <= 0) break;
+      decision = await this.captureAndDecide(this.config.maxDurationMs - elapsed);
+      if (!decision) await this.delay(500);
+    }
+    if (!decision || decision.action === "done") {
+      if (decision) {
         console.log(`\u2705 ${this.getAgentName()}: LLM ended session \u2014 ${decision.thinking}`);
         this.collector.appendLog(`\u2705 ${this.getAgentName()}: LLM ended session \u2014 ${decision.thinking}`);
-        break;
       }
-      if (decision.memory) {
-        this.lastMemory = decision.memory;
-      }
-      this.lastIntent = decision.intent || "";
-      this.lastExpectedState = decision.expected_state || "";
-      this.lastRecoveryPlan = decision.if_wrong || "";
-      if (decision.element_notes) {
-        for (const [idStr, description] of Object.entries(decision.element_notes)) {
-          const id = parseInt(idStr, 10);
-          const el = this.currentElements.get(id);
-          if (el) {
-            const fp = elementFingerprint(el);
-            this.elementKnowledge.set(fp, description);
+    } else {
+      while (true) {
+        if (this.stopped) {
+          console.log(`\u{1F6D1} ${this.getAgentName()}: stopped by user`);
+          this.collector.appendLog(`\u{1F6D1} ${this.getAgentName()}: stopped by user (Cmd+Shift+K)`);
+          break;
+        }
+        if (decision.memory) this.lastMemory = decision.memory;
+        this.lastIntent = decision.intent || "";
+        this.lastExpectedState = decision.expected_state || "";
+        this.lastRecoveryPlan = decision.if_wrong || "";
+        if (decision.element_notes) {
+          for (const [idStr, description] of Object.entries(decision.element_notes)) {
+            const id = parseInt(idStr, 10);
+            const el = this.currentElements.get(id);
+            if (el) this.elementKnowledge.set(elementFingerprint(el), description);
           }
         }
-      }
-      if (decision.lesson) {
-        this.learnedLessons.push(decision.lesson);
-        if (this.learnedLessons.length > 10) {
-          this.learnedLessons.shift();
+        if (decision.lesson) {
+          this.learnedLessons.push(decision.lesson);
+          if (this.learnedLessons.length > 10) this.learnedLessons.shift();
         }
-      }
-      const result = await this.executeAction(decision);
-      console.log(`     \u2192 ${result}`);
-      this.lastAction = decision;
-      this.actionHistory.push({
-        action: this.formatAction(decision),
-        result
-      });
-      const tokenStr = this.lastTokenUsage ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens` : "";
-      this.collector.appendLog(`[${this.decisionCount}] ${this.formatAction(decision)}${tokenStr}`);
-      this.collector.appendLog(`  \u{1F4AD} ${decision.thinking}`);
-      this.collector.appendLog(`  \u2192 ${result}`);
-      if (decision.memory) {
-        this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
+        const result = await this.executeAction(decision);
+        console.log(`     \u2192 ${result}`);
+        this.lastAction = decision;
+        this.actionHistory.push({ action: this.formatAction(decision), result });
+        const tokenStr = this.lastTokenUsage ? ` | ${this.lastTokenUsage.promptTokens}+${this.lastTokenUsage.completionTokens} tokens` : "";
+        this.collector.appendLog(`[${this.decisionCount}] ${this.formatAction(decision)}${tokenStr}`);
+        this.collector.appendLog(`  \u{1F4AD} ${decision.thinking}`);
+        this.collector.appendLog(`  \u2192 ${result}`);
+        if (decision.memory) this.collector.appendLog(`  \u{1F4DD} Memory: ${decision.memory}`);
+        const elapsed = Date.now() - this.startTime;
+        const remaining = this.config.maxDurationMs - elapsed;
+        if (remaining <= 0) {
+          console.log(`\u23F1\uFE0F  ${this.getAgentName()}: time limit reached`);
+          this.collector.appendLog(`\u23F1\uFE0F ${this.getAgentName()}: time limit reached`);
+          break;
+        }
+        await this.delay(300);
+        const rawScreenshot = await this.captureScreenshot();
+        if (!rawScreenshot) {
+          await this.delay(500);
+          continue;
+        }
+        this.saveRawScreenshot(rawScreenshot);
+        this.lastRawScreenshot = rawScreenshot;
+        let screenshot;
+        if (this.shouldLabelElements()) {
+          const labeled = await labelElements(
+            this.page,
+            rawScreenshot,
+            this.screenshotWidth,
+            this.screenshotHeight,
+            this.viewportWidth,
+            this.viewportHeight
+          );
+          screenshot = labeled.buffer;
+          this.currentElements = labeled.elements;
+          console.log(`  \u{1F3F7}\uFE0F Labeled ${labeled.elements.size} interactive elements`);
+        } else {
+          screenshot = rawScreenshot;
+          this.currentElements = /* @__PURE__ */ new Map();
+        }
+        const nextDecision = await this.callLLM(screenshot, remaining);
+        this.decisionCount++;
+        console.log(`  \u{1F9ED} [${this.decisionCount}] action=${nextDecision.action} | ${nextDecision.thinking.slice(0, 80)}`);
+        if (["click", "hover", "newtab"].includes(nextDecision.action) && nextDecision.element !== void 0) {
+          const el = this.currentElements.get(nextDecision.element);
+          const desc = el ? `"${el.text || el.ariaLabel || el.tag}"` : "unknown";
+          const coordLog = `[${this.decisionCount}] ${nextDecision.action}([${nextDecision.element}] ${desc}) \u2014 ${nextDecision.thinking}`;
+          console.log(`  \u{1F4CD} ${coordLog}`);
+          this.collector.appendLog(`\u{1F4CD} ${coordLog}`);
+        }
+        await this.saveDebugScreenshot(screenshot, nextDecision);
+        if (nextDecision.action === "done") {
+          console.log(`\u2705 ${this.getAgentName()}: LLM ended session \u2014 ${nextDecision.thinking}`);
+          this.collector.appendLog(`\u2705 ${this.getAgentName()}: LLM ended session \u2014 ${nextDecision.thinking}`);
+          break;
+        }
+        decision = nextDecision;
       }
     }
     if (this.rawDir) {
@@ -41671,6 +41729,44 @@ var BaseVisionAgent = class {
       decisionCount: this.decisionCount,
       actionHistory: [...this.actionHistory]
     };
+  }
+  // -----------------------------------------------------------------------
+  // Screenshot + LLM decision helper
+  // -----------------------------------------------------------------------
+  async captureAndDecide(remainingMs) {
+    const rawScreenshot = await this.captureScreenshot();
+    if (!rawScreenshot) return null;
+    this.saveRawScreenshot(rawScreenshot);
+    this.lastRawScreenshot = rawScreenshot;
+    let screenshot;
+    if (this.shouldLabelElements()) {
+      const labeled = await labelElements(
+        this.page,
+        rawScreenshot,
+        this.screenshotWidth,
+        this.screenshotHeight,
+        this.viewportWidth,
+        this.viewportHeight
+      );
+      screenshot = labeled.buffer;
+      this.currentElements = labeled.elements;
+      console.log(`  \u{1F3F7}\uFE0F Labeled ${labeled.elements.size} interactive elements`);
+    } else {
+      screenshot = rawScreenshot;
+      this.currentElements = /* @__PURE__ */ new Map();
+    }
+    const decision = await this.callLLM(screenshot, remainingMs);
+    this.decisionCount++;
+    console.log(`  \u{1F9ED} [${this.decisionCount}] action=${decision.action} | ${decision.thinking.slice(0, 80)}`);
+    if (["click", "hover", "newtab"].includes(decision.action) && decision.element !== void 0) {
+      const el = this.currentElements.get(decision.element);
+      const desc = el ? `"${el.text || el.ariaLabel || el.tag}"` : "unknown";
+      const coordLog = `[${this.decisionCount}] ${decision.action}([${decision.element}] ${desc}) \u2014 ${decision.thinking}`;
+      console.log(`  \u{1F4CD} ${coordLog}`);
+      this.collector.appendLog(`\u{1F4CD} ${coordLog}`);
+    }
+    await this.saveDebugScreenshot(screenshot, decision);
+    return decision;
   }
   // -----------------------------------------------------------------------
   // Screenshot Capture & Resize
@@ -41732,6 +41828,8 @@ var BaseVisionAgent = class {
         return this.executeNewtab(decision);
       case "closetab":
         return this.executeClosetab();
+      case "goback":
+        return this.executeGoback();
       default:
         return `unknown action: ${decision.action}`;
     }
@@ -41837,6 +41935,18 @@ var BaseVisionAgent = class {
       return "newtab failed \u2014 target may not be a link. Try click() instead.";
     }
   }
+  async executeGoback() {
+    const beforeUrl = this.page.url();
+    console.log(`  \u21A9\uFE0F goback: from ${beforeUrl}`);
+    this.collector.appendLog(`\u21A9\uFE0F goback: from ${beforeUrl}`);
+    await this.page.goBack({ waitUntil: "domcontentloaded", timeout: 5e3 }).catch(() => {
+    });
+    await this.delay(500);
+    const afterUrl = this.page.url();
+    console.log(`  \u21A9\uFE0F goback: now at ${afterUrl}`);
+    this.collector.appendLog(`\u21A9\uFE0F goback: now at ${afterUrl}`);
+    return `navigated back from ${beforeUrl} \u2192 ${afterUrl}`;
+  }
   async executeClosetab() {
     if (!this.originalPage) {
       return "no tab to close \u2014 already on the main tab";
@@ -41899,17 +42009,6 @@ var BaseVisionAgent = class {
     const messages = [];
     if (!this.referenceImagesSent && this.referenceImages && this.referenceImages.length > 0) {
       const refContent = [];
-      const generalImages = this.loadGeneralReferenceImages();
-      for (const ref of generalImages) {
-        refContent.push({
-          type: "image",
-          source: this.dataUrlToAnthropicSource(ref.base64)
-        });
-        refContent.push({
-          type: "text",
-          text: `[Reference: ${ref.label}]`
-        });
-      }
       for (const ref of this.referenceImages) {
         refContent.push({
           type: "image",
@@ -41927,9 +42026,10 @@ var BaseVisionAgent = class {
           text: `These are step-by-step instructions for how to handle ${folder.toLowerCase()} on Instagram. The images are numbered \u2014 follow them in sequence. Read the annotations in each image carefully.`
         });
         messages.push({ role: "user", content: refContent });
+        const summary = this.getWorkflowSummary();
         messages.push({
           role: "assistant",
-          content: `Understood. I'll follow the ${folder.toLowerCase()} workflow steps shown above.`
+          content: summary || `Understood. I'll follow the ${folder.toLowerCase()} workflow steps shown above.`
         });
         console.log(`  \u{1F4CE} Injected reference images (${this.referenceImages.length} images)`);
         this.collector.appendLog(`\u{1F4CE} Injected reference images (${this.referenceImages.length} images)`);
@@ -42082,27 +42182,6 @@ var BaseVisionAgent = class {
       this.collector.appendLog(`\u26A0\uFE0F Failed to load reference images: ${err}`);
     }
   }
-  loadGeneralReferenceImages() {
-    const examplesDir = import_path3.default.join(__dirname, "../../src/main/prompts/examples");
-    const images = [];
-    try {
-      if (!import_fs5.default.existsSync(examplesDir)) return images;
-      const imagePattern = /\.(jpg|jpeg|png|webp)$/i;
-      const rootFiles = import_fs5.default.readdirSync(examplesDir).filter((f) => imagePattern.test(f) && import_fs5.default.statSync(import_path3.default.join(examplesDir, f)).isFile()).sort();
-      const cleanName = (name) => import_path3.default.basename(name, import_path3.default.extname(name)).replace(/[-_.]/g, " ").trim();
-      for (const file of rootFiles) {
-        const buffer = import_fs5.default.readFileSync(import_path3.default.join(examplesDir, file));
-        const ext = import_path3.default.extname(file).toLowerCase().replace(".", "");
-        const mime2 = ext === "jpg" ? "jpeg" : ext;
-        images.push({
-          label: cleanName(file),
-          base64: `data:image/${mime2};base64,${buffer.toString("base64")}`
-        });
-      }
-    } catch {
-    }
-    return images;
-  }
   // -----------------------------------------------------------------------
   // Per-Turn User Prompt
   // -----------------------------------------------------------------------
@@ -42172,6 +42251,9 @@ ${this.lastMemory}`);
       for (const lesson of this.learnedLessons) {
         parts.push(`- ${lesson}`);
       }
+    }
+    if (this.decisionCount > 0 && this.decisionCount % 10 === 0) {
+      parts.push("\nREMINDER: Stay on workflow. Which reference image scenario matches what you see right now? Follow that scenario's steps.");
     }
     parts.push("\nWhat do you do next?");
     return parts.join("\n");
@@ -42314,6 +42396,8 @@ ${this.lastMemory}`);
         return `newtab([${d.element}])`;
       case "closetab":
         return "closetab";
+      case "goback":
+        return "goback";
       case "done":
         return "done";
       default:
@@ -42335,23 +42419,19 @@ ${this.lastMemory}`);
 // src/shared/modelConfig.ts
 var ModelConfig = {
   // Stories navigation — cheap model, tight mechanical loop (click avatar, advance, escape)
-  stories: process.env.KOWALSKI_STORIES_MODEL || "claude-haiku-4-5-20241022",
+  stories: process.env.KOWALSKI_STORIES_MODEL || "claude-sonnet-4-6",
   // Feed navigation — fast model, handles scrolling, clicking, dismissing popups
   navigation: process.env.KOWALSKI_NAV_MODEL || "claude-sonnet-4-6",
-  // Specialist — powerful model, handles captures, carousels, stuck recovery
-  specialist: process.env.KOWALSKI_SPECIALIST_MODEL || "claude-opus-4-6",
+  // Specialist — handles captures, carousels, stuck recovery
+  specialist: process.env.KOWALSKI_SPECIALIST_MODEL || "claude-sonnet-4-6",
   // Content extraction from viewport screenshots — called per capture
-  // Needs: strong vision, detailed text extraction from images, caption/comment parsing
-  vision: process.env.KOWALSKI_VISION_MODEL || "claude-opus-4-6",
+  vision: process.env.KOWALSKI_VISION_MODEL || "claude-sonnet-4-6",
   // Image tagging — categorize and describe captured screenshots
-  // Needs: basic vision, simple categorization, fast
-  tagging: process.env.KOWALSKI_TAGGING_MODEL || "claude-opus-4-6",
+  tagging: process.env.KOWALSKI_TAGGING_MODEL || "claude-sonnet-4-6",
   // Batch digest generation — synthesize all captures into a digest
-  // Needs: strong reasoning, long context (many captures), good writing
-  digest: process.env.KOWALSKI_DIGEST_MODEL || "claude-opus-4-6",
+  digest: process.env.KOWALSKI_DIGEST_MODEL || "claude-sonnet-4-6",
   // Analysis and insights generation
-  // Needs: complex reasoning, pattern recognition, good writing
-  analysis: process.env.KOWALSKI_ANALYSIS_MODEL || "claude-opus-4-6"
+  analysis: process.env.KOWALSKI_ANALYSIS_MODEL || "claude-sonnet-4-6"
 };
 
 // src/main/prompts/stories-instructions.md
@@ -42362,12 +42442,10 @@ ONLY stories are allowed. Do NOT scroll the feed, open posts, or navigate to Sea
 
 STRATEGY
 
-This agent operates WITHOUT element labels. You see the raw screenshot and must use visual recognition to navigate. No numbered badges or element lists are provided.
-
 Your workflow:
-1. FIND story avatars \u2014 look at the top of the feed for circular profile pictures with colored rings (indicating unviewed stories).
-2. CLICK the LEFTMOST story avatar to enter the story viewer. Since there are no element labels, use click with coordinates by describing the position visually in your thinking.
-3. ADVANCE through stories \u2014 press ArrowRight to move to the next story frame. Keep going until stories end.
+1. FIND story avatars \u2014 look at the top of the feed for circular profile pictures with colored rings (indicating unviewed stories). Find the LEFTMOST one in the LABELED ELEMENTS list.
+2. CLICK the leftmost story avatar using its element number to enter the story viewer.
+3. ADVANCE through stories \u2014 press ArrowRight to move to the next story frame. Keep going until stories end. (Pausing is handled automatically by the system.)
 4. EXIT when done \u2014 when stories end (Instagram returns you to the feed), you are done. Press Escape if needed to close the viewer, then call done.
 
 HOW INSTAGRAM STORIES WORK
@@ -42377,14 +42455,24 @@ HOW INSTAGRAM STORIES WORK
 - Stories auto-advance, but you should manually press ArrowRight to control the pace and ensure each frame is captured.
 - When all stories are exhausted, the viewer closes and you return to the feed.
 
-NAVIGATION WITHOUT LABELS
-Since you don't have numbered elements, use these actions:
-- press("ArrowRight") to advance to the next story frame \u2014 this is your PRIMARY action
+KEY ACTIONS
+- click(n) to click a labeled element (story avatars, dismiss buttons, close buttons)
+- press("ArrowRight") to advance to the next story frame \u2014 this is your PRIMARY action once inside the viewer
 - press("Escape") to exit the story viewer
 - scroll("down") if you need to scroll the feed to find story avatars
-- For the rare case where you need to click something (dismiss button, story avatar), describe what you see and click it
 
-Most turns should just be press("ArrowRight"). Stories navigation is mechanical.
+Most turns inside the story viewer should just be press("ArrowRight"). Stories navigation is mechanical.
+
+WORKFLOW SCENARIOS
+You were shown 3 reference images at the start of this session. Use them as your guide:
+
+- "stories1 scenario" \u2014 You see the feed with story avatars at the top. Click the leftmost avatar with a gradient ring.
+- "stories2 scenario" \u2014 You're inside the story viewer. Press ArrowRight to advance to the next frame.
+- "stories.end scenario" \u2014 You've reached the last story. Click the X in the top-right to exit back to the feed.
+
+When deciding what to do, identify which scenario matches your current screen.
+
+When writing your "intent" field, reference the scenario name if one applies (e.g., "stories2 scenario \u2014 advancing to next story frame").
 
 EXIT CONDITIONS
 - Stories end naturally (Instagram returns to feed) \u2014 call done.
@@ -42413,18 +42501,158 @@ var StoriesAgent = class extends BaseVisionAgent {
     return 512;
   }
   getReferenceImageFolder() {
-    return null;
+    return "stories";
   }
   getAgentName() {
     return "StoriesAgent";
   }
   shouldLabelElements() {
-    return false;
+    return true;
+  }
+  async executeAction(decision) {
+    const result = await super.executeAction(decision);
+    const shouldAutoPause = decision.action === "click" || decision.action === "press" && decision.key === "ArrowRight";
+    if (shouldAutoPause) {
+      await this.delay(1500);
+      await this.page.keyboard.press(" ");
+    }
+    if (decision.action === "press" && decision.key === "ArrowRight") {
+      const rawScreenshot = await this.captureScreenshot();
+      if (rawScreenshot) {
+        const labeled = await labelElements(
+          this.page,
+          rawScreenshot,
+          this.screenshotWidth,
+          this.screenshotHeight,
+          this.viewportWidth,
+          this.viewportHeight
+        );
+        this.currentElements = labeled.elements;
+        const hasNextButton = [...labeled.elements.values()].some((el) => {
+          const label = (el.ariaLabel || "").toLowerCase();
+          const text = (el.text || "").toLowerCase();
+          return label.includes("next") || text.includes("next") || label.includes("right");
+        });
+        if (!hasNextButton) {
+          console.log("\u{1F4D6} StoriesAgent: no Next button found \u2014 stories ended");
+          this.collector.appendLog("\u{1F4D6} StoriesAgent: no Next button found \u2014 stories ended");
+          const closeButton = [...labeled.elements.values()].find((el) => {
+            const label = (el.ariaLabel || "").toLowerCase();
+            const text = (el.text || "").toLowerCase();
+            return label.includes("close") || text.includes("close") || text === "x";
+          });
+          if (closeButton) {
+            const cx = closeButton.x + closeButton.width / 2;
+            const cy = closeButton.y + closeButton.height / 2;
+            await this.ghost.clickPoint(cx, cy);
+            console.log("\u{1F4D6} Clicked Close button to exit stories");
+            this.collector.appendLog("\u{1F4D6} Clicked Close button to exit stories");
+          } else {
+            await this.page.keyboard.press("Escape");
+            console.log("\u{1F4D6} No Close button found, pressed Escape");
+            this.collector.appendLog("\u{1F4D6} No Close button found, pressed Escape");
+          }
+          this.stopped = true;
+        }
+      }
+    }
+    return result;
+  }
+  getWorkflowSummary() {
+    return `I've studied the reference images. Here's my workflow:
+
+OPENING STORIES (from stories1):
+- Story avatars are the circular profile pictures at the top of the feed with colored gradient rings (pinkish-orange border)
+- Click the LEFTMOST avatar with a gradient ring to start viewing stories
+- The gradient ring distinguishes unwatched stories from regular profile pictures
+
+VIEWING STORIES (from stories2):
+- Press ArrowRight to advance to the next story frame
+- Stories are automatically paused by the system \u2014 just keep pressing ArrowRight
+- Do NOT click the small story previews on the sides (those are other users' stories)
+
+EXITING STORIES (from stories.end):
+- When I reach the last story (no more frames to advance to), click the X button in the top-right corner
+- This exits the story viewer and returns to the home feed
+- Do not skip any stories \u2014 every frame must be screenshotted`;
   }
 };
 
 // src/main/prompts/feed-instructions.md
-var feed_instructions_default = "MISSION\nBrowse the Instagram feed to capture post content for a digest. You handle ONLY feed browsing \u2014 stories have already been handled by a previous agent.\n\nONLY feed browsing is allowed. Do NOT click story avatars, and do NOT navigate to Search, Explore, Reels, or any other section. If you see the Explore page (grid of suggested posts) or the Reels page (full-screen vertical video feed), you are OFF TRACK \u2014 click Home immediately to return to the feed.\n\nSTRATEGY\n\nYour core loop on the feed:\n1. OPEN a post \u2014 find a `link` element in the LABELED ELEMENTS list with an href containing `/p/` or `/reel/`. Click it. This opens the post modal (dark overlay, full image in center).\n2. VIEW the post \u2014 if it's a carousel, hover on the image to reveal arrow buttons, then click to advance through ALL slides. Each slide is a separate screenshot.\n3. CLOSE the modal \u2014 press Escape to return to the feed.\n4. SCROLL down to reveal the next post, then repeat from step 1.\n\nDo this for every post you encounter. Do not scroll past posts without opening them.\n\nHow to find the right element to click:\n- To open a post, look in the LABELED ELEMENTS list for elements with hrefs like `/p/...` or `/reel/...`. The timestamp text (e.g. \"8h\", \"2d\") next to a username is usually a link to the post. Click that \u2014 NOT the image, NOT the username.\n- If you click something and a profile page opens instead of a modal, you clicked the wrong element. Press back or click Home, and try the timestamp link instead.\n- If something doesn't work, try a different element. Don't click the same one repeatedly.\n\nREFERENCE IMAGES\nYou may be shown annotated reference screenshots before your first-turn screenshot. These are STRUCTURAL GUIDES that show you UI layout, click positions, and workflow steps \u2014 NOT specific content to look for.\n\nCRITICAL: The accounts, usernames, brands, and post content visible in reference images are just whatever happened to be on screen when the reference was captured. Do NOT seek out or match that specific content. Instead, focus ONLY on:\n- The colored annotations (red/orange/pink boxes and circles) showing WHERE to click\n- The relative POSITION of annotated elements (leftmost, topmost, center)\n- The UI PATTERNS being demonstrated (modals, sidebars, buttons, navigation)\n\nColor coding in the reference images:\n- RED box/circle = the primary element to click or the area of interest\n- ORANGE box = supplementary element worth noting \u2014 context varies per image\n- BLUE box = a utility button to interact with before the main action (e.g. pause button)\n- PINK box = elements you should NOT click\n\nHOW INSTAGRAM FEED WORKS\n- The HOME FEED shows posts in a vertical scroll. Each post has: a header (profile pic + username + timestamp), the post image/video, and engagement buttons below.\n- Clicking a post's TIMESTAMP opens it as a detail modal (full image + caption + comments on a dark overlay). This is what you want to open.\n- Clicking a USERNAME navigates to that user's profile page (grid of thumbnails). This is NOT a post detail \u2014 avoid it.\n- Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image and a right arrow on the image. Hover to reveal arrows, click to advance.\n- The LEFT SIDEBAR has navigation: Home, Search, Explore, Reels, Messages, etc. You should ONLY use Home from this sidebar. NEVER click Search, Explore, Reels, or Messages.\n- Pressing ESCAPE closes modals and overlays, returning you to the previous view.\n- The MESSAGES/DMs icon is also in the sidebar \u2014 do NOT click it.\n\nELEMENT NOTES\nIn your response, include an element_notes field describing what you think key elements do.\nYou don't need to annotate every element \u2014 just the ones you actively considered this turn.\nYour notes from previous turns will appear next to elements in the LABELED ELEMENTS list.\n\nIf an element has no note yet, it will appear as:\n  [5] button \u2014 no known function yet\n\nAfter you annotate it, future turns will show:\n  [5] button \u2014 dismisses notification prompt\n\nSELF-CORRECTION\n- Check your RECENT HISTORY before acting. If your last 2+ actions resulted in \"no change\", you are stuck.\n- If your last click didn't change the page, the element might not be clickable or may not be what you expected. Try a different element or a different approach entirely.\n- If STUCK reaches 3, change strategy entirely. If it reaches 5, click Home to reset.\n- If you see a message/chat interface (conversation bubbles, text input at bottom, contact names/avatars in a list), you are in DMs \u2014 press Escape or click Home immediately.\n- If you see a full-screen vertical video player or \"Reels\" label, you are on the Reels page \u2014 click Home immediately.\n- If you see a grid of suggested/trending content that is NOT your home feed, you are on Explore \u2014 click Home immediately.\n- If you've been on the same page for 3+ actions without progress, move on. Scroll past or navigate elsewhere.";
+var feed_instructions_default = `MISSION
+Browse the Instagram feed to capture post content for a digest. You handle ONLY feed browsing \u2014 stories have already been handled by a previous agent.
+
+ONLY feed browsing is allowed. Do NOT click story avatars, and do NOT navigate to Search, Explore, Reels, or any other section. If you see the Explore page (grid of suggested posts) or the Reels page (full-screen vertical video feed), you are OFF TRACK \u2014 click Home immediately to return to the feed.
+
+STRATEGY
+
+Your core loop on the feed:
+1. OPEN a post \u2014 find a \`link\` element in the LABELED ELEMENTS list with an href containing \`/p/\` or \`/reel/\`. Click it. This opens the post modal (dark overlay, full image in center).
+2. VIEW the post \u2014 if it's a carousel, hover on the image to reveal arrow buttons, then click to advance through ALL slides. Each slide is a separate screenshot.
+3. CLOSE the post \u2014 use goback to return to the feed. This preserves your scroll position. Do NOT press Escape (it doesn't close post pages). Do NOT click Home (it resets scroll position to the top).
+4. SCROLL down to reveal the next post, then repeat from step 1.
+
+Do this for every post you encounter. Do not scroll past posts without opening them.
+
+How to find the right element to click:
+- To open a post, look in the LABELED ELEMENTS list for elements with hrefs like \`/p/...\` or \`/reel/...\`. The timestamp text (e.g. "8h", "2d") next to a username is usually a link to the post. Click that \u2014 NOT the image, NOT the username.
+- If you click something and a profile page opens instead of a modal, use goback to return, then try the timestamp link instead.
+- If something doesn't work, try a different element. Don't click the same one repeatedly.
+
+REFERENCE IMAGES
+You may be shown annotated reference screenshots before your first-turn screenshot. These are STRUCTURAL GUIDES that show you UI layout, click positions, and workflow steps \u2014 NOT specific content to look for.
+
+CRITICAL: The accounts, usernames, brands, and post content visible in reference images are just whatever happened to be on screen when the reference was captured. Do NOT seek out or match that specific content. Instead, focus ONLY on:
+- The colored annotations (red/orange/pink boxes and circles) showing WHERE to click
+- The relative POSITION of annotated elements (leftmost, topmost, center)
+- The UI PATTERNS being demonstrated (modals, sidebars, buttons, navigation)
+
+Color coding in the reference images:
+- RED box/circle = the primary element to click or the area of interest
+- ORANGE box = supplementary element worth noting \u2014 context varies per image
+- BLUE box = a utility button to interact with before the main action (e.g. pause button)
+- PINK box = elements you should NOT click
+
+HOW INSTAGRAM FEED WORKS
+- The HOME FEED shows posts in a vertical scroll. Each post has: a header (profile pic + username + timestamp), the post image/video, and engagement buttons below.
+- Clicking a post's TIMESTAMP opens it as a detail modal (full image + caption + comments on a dark overlay). This is what you want to open.
+- Clicking a USERNAME navigates to that user's profile page (grid of thumbnails). This is NOT a post detail \u2014 avoid it.
+- Some posts are CAROUSELS with multiple images. You'll see dot indicators below the image and a right arrow on the image. Hover to reveal arrows, click to advance.
+- The LEFT SIDEBAR has navigation: Home, Search, Explore, Reels, Messages, etc. You should ONLY use Home from this sidebar. NEVER click Search, Explore, Reels, or Messages.
+- After viewing a post, use goback to return to the feed. Pressing Escape does NOT close post pages (only overlays/popups). Clicking Home resets your scroll position \u2014 avoid it.
+- The MESSAGES/DMs icon is also in the sidebar \u2014 do NOT click it.
+
+WORKFLOW SCENARIOS
+You were shown 4 reference images at the start of this session. Use them as your guide:
+
+- "posts1 scenario" \u2014 You see the feed with posts. Find a timestamp link and click it.
+- "posts2 scenario" \u2014 You see the post modal open. Screenshot the content, ignore related posts below, press Escape.
+- "posts3 scenario" \u2014 You're in a modal and see carousel indicators. Advance through all slides, screenshot each one.
+- "goinghome scenario" \u2014 You're lost or off-track. Click the Instagram logo in the top-left sidebar.
+
+When deciding what to do, identify which scenario matches your current screen. If none match, you may be seeing unexpected UI \u2014 follow the UNEXPECTED UI recovery steps.
+
+When writing your "intent" field, reference the scenario name if one applies (e.g., "posts2 scenario \u2014 closing modal after screenshot"). This helps you stay on track.
+
+ELEMENT NOTES
+In your response, include an element_notes field describing what you think key elements do.
+You don't need to annotate every element \u2014 just the ones you actively considered this turn.
+Your notes from previous turns will appear next to elements in the LABELED ELEMENTS list.
+
+If an element has no note yet, it will appear as:
+  [5] button \u2014 no known function yet
+
+After you annotate it, future turns will show:
+  [5] button \u2014 dismisses notification prompt
+
+SELF-CORRECTION
+- Check your RECENT HISTORY before acting. If your last 2+ actions resulted in "no change", you are stuck.
+- If your last click didn't change the page, the element might not be clickable or may not be what you expected. Try a different element or a different approach entirely.
+- If STUCK reaches 3, change strategy entirely. If it reaches 5, click Home to reset.
+- If you see a message/chat interface (conversation bubbles, text input at bottom, contact names/avatars in a list), you are in DMs \u2014 press Escape or click Home immediately.
+- If you see a full-screen vertical video player or "Reels" label, you are on the Reels page \u2014 click Home immediately.
+- If you see a grid of suggested/trending content that is NOT your home feed, you are on Explore \u2014 click Home immediately.
+- If you've been on the same page for 3+ actions without progress, move on. Scroll past or navigate elsewhere.`;
 
 // src/main/services/FeedAgent.ts
 var FeedAgent = class extends BaseVisionAgent {
@@ -42441,13 +42669,38 @@ var FeedAgent = class extends BaseVisionAgent {
     return 2048;
   }
   getReferenceImageFolder() {
-    return "Posts";
+    return "feed";
   }
   getAgentName() {
     return "FeedAgent";
   }
   shouldLabelElements() {
     return true;
+  }
+  getWorkflowSummary() {
+    return `I've studied the reference images. Here's my workflow:
+
+OPENING POSTS (from posts1):
+- Find timestamp links (e.g. "13h", "2d", "7h") \u2014 these are the clickable text near the username
+- Click the timestamp to open the post in a detail modal (dark overlay)
+- Do NOT click the image or the username \u2014 only the timestamp link
+
+POST MODAL (from posts2):
+- The modal shows the post image on the left and caption/comments on the right
+- Screenshot this view \u2014 this is the content I need to capture
+- Ignore the "More posts from..." section below the modal (orange box area)
+- Press Escape to close the modal and return to the feed
+
+CAROUSELS (from posts3):
+- Some posts have multiple images, indicated by a right arrow on the image and dot indicators below
+- After opening the modal, if I see a right arrow: click it to advance to the next slide
+- Screenshot each slide
+- Repeat until the right arrow disappears (last slide)
+- Then press Escape to return to feed
+
+GOING HOME (from goinghome):
+- If I get lost or need to reset, click the Instagram logo in the top-left corner of the sidebar
+- This always returns me to the home feed`;
   }
 };
 
@@ -42664,9 +42917,9 @@ var Kowalski = class {
       const baseRawDir = config?.rawDir;
       const storiesRawDir = baseRawDir ? path6.join(baseRawDir, "stories") : void 0;
       const feedRawDir = baseRawDir ? path6.join(baseRawDir, "feed") : void 0;
-      const storiesMaxMs = Math.min(3 * 60 * 1e3, targetDurationMs * 0.15);
+      const storiesMaxMs = Infinity;
       console.log(`
-\u{1F4D6} Phase 1: Stories (budget: ${(storiesMaxMs / 1e3 / 60).toFixed(1)} min, model: ${ModelConfig.stories})`);
+\u{1F4D6} Phase 1: Stories (no time limit \u2014 exits when stories end, model: ${ModelConfig.stories})`);
       this.screenshotCollector.appendLogRaw(`
 ## Phase 1: Stories
 `);
@@ -43253,7 +43506,7 @@ or
 };
 
 // src/main/services/RunManager.ts
-var __filename = new URL(__importMetaUrl).pathname;
+var __filename = decodeURIComponent(new URL(__importMetaUrl).pathname);
 var __dirname2 = import_path5.default.dirname(__filename);
 var RunManager = class _RunManager {
   static instance;
@@ -43323,9 +43576,11 @@ var RunManager = class _RunManager {
       if (!sessionCheck.valid) {
         throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
       }
-      const screenshotsDir = import_path5.default.join(__dirname2, "../../debug-screenshots");
-      const sessionTimestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const sessionDir = import_path5.default.join(screenshotsDir, `session_${sessionTimestamp}`);
+      const screenshotsDir = import_path5.default.join(import_electron6.app.getPath("downloads"), "kowalski-debug");
+      const runStart = /* @__PURE__ */ new Date();
+      const pad = (n) => n.toString().padStart(2, "0");
+      const dateTime = `${runStart.getFullYear()}-${pad(runStart.getMonth() + 1)}-${pad(runStart.getDate())}_${pad(runStart.getHours())}-${pad(runStart.getMinutes())}-${pad(runStart.getSeconds())}`;
+      const sessionDir = import_path5.default.join(screenshotsDir, `run_${dateTime}`);
       const rawStoriesDir = import_path5.default.join(sessionDir, "raw", "stories");
       const rawFeedDir = import_path5.default.join(sessionDir, "raw", "feed");
       const filteredStoriesDir = import_path5.default.join(sessionDir, "filtered", "stories");
@@ -43736,7 +43991,7 @@ function setupIPCHandlers() {
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
+          model: "claude-haiku-4-5",
           max_tokens: 1,
           messages: [{ role: "user", content: "hi" }]
         })

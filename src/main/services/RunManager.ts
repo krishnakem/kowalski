@@ -102,9 +102,9 @@ export class RunManager {
 
             // 5. Set up directories
             const screenshotsDir = path.join(app.getPath('downloads'), 'kowalski-debug');
-            const now = new Date();
+            const runStart = new Date();
             const pad = (n: number) => n.toString().padStart(2, '0');
-            const dateTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+            const dateTime = `${runStart.getFullYear()}-${pad(runStart.getMonth() + 1)}-${pad(runStart.getDate())}_${pad(runStart.getHours())}-${pad(runStart.getMinutes())}-${pad(runStart.getSeconds())}`;
             const sessionDir = path.join(screenshotsDir, `run_${dateTime}`);
             const rawStoriesDir = path.join(sessionDir, 'raw', 'stories');
             const rawFeedDir = path.join(sessionDir, 'raw', 'feed');
