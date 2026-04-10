@@ -16,7 +16,6 @@ import { ScreenshotCollector } from './ScreenshotCollector.js';
 import { BaseVisionAgent, type BaseAgentConfig, type VisionAction } from './BaseVisionAgent.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
 import storiesInstructions from '../prompts/stories-instructions.md';
-import { labelElements } from '../../utils/elementLabeler.js';
 
 export class StoriesAgent extends BaseVisionAgent {
     constructor(
@@ -64,70 +63,28 @@ export class StoriesAgent extends BaseVisionAgent {
         if (shouldAutoPause) {
             await this.delay(1500);
 
-            // Diagnostic: check pause state before Space
-            const beforeState = await this.page.evaluate(() => {
-                const pauseBtn = document.querySelector('[aria-label="Pause"]');
-                const playBtn = document.querySelector('[aria-label="Play"]');
-                return pauseBtn ? 'playing' : playBtn ? 'paused' : 'unknown';
-            }).catch(() => 'error');
-
             await this.page.keyboard.press(' ');
             await this.delay(200);
 
-            // Diagnostic: check pause state after Space
-            const afterState = await this.page.evaluate(() => {
-                const pauseBtn = document.querySelector('[aria-label="Pause"]');
-                const playBtn = document.querySelector('[aria-label="Play"]');
-                return pauseBtn ? 'playing' : playBtn ? 'paused' : 'unknown';
-            }).catch(() => 'error');
+            // Verify pause worked — if Pause button still visible, story is still playing
+            const stillPlaying = await this.page.evaluate(() =>
+                document.querySelector('[aria-label="Pause"]') !== null
+            ).catch(() => false);
 
-            console.log(`  ⏸️ Auto-pause: before=${beforeState}, after=${afterState}`);
-            this.collector.appendLog(`⏸️ Auto-pause: before=${beforeState}, after=${afterState}`);
-        }
+            if (stillPlaying) {
+                // Retry once
+                await this.page.keyboard.press(' ');
+                await this.delay(200);
 
-        // Detect story end after ArrowRight
-        if (decision.action === 'press' && decision.key === 'ArrowRight') {
-            const rawScreenshot = await this.captureScreenshot();
-            if (rawScreenshot) {
-                const labeled = await labelElements(
-                    this.page, rawScreenshot,
-                    this.screenshotWidth, this.screenshotHeight,
-                    this.viewportWidth, this.viewportHeight
-                );
-                this.currentElements = labeled.elements;
+                const retriedStillPlaying = await this.page.evaluate(() =>
+                    document.querySelector('[aria-label="Pause"]') !== null
+                ).catch(() => false);
 
-                // Check if a right-arrow / "Next" button still exists
-                const hasNextButton = [...labeled.elements.values()].some(el => {
-                    const label = (el.ariaLabel || '').toLowerCase();
-                    const text = (el.text || '').toLowerCase();
-                    return label.includes('next') || text.includes('next') || label.includes('right');
-                });
-
-                if (!hasNextButton) {
-                    console.log('📖 StoriesAgent: no Next button found — stories ended');
-                    this.collector.appendLog('📖 StoriesAgent: no Next button found — stories ended');
-
-                    // Click the X / Close button in the top-right
-                    const closeButton = [...labeled.elements.values()].find(el => {
-                        const label = (el.ariaLabel || '').toLowerCase();
-                        const text = (el.text || '').toLowerCase();
-                        return label.includes('close') || text.includes('close') || text === 'x';
-                    });
-
-                    if (closeButton) {
-                        const cx = closeButton.x + closeButton.width / 2;
-                        const cy = closeButton.y + closeButton.height / 2;
-                        await this.ghost.clickPoint(cx, cy);
-                        console.log('📖 Clicked Close button to exit stories');
-                        this.collector.appendLog('📖 Clicked Close button to exit stories');
-                    } else {
-                        await this.page.keyboard.press('Escape');
-                        console.log('📖 No Close button found, pressed Escape');
-                        this.collector.appendLog('📖 No Close button found, pressed Escape');
-                    }
-
-                    this.stopped = true;
-                }
+                console.log(`  ⏸️ Auto-pause: retry needed, final=${retriedStillPlaying ? 'FAILED' : 'paused'}`);
+                this.collector.appendLog(`⏸️ Auto-pause: retry needed, final=${retriedStillPlaying ? 'FAILED' : 'paused'}`);
+            } else {
+                console.log('  ⏸️ Auto-pause: paused on first try');
+                this.collector.appendLog('⏸️ Auto-pause: paused on first try');
             }
         }
 

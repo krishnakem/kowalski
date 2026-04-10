@@ -1,73 +1,90 @@
-# Welcome to your Lovable project
+# Kowalski
 
-## Project info
+An AI-powered desktop app that automatically browses your Instagram stories and feed, then generates a curated daily digest — so you stay in the loop without the endless scroll.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## How It Works
 
-## How can I edit this code?
+Kowalski uses Claude vision agents to operate a real browser, mimicking human behavior as it navigates Instagram:
 
-There are several ways of editing your application.
+1. **Stories Phase** — An agent clicks through your unwatched stories, capturing screenshots as it goes
+2. **Feed Phase** — A second agent scrolls your feed, opens posts and carousels, and captures content
+3. **Digest Phase** — All captured screenshots are synthesized into a readable, categorized digest
 
-**Use Lovable**
+The entire run is time-bounded (configurable), and the agents use human-like mouse movements, scrolling, and randomized fingerprints to blend in.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Tech Stack
 
-Changes made via Lovable will be committed automatically to this repo.
+- **Desktop**: Electron + Playwright (browser automation)
+- **Frontend**: React, TypeScript, Tailwind CSS, shadcn/ui
+- **AI**: Claude API (Anthropic) — Sonnet 4.6 for navigation and vision
+- **Storage**: better-sqlite3 (local database), Electron Store (settings)
+- **Build**: Vite, electron-builder
 
-**Use your preferred IDE**
+## Getting Started
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Prerequisites
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+- Node.js (v16+)
+- npm
+- An Anthropic API key
 
-Follow these steps:
+### Install & Run
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+# Install dependencies
+npm install
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+# One-time browser setup
+npm run setup:browser
 
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+# Start the dev app (Vite + Electron with hot reload)
+npm run electron:dev
 ```
 
-**Edit a file directly in GitHub**
+### Other Commands
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```sh
+npm run dev              # Vite dev server only (no Electron)
+npm run build            # Production build
+npm run electron:build   # Package for distribution (.dmg, .exe, .AppImage)
+npm run lint             # Run ESLint
+```
 
-**Use GitHub Codespaces**
+## Configuration
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Set your Anthropic API key in the app's Settings page. You can also override models per-phase via environment variables:
 
-## What technologies are used for this project?
+| Variable | Phase | Default |
+|---|---|---|
+| `KOWALSKI_STORIES_MODEL` | Stories browsing | `claude-sonnet-4-6` |
+| `KOWALSKI_NAV_MODEL` | Feed browsing | `claude-sonnet-4-6` |
+| `KOWALSKI_SPECIALIST_MODEL` | Carousel/stuck recovery | `claude-sonnet-4-6` |
+| `KOWALSKI_VISION_MODEL` | Content extraction | `claude-sonnet-4-6` |
+| `KOWALSKI_DIGEST_MODEL` | Digest synthesis | `claude-sonnet-4-6` |
+| `KOWALSKI_ANALYSIS_MODEL` | Insights generation | `claude-sonnet-4-6` |
 
-This project is built with:
+## Project Structure
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```
+src/
+├── main/                   # Electron main process
+│   ├── main.ts             # Entry point, IPC handlers
+│   ├── services/
+│   │   ├── Kowalski.ts     # Master orchestrator (phases 1→2→3)
+│   │   ├── BaseVisionAgent.ts  # Abstract agent: screenshot→Claude→act loop
+│   │   ├── StoriesAgent.ts     # Phase 1 — stories navigation
+│   │   ├── FeedAgent.ts        # Phase 2 — feed navigation
+│   │   ├── BrowserManager.ts   # Playwright browser lifecycle
+│   │   ├── DigestGeneration.ts # Phase 3 — digest synthesis
+│   │   ├── GhostMouse.ts      # Human-like mouse movements
+│   │   └── ...
+│   └── prompts/            # Agent instruction prompts (markdown)
+├── components/             # React UI
+│   ├── screens/            # Main app states (zero, active, ready, gazette)
+│   └── gazette/            # Digest rendering
+├── pages/                  # Routes (home, settings, archive)
+├── shared/
+│   └── modelConfig.ts      # Centralized LLM model config
+└── types/                  # TypeScript type definitions
+```
 
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)

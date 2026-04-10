@@ -42514,7 +42514,20 @@ var StoriesAgent = class extends BaseVisionAgent {
     const shouldAutoPause = decision.action === "click" || decision.action === "press" && decision.key === "ArrowRight";
     if (shouldAutoPause) {
       await this.delay(1500);
+      const beforeState = await this.page.evaluate(() => {
+        const pauseBtn = document.querySelector('[aria-label="Pause"]');
+        const playBtn = document.querySelector('[aria-label="Play"]');
+        return pauseBtn ? "playing" : playBtn ? "paused" : "unknown";
+      }).catch(() => "error");
       await this.page.keyboard.press(" ");
+      await this.delay(200);
+      const afterState = await this.page.evaluate(() => {
+        const pauseBtn = document.querySelector('[aria-label="Pause"]');
+        const playBtn = document.querySelector('[aria-label="Play"]');
+        return pauseBtn ? "playing" : playBtn ? "paused" : "unknown";
+      }).catch(() => "error");
+      console.log(`  \u23F8\uFE0F Auto-pause: before=${beforeState}, after=${afterState}`);
+      this.collector.appendLog(`\u23F8\uFE0F Auto-pause: before=${beforeState}, after=${afterState}`);
     }
     if (decision.action === "press" && decision.key === "ArrowRight") {
       const rawScreenshot = await this.captureScreenshot();
@@ -42593,6 +42606,7 @@ Your core loop on the feed:
 4. SCROLL down to reveal the next post, then repeat from step 1.
 
 Do this for every post you encounter. Do not scroll past posts without opening them.
+- A list of already-captured post IDs is provided each turn under ALREADY CAPTURED. If a post's /p/ or /reel/ URL matches one in the list, skip it \u2014 scroll past to find new posts.
 
 How to find the right element to click:
 - To open a post, look in the LABELED ELEMENTS list for elements with hrefs like \`/p/...\` or \`/reel/...\`. The timestamp text (e.g. "8h", "2d") next to a username is usually a link to the post. Click that \u2014 NOT the image, NOT the username.
@@ -42656,6 +42670,7 @@ SELF-CORRECTION
 
 // src/main/services/FeedAgent.ts
 var FeedAgent = class extends BaseVisionAgent {
+  visitedPostIds = /* @__PURE__ */ new Set();
   constructor(page, ghost, scroll, collector, config) {
     super(page, ghost, scroll, collector, config);
   }
@@ -42676,6 +42691,32 @@ var FeedAgent = class extends BaseVisionAgent {
   }
   shouldLabelElements() {
     return true;
+  }
+  async executeAction(decision) {
+    if (decision.action === "click" && decision.element !== void 0) {
+      const el = this.currentElements.get(decision.element);
+      if (el?.href) {
+        const postMatch = el.href.match(/\/p\/([^/]+)/);
+        const reelMatch = el.href.match(/\/reel\/([^/]+)/);
+        const postId = postMatch?.[1] || reelMatch?.[1];
+        if (postId) {
+          this.visitedPostIds.add(postId);
+          console.log(`  \u{1F4CC} Tracked post: ${postId} (${this.visitedPostIds.size} total)`);
+          this.collector.appendLog(`\u{1F4CC} Tracked post: ${postId} (${this.visitedPostIds.size} total)`);
+        }
+      }
+    }
+    return super.executeAction(decision);
+  }
+  buildUserPrompt(remainingMs) {
+    let prompt = super.buildUserPrompt(remainingMs);
+    if (this.visitedPostIds.size > 0) {
+      prompt += `
+
+ALREADY CAPTURED (skip these \u2014 scroll past them):
+${[...this.visitedPostIds].join(", ")}`;
+    }
+    return prompt;
   }
   getWorkflowSummary() {
     return `I've studied the reference images. Here's my workflow:
