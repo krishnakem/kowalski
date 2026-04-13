@@ -211,7 +211,14 @@ async function detectElements(
                 debug.push(`Found /p/ link: href="${href}" text="${(el.textContent||'').trim().slice(0,30)}" size=${rect.width}x${rect.height}`);
             }
             const isNavLink = tag === 'A' && /^\/(.*\/)?p\/|\/reel\/|\/stories\//.test(href);
-            if (!isNavLink) {
+            // Carousel navigation arrows (Next/Previous buttons inside post modals)
+            // and close/dismiss buttons must bypass the dense-scroller filter.
+            // Detection: aria-label match OR absolutely-positioned small buttons
+            // (carousel arrows are position:absolute over the image; comment buttons are in flow).
+            const isOverlayBtn = (tag === 'BUTTON' || role === 'button') && style.position === 'absolute';
+            const isCarouselOrCloseBtn = ((tag === 'BUTTON' || role === 'button') &&
+                /^(Next|Go Forward|Go Back|Previous|Close|Chevron)/i.test(selfLabel)) || isOverlayBtn;
+            if (!isNavLink && !isCarouselOrCloseBtn) {
                 let inDenseScroller = false;
                 let ancestor = htmlEl.parentElement;
                 for (let depth = 0; depth < 8 && ancestor; depth++) {

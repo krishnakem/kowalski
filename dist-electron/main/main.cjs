@@ -41244,7 +41244,9 @@ async function detectElements(page, viewportWidth, viewportHeight) {
         debug2.push(`Found /p/ link: href="${href}" text="${(el.textContent || "").trim().slice(0, 30)}" size=${rect.width}x${rect.height}`);
       }
       const isNavLink = tag === "A" && /^\/(.*\/)?p\/|\/reel\/|\/stories\//.test(href);
-      if (!isNavLink) {
+      const isOverlayBtn = (tag === "BUTTON" || role === "button") && style.position === "absolute";
+      const isCarouselOrCloseBtn = (tag === "BUTTON" || role === "button") && /^(Next|Go Forward|Go Back|Previous|Close|Chevron)/i.test(selfLabel) || isOverlayBtn;
+      if (!isNavLink && !isCarouselOrCloseBtn) {
         let inDenseScroller = false;
         let ancestor = htmlEl.parentElement;
         for (let depth = 0; depth < 8 && ancestor; depth++) {
@@ -41575,8 +41577,11 @@ var BaseVisionAgent = class {
   learnedLessons = [];
   // Raw screenshot for debug saving (kept across LLM call)
   lastRawScreenshot = null;
+  // Raw screenshot gating — only save when viewing content (post modal, carousel slide)
+  lastActionWasContentCapture = false;
   // External stop signal
   stopped = false;
+  abortController = new AbortController();
   constructor(page, ghost, scroll, collector, config) {
     this.page = page;
     this.ghost = ghost;
@@ -41594,6 +41599,7 @@ var BaseVisionAgent = class {
   /** Stop the agent externally (e.g. Cmd+Shift+K). */
   stop() {
     this.stopped = true;
+    this.abortController.abort();
     console.log(`\u{1F6D1} ${this.getAgentName()}: external stop signal received`);
     this.collector.appendLog(`\u{1F6D1} ${this.getAgentName()}: external stop signal received`);
   }
@@ -41668,13 +41674,15 @@ var BaseVisionAgent = class {
           this.collector.appendLog(`\u23F1\uFE0F ${this.getAgentName()}: time limit reached`);
           break;
         }
-        await this.delay(300);
+        await this.settleAfterAction(decision);
         const rawScreenshot = await this.captureScreenshot();
         if (!rawScreenshot) {
           await this.delay(500);
           continue;
         }
-        this.saveRawScreenshot(rawScreenshot);
+        if (this.lastActionWasContentCapture) {
+          this.saveRawScreenshot(rawScreenshot);
+        }
         this.lastRawScreenshot = rawScreenshot;
         let screenshot;
         if (this.shouldLabelElements()) {
@@ -41833,6 +41841,38 @@ var BaseVisionAgent = class {
       default:
         return `unknown action: ${decision.action}`;
     }
+  }
+  /**
+   * Smart post-action delay based on what just happened.
+   * Post navigations and carousel advances need more time than scrolls/hovers.
+   */
+  async settleAfterAction(decision) {
+    if (decision.action === "click" && decision.element !== void 0) {
+      const el = this.currentElements.get(decision.element);
+      if (el) {
+        if (/\/p\/|\/reel\//.test(el.href)) {
+          console.log("  \u23F3 Post navigation detected \u2014 waiting for page load");
+          this.collector.appendLog("\u23F3 Waiting for post page to load");
+          this.lastActionWasContentCapture = true;
+          try {
+            await this.page.waitForLoadState("domcontentloaded", { timeout: 5e3 });
+          } catch {
+          }
+          await this.delay(800);
+          return;
+        }
+        const label = (el.ariaLabel || el.text || "").toLowerCase();
+        if ((el.tag === "button" || el.role === "button") && /next|previous|go forward|go back|chevron/.test(label)) {
+          console.log("  \u23F3 Carousel advance detected \u2014 waiting for slide");
+          this.collector.appendLog("\u23F3 Waiting for carousel slide to load");
+          this.lastActionWasContentCapture = true;
+          await this.delay(1e3);
+          return;
+        }
+      }
+    }
+    this.lastActionWasContentCapture = false;
+    await this.delay(300);
   }
   async executeClick(d) {
     if (d.element === void 0) return "missing element number";
@@ -42058,6 +42098,7 @@ var BaseVisionAgent = class {
     };
     const maxRetries = 4;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (this.stopped) break;
       try {
         const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -42067,7 +42108,8 @@ var BaseVisionAgent = class {
             "anthropic-version": "2023-06-01",
             "anthropic-beta": "prompt-caching-2024-07-31"
           },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify(requestBody),
+          signal: this.abortController.signal
         });
         if (!response.ok) {
           const errText = await response.text();
@@ -42110,6 +42152,7 @@ var BaseVisionAgent = class {
         }
         return this.parseJsonResponse(content);
       } catch (err) {
+        if (this.stopped) break;
         console.warn(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}/${maxRetries}):`, err);
         this.collector.appendLog(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}/${maxRetries}): ${err}`);
         if (attempt < maxRetries - 1) {
@@ -42376,7 +42419,19 @@ ${this.lastMemory}`);
     throw new SyntaxError(`No JSON found in response: ${trimmed.slice(0, 100)}`);
   }
   delay(ms) {
-    return new Promise((r) => setTimeout(r, ms));
+    return new Promise((resolve2) => {
+      const timer = setTimeout(resolve2, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        resolve2();
+      };
+      if (this.abortController.signal.aborted) {
+        clearTimeout(timer);
+        resolve2();
+        return;
+      }
+      this.abortController.signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
   formatAction(d) {
     switch (d.action) {
@@ -42511,61 +42566,44 @@ var StoriesAgent = class extends BaseVisionAgent {
   }
   async executeAction(decision) {
     const result = await super.executeAction(decision);
+    this.lastActionWasContentCapture = true;
     const shouldAutoPause = decision.action === "click" || decision.action === "press" && decision.key === "ArrowRight";
     if (shouldAutoPause) {
-      await this.delay(1500);
-      const beforeState = await this.page.evaluate(() => {
-        const pauseBtn = document.querySelector('[aria-label="Pause"]');
-        const playBtn = document.querySelector('[aria-label="Play"]');
-        return pauseBtn ? "playing" : playBtn ? "paused" : "unknown";
-      }).catch(() => "error");
+      await this.delay(3e3);
       await this.page.keyboard.press(" ");
       await this.delay(200);
-      const afterState = await this.page.evaluate(() => {
-        const pauseBtn = document.querySelector('[aria-label="Pause"]');
-        const playBtn = document.querySelector('[aria-label="Play"]');
-        return pauseBtn ? "playing" : playBtn ? "paused" : "unknown";
-      }).catch(() => "error");
-      console.log(`  \u23F8\uFE0F Auto-pause: before=${beforeState}, after=${afterState}`);
-      this.collector.appendLog(`\u23F8\uFE0F Auto-pause: before=${beforeState}, after=${afterState}`);
-    }
-    if (decision.action === "press" && decision.key === "ArrowRight") {
-      const rawScreenshot = await this.captureScreenshot();
-      if (rawScreenshot) {
-        const labeled = await labelElements(
-          this.page,
-          rawScreenshot,
-          this.screenshotWidth,
-          this.screenshotHeight,
-          this.viewportWidth,
-          this.viewportHeight
-        );
-        this.currentElements = labeled.elements;
-        const hasNextButton = [...labeled.elements.values()].some((el) => {
-          const label = (el.ariaLabel || "").toLowerCase();
-          const text = (el.text || "").toLowerCase();
-          return label.includes("next") || text.includes("next") || label.includes("right");
-        });
-        if (!hasNextButton) {
-          console.log("\u{1F4D6} StoriesAgent: no Next button found \u2014 stories ended");
-          this.collector.appendLog("\u{1F4D6} StoriesAgent: no Next button found \u2014 stories ended");
-          const closeButton = [...labeled.elements.values()].find((el) => {
-            const label = (el.ariaLabel || "").toLowerCase();
-            const text = (el.text || "").toLowerCase();
-            return label.includes("close") || text.includes("close") || text === "x";
-          });
-          if (closeButton) {
-            const cx = closeButton.x + closeButton.width / 2;
-            const cy = closeButton.y + closeButton.height / 2;
-            await this.ghost.clickPoint(cx, cy);
-            console.log("\u{1F4D6} Clicked Close button to exit stories");
-            this.collector.appendLog("\u{1F4D6} Clicked Close button to exit stories");
-          } else {
-            await this.page.keyboard.press("Escape");
-            console.log("\u{1F4D6} No Close button found, pressed Escape");
-            this.collector.appendLog("\u{1F4D6} No Close button found, pressed Escape");
+      const stillPlaying = await this.page.evaluate(
+        () => document.querySelector('[aria-label="Pause"]') !== null
+      ).catch(() => false);
+      if (stillPlaying) {
+        await this.page.keyboard.press(" ");
+        await this.delay(200);
+        const retriedStillPlaying = await this.page.evaluate(
+          () => document.querySelector('[aria-label="Pause"]') !== null
+        ).catch(() => false);
+        console.log(`  \u23F8\uFE0F Auto-pause: retry needed, final=${retriedStillPlaying ? "FAILED" : "paused"}`);
+        this.collector.appendLog(`\u23F8\uFE0F Auto-pause: retry needed, final=${retriedStillPlaying ? "FAILED" : "paused"}`);
+      } else {
+        console.log("  \u23F8\uFE0F Auto-pause: paused on first try");
+        this.collector.appendLog("\u23F8\uFE0F Auto-pause: paused on first try");
+      }
+      if (decision.action === "press" && decision.key === "ArrowRight") {
+        const storyViewerOpen = await this.page.evaluate(() => {
+          if (document.querySelector('[aria-label="Story viewer"]')) return true;
+          if (document.querySelector('[aria-label="Close"]')?.closest('[role="dialog"]')) return true;
+          const headers = document.querySelectorAll("header");
+          for (const h of headers) {
+            if (h.querySelectorAll('div[style*="width"]').length >= 2) return true;
           }
+          return false;
+        }).catch(() => false);
+        const url = this.page.url();
+        const onBaseFeed = /^https:\/\/www\.instagram\.com\/?(\?.*)?$/.test(url);
+        if (!storyViewerOpen && onBaseFeed) {
+          console.log("  \u{1F4D6} StoriesAgent: story viewer closed \u2014 stories ended");
+          this.collector.appendLog("\u{1F4D6} StoriesAgent: story viewer closed \u2014 stories ended");
           this.stopped = true;
+          return result;
         }
       }
     }
@@ -42606,7 +42644,10 @@ Your core loop on the feed:
 4. SCROLL down to reveal the next post, then repeat from step 1.
 
 Do this for every post you encounter. Do not scroll past posts without opening them.
-- A list of already-captured post IDs is provided each turn under ALREADY CAPTURED. If a post's /p/ or /reel/ URL matches one in the list, skip it \u2014 scroll past to find new posts.
+
+CAROUSEL POSTS: After opening a post modal, check for a right arrow button (labeled "Next" or "Go to next image") on the image. If you see one, this is a carousel with multiple slides. Click the arrow to advance to the next slide \u2014 each slide gets automatically screenshotted. Keep clicking the arrow until it disappears (you're on the last slide). Only THEN use goback to return to the feed. Do NOT go back after seeing just the first slide.
+
+- A list of already-captured post IDs is provided each turn under ALREADY CAPTURED. When scrolling the feed, do NOT click timestamps for posts in this list \u2014 scroll past them. However, if you are ALREADY INSIDE a post modal (you just clicked it), finish processing it (including all carousel slides) before going back, even if it appears in the list.
 
 How to find the right element to click:
 - To open a post, look in the LABELED ELEMENTS list for elements with hrefs like \`/p/...\` or \`/reel/...\`. The timestamp text (e.g. "8h", "2d") next to a username is usually a link to the post. Click that \u2014 NOT the image, NOT the username.
@@ -42640,7 +42681,7 @@ WORKFLOW SCENARIOS
 You were shown 4 reference images at the start of this session. Use them as your guide:
 
 - "posts1 scenario" \u2014 You see the feed with posts. Find a timestamp link and click it.
-- "posts2 scenario" \u2014 You see the post modal open. Screenshot the content, ignore related posts below, press Escape.
+- "posts2 scenario" \u2014 You see the post modal open. Check for a carousel arrow on the image. If there's no arrow, use goback to return to the feed. If there IS an arrow, advance through all slides first (see posts3 scenario).
 - "posts3 scenario" \u2014 You're in a modal and see carousel indicators. Advance through all slides, screenshot each one.
 - "goinghome scenario" \u2014 You're lost or off-track. Click the Instagram logo in the top-left sidebar.
 
@@ -42671,6 +42712,7 @@ SELF-CORRECTION
 // src/main/services/FeedAgent.ts
 var FeedAgent = class extends BaseVisionAgent {
   visitedPostIds = /* @__PURE__ */ new Set();
+  currentPostId = null;
   constructor(page, ghost, scroll, collector, config) {
     super(page, ghost, scroll, collector, config);
   }
@@ -42700,11 +42742,17 @@ var FeedAgent = class extends BaseVisionAgent {
         const reelMatch = el.href.match(/\/reel\/([^/]+)/);
         const postId = postMatch?.[1] || reelMatch?.[1];
         if (postId) {
-          this.visitedPostIds.add(postId);
-          console.log(`  \u{1F4CC} Tracked post: ${postId} (${this.visitedPostIds.size} total)`);
-          this.collector.appendLog(`\u{1F4CC} Tracked post: ${postId} (${this.visitedPostIds.size} total)`);
+          this.currentPostId = postId;
+          console.log(`  \u{1F4CC} Viewing post: ${postId}`);
+          this.collector.appendLog(`\u{1F4CC} Viewing post: ${postId}`);
         }
       }
+    }
+    if (decision.action === "goback" && this.currentPostId) {
+      this.visitedPostIds.add(this.currentPostId);
+      console.log(`  \u{1F4CC} Captured post: ${this.currentPostId} (${this.visitedPostIds.size} total)`);
+      this.collector.appendLog(`\u{1F4CC} Captured post: ${this.currentPostId} (${this.visitedPostIds.size} total)`);
+      this.currentPostId = null;
     }
     return super.executeAction(decision);
   }
@@ -42713,7 +42761,7 @@ var FeedAgent = class extends BaseVisionAgent {
     if (this.visitedPostIds.size > 0) {
       prompt += `
 
-ALREADY CAPTURED (skip these \u2014 scroll past them):
+ALREADY CAPTURED (skip these on the feed \u2014 do NOT click their timestamps again):
 ${[...this.visitedPostIds].join(", ")}`;
     }
     return prompt;
@@ -42958,58 +43006,68 @@ var Kowalski = class {
       const baseRawDir = config?.rawDir;
       const storiesRawDir = baseRawDir ? path6.join(baseRawDir, "stories") : void 0;
       const feedRawDir = baseRawDir ? path6.join(baseRawDir, "feed") : void 0;
-      const storiesMaxMs = Infinity;
-      console.log(`
+      const phases = config?.phases ?? ["stories", "feed"];
+      let storiesElapsed = 0;
+      if (phases.includes("stories")) {
+        const storiesMaxMs = Infinity;
+        console.log(`
 \u{1F4D6} Phase 1: Stories (no time limit \u2014 exits when stories end, model: ${ModelConfig.stories})`);
-      this.screenshotCollector.appendLogRaw(`
+        this.screenshotCollector.appendLogRaw(`
 ## Phase 1: Stories
 `);
-      const storiesAgent = new StoriesAgent(
-        this.page,
-        this.ghost,
-        this.scroll,
-        this.screenshotCollector,
-        {
-          apiKey: this.apiKey,
-          maxDurationMs: storiesMaxMs,
-          debugMode: this.debugMode,
-          sessionMemoryDigest,
-          rawDir: storiesRawDir
-        }
-      );
-      this.activeAgent = storiesAgent;
-      const storiesResult = await storiesAgent.run();
-      totalRawScreenshots += storiesResult.rawScreenshotCount;
-      totalDecisions += storiesResult.decisionCount;
-      console.log(`\u{1F4D6} Stories phase complete: ${storiesResult.rawScreenshotCount} screenshots, ${storiesResult.decisionCount} decisions`);
-      const storiesElapsed = Date.now() - startTime;
-      const feedMaxMs = targetDurationMs - storiesElapsed;
-      if (feedMaxMs > 3e4) {
-        console.log(`
-\u{1F4F0} Phase 2: Feed (budget: ${(feedMaxMs / 1e3 / 60).toFixed(1)} min, model: ${ModelConfig.navigation})`);
-        this.screenshotCollector.appendLogRaw(`
-## Phase 2: Feed
-`);
-        const feedAgent = new FeedAgent(
+        const storiesAgent = new StoriesAgent(
           this.page,
           this.ghost,
           this.scroll,
           this.screenshotCollector,
           {
             apiKey: this.apiKey,
-            maxDurationMs: feedMaxMs,
+            maxDurationMs: storiesMaxMs,
             debugMode: this.debugMode,
             sessionMemoryDigest,
-            rawDir: feedRawDir
+            rawDir: storiesRawDir
           }
         );
-        this.activeAgent = feedAgent;
-        const feedResult = await feedAgent.run();
-        totalRawScreenshots += feedResult.rawScreenshotCount;
-        totalDecisions += feedResult.decisionCount;
-        console.log(`\u{1F4F0} Feed phase complete: ${feedResult.rawScreenshotCount} screenshots, ${feedResult.decisionCount} decisions`);
+        this.activeAgent = storiesAgent;
+        const storiesResult = await storiesAgent.run();
+        totalRawScreenshots += storiesResult.rawScreenshotCount;
+        totalDecisions += storiesResult.decisionCount;
+        storiesElapsed = Date.now() - startTime;
+        console.log(`\u{1F4D6} Stories phase complete: ${storiesResult.rawScreenshotCount} screenshots, ${storiesResult.decisionCount} decisions`);
       } else {
-        console.log("\u{1F4F0} Skipping feed phase \u2014 insufficient time remaining");
+        console.log("\u{1F4D6} Skipping stories phase");
+      }
+      if (phases.includes("feed")) {
+        const feedMaxMs = targetDurationMs - (Date.now() - startTime);
+        if (feedMaxMs > 3e4) {
+          console.log(`
+\u{1F4F0} Phase 2: Feed (budget: ${(feedMaxMs / 1e3 / 60).toFixed(1)} min, model: ${ModelConfig.navigation})`);
+          this.screenshotCollector.appendLogRaw(`
+## Phase 2: Feed
+`);
+          const feedAgent = new FeedAgent(
+            this.page,
+            this.ghost,
+            this.scroll,
+            this.screenshotCollector,
+            {
+              apiKey: this.apiKey,
+              maxDurationMs: feedMaxMs,
+              debugMode: this.debugMode,
+              sessionMemoryDigest,
+              rawDir: feedRawDir
+            }
+          );
+          this.activeAgent = feedAgent;
+          const feedResult = await feedAgent.run();
+          totalRawScreenshots += feedResult.rawScreenshotCount;
+          totalDecisions += feedResult.decisionCount;
+          console.log(`\u{1F4F0} Feed phase complete: ${feedResult.rawScreenshotCount} screenshots, ${feedResult.decisionCount} decisions`);
+        } else {
+          console.log("\u{1F4F0} Skipping feed phase \u2014 insufficient time remaining");
+        }
+      } else {
+        console.log("\u{1F4F0} Skipping feed phase");
       }
       this.screenshotCollector.appendLogRaw(`
 ---
@@ -43028,12 +43086,12 @@ var Kowalski = class {
           {
             phase: "stories",
             durationMs: storiesElapsed,
-            capturesProduced: storiesResult.rawScreenshotCount
+            capturesProduced: phases.includes("stories") ? totalRawScreenshots : 0
           },
           {
             phase: "feed",
             durationMs: Date.now() - startTime - storiesElapsed,
-            capturesProduced: totalRawScreenshots - storiesResult.rawScreenshotCount
+            capturesProduced: phases.includes("feed") ? totalRawScreenshots : 0
           }
         ],
         stagnationEvents: [],
@@ -43589,7 +43647,8 @@ var RunManager = class _RunManager {
     }
     this.status = "running";
     const headless = options?.headless ?? false;
-    console.log(`\u{1F680} Run started (headless: ${headless})`);
+    const phases = options?.phases ?? ["stories", "feed"];
+    console.log(`\u{1F680} Run started (headless: ${headless}, phases: ${phases.join(", ")})`);
     const MAX_DURATION_MS = 90 * 60 * 1e3;
     const browserManager = BrowserManager.getInstance();
     let context = null;
@@ -43641,7 +43700,7 @@ var RunManager = class _RunManager {
       this.activeScraper = scraper;
       const session2 = await scraper.browseAndCapture(
         MAX_DURATION_MS / 6e4,
-        { rawDir: import_path5.default.join(sessionDir, "raw") }
+        { rawDir: import_path5.default.join(sessionDir, "raw"), phases }
       );
       this.activeScraper = null;
       console.log(`\u{1F680} Browsing complete: ${session2.rawScreenshotCount} raw screenshots`);
@@ -43891,6 +43950,14 @@ import_electron7.app.on("ready", () => {
   import_electron7.globalShortcut.register("CommandOrControl+Shift+K", () => {
     console.log("\u{1F6D1} Stop Triggered (Cmd+Shift+K)");
     RunManager.getInstance().stopRun();
+  });
+  import_electron7.globalShortcut.register("CommandOrControl+Shift+S", () => {
+    console.log("\u{1F4D6} Stories-Only Run Triggered (Cmd+Shift+S)");
+    RunManager.getInstance().startRun({ phases: ["stories"] });
+  });
+  import_electron7.globalShortcut.register("CommandOrControl+Shift+F", () => {
+    console.log("\u{1F4F0} Feed-Only Run Triggered (Cmd+Shift+F)");
+    RunManager.getInstance().startRun({ phases: ["feed"] });
   });
   import_electron7.globalShortcut.register("CommandOrControl+Shift+R", () => {
     console.log("\u{1F9E0} Reset Session Memory Triggered (Cmd+Shift+R)");

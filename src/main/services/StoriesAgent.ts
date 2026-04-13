@@ -55,13 +55,16 @@ export class StoriesAgent extends BaseVisionAgent {
     protected async executeAction(decision: VisionAction): Promise<string> {
         const result = await super.executeAction(decision);
 
+        // Every story frame is content worth capturing
+        this.lastActionWasContentCapture = true;
+
         // Auto-pause after actions that change the story frame
         const shouldAutoPause =
             decision.action === 'click' ||
             (decision.action === 'press' && decision.key === 'ArrowRight');
 
         if (shouldAutoPause) {
-            await this.delay(1500);
+            await this.delay(3000);
 
             await this.page.keyboard.press(' ');
             await this.delay(200);
@@ -85,6 +88,31 @@ export class StoriesAgent extends BaseVisionAgent {
             } else {
                 console.log('  ⏸️ Auto-pause: paused on first try');
                 this.collector.appendLog('⏸️ Auto-pause: paused on first try');
+            }
+
+            // Story-end detection: only after ArrowRight, check if viewer closed
+            if (decision.action === 'press' && decision.key === 'ArrowRight') {
+                const storyViewerOpen = await this.page.evaluate(() => {
+                    // Check for story-viewer-specific DOM elements
+                    if (document.querySelector('[aria-label="Story viewer"]')) return true;
+                    if (document.querySelector('[aria-label="Close"]')?.closest('[role="dialog"]')) return true;
+                    // Progress bar segments at top of story viewer
+                    const headers = document.querySelectorAll('header');
+                    for (const h of headers) {
+                        if (h.querySelectorAll('div[style*="width"]').length >= 2) return true;
+                    }
+                    return false;
+                }).catch(() => false);
+
+                const url = this.page.url();
+                const onBaseFeed = /^https:\/\/www\.instagram\.com\/?(\?.*)?$/.test(url);
+
+                if (!storyViewerOpen && onBaseFeed) {
+                    console.log('  📖 StoriesAgent: story viewer closed — stories ended');
+                    this.collector.appendLog('📖 StoriesAgent: story viewer closed — stories ended');
+                    this.stopped = true;
+                    return result;
+                }
             }
         }
 

@@ -16,4 +16,5 @@ export interface NavigationLoopConfig {
     maxDurationMs: number;
     actionDelayMs?: [number, number];
     rawDir?: string;  // Directory for raw screenshot dumps (three-agent pipeline)
+    phases?: ('stories' | 'feed')[];  // Which phases to run (default: both)
 }

@@ -52,7 +52,7 @@ export class RunManager {
         }
     }
 
-    public async startRun(options?: { headless?: boolean }): Promise<void> {
+    public async startRun(options?: { headless?: boolean; phases?: ('stories' | 'feed')[] }): Promise<void> {
         if (this.status === 'running') {
             console.log('⚠️ Run already in progress');
             return;
@@ -60,7 +60,8 @@ export class RunManager {
 
         this.status = 'running';
         const headless = options?.headless ?? false;
-        console.log(`🚀 Run started (headless: ${headless})`);
+        const phases = options?.phases ?? ['stories', 'feed'];
+        console.log(`🚀 Run started (headless: ${headless}, phases: ${phases.join(', ')})`);
 
         const MAX_DURATION_MS = 90 * 60 * 1000;
         const browserManager = BrowserManager.getInstance();
@@ -129,7 +130,7 @@ export class RunManager {
             this.activeScraper = scraper;
             const session = await scraper.browseAndCapture(
                 MAX_DURATION_MS / 60000,
-                { rawDir: path.join(sessionDir, 'raw') }
+                { rawDir: path.join(sessionDir, 'raw'), phases }
             );
             this.activeScraper = null;
             console.log(`🚀 Browsing complete: ${session.rawScreenshotCount} raw screenshots`);

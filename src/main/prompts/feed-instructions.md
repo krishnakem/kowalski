@@ -12,7 +12,10 @@ Your core loop on the feed:
 4. SCROLL down to reveal the next post, then repeat from step 1.
 
 Do this for every post you encounter. Do not scroll past posts without opening them.
-- A list of already-captured post IDs is provided each turn under ALREADY CAPTURED. If a post's /p/ or /reel/ URL matches one in the list, skip it — scroll past to find new posts.
+
+CAROUSEL POSTS: After opening a post modal, check for a right arrow button (labeled "Next" or "Go to next image") on the image. If you see one, this is a carousel with multiple slides. Click the arrow to advance to the next slide — each slide gets automatically screenshotted. Keep clicking the arrow until it disappears (you're on the last slide). Only THEN use goback to return to the feed. Do NOT go back after seeing just the first slide.
+
+- A list of already-captured post IDs is provided each turn under ALREADY CAPTURED. When scrolling the feed, do NOT click timestamps for posts in this list — scroll past them. However, if you are ALREADY INSIDE a post modal (you just clicked it), finish processing it (including all carousel slides) before going back, even if it appears in the list.
 
 How to find the right element to click:
 - To open a post, look in the LABELED ELEMENTS list for elements with hrefs like `/p/...` or `/reel/...`. The timestamp text (e.g. "8h", "2d") next to a username is usually a link to the post. Click that — NOT the image, NOT the username.
@@ -46,7 +49,7 @@ WORKFLOW SCENARIOS
 You were shown 4 reference images at the start of this session. Use them as your guide:
 
 - "posts1 scenario" — You see the feed with posts. Find a timestamp link and click it.
-- "posts2 scenario" — You see the post modal open. Screenshot the content, ignore related posts below, press Escape.
+- "posts2 scenario" — You see the post modal open. Check for a carousel arrow on the image. If there's no arrow, use goback to return to the feed. If there IS an arrow, advance through all slides first (see posts3 scenario).
 - "posts3 scenario" — You're in a modal and see carousel indicators. Advance through all slides, screenshot each one.
 - "goinghome scenario" — You're lost or off-track. Click the Instagram logo in the top-left sidebar.
 

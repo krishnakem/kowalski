@@ -220,6 +220,18 @@ app.on('ready', () => {
     RunManager.getInstance().stopRun();
   });
 
+  // Cmd+Shift+S: Stories-only run
+  globalShortcut.register('CommandOrControl+Shift+S', () => {
+    console.log('📖 Stories-Only Run Triggered (Cmd+Shift+S)');
+    RunManager.getInstance().startRun({ phases: ['stories'] });
+  });
+
+  // Cmd+Shift+F: Feed-only run
+  globalShortcut.register('CommandOrControl+Shift+F', () => {
+    console.log('📰 Feed-Only Run Triggered (Cmd+Shift+F)');
+    RunManager.getInstance().startRun({ phases: ['feed'] });
+  });
+
   // Cmd+Shift+R: Reset session memory
   globalShortcut.register('CommandOrControl+Shift+R', () => {
     console.log('🧠 Reset Session Memory Triggered (Cmd+Shift+R)');

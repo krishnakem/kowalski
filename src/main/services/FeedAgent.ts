@@ -19,6 +19,7 @@ import feedInstructions from '../prompts/feed-instructions.md';
 
 export class FeedAgent extends BaseVisionAgent {
     private visitedPostIds: Set<string> = new Set();
+    private currentPostId: string | null = null;
 
     constructor(
         page: Page,
@@ -62,19 +63,28 @@ export class FeedAgent extends BaseVisionAgent {
                 const reelMatch = el.href.match(/\/reel\/([^/]+)/);
                 const postId = postMatch?.[1] || reelMatch?.[1];
                 if (postId) {
-                    this.visitedPostIds.add(postId);
-                    console.log(`  📌 Tracked post: ${postId} (${this.visitedPostIds.size} total)`);
-                    this.collector.appendLog(`📌 Tracked post: ${postId} (${this.visitedPostIds.size} total)`);
+                    this.currentPostId = postId;
+                    console.log(`  📌 Viewing post: ${postId}`);
+                    this.collector.appendLog(`📌 Viewing post: ${postId}`);
                 }
             }
         }
+
+        // When leaving a post, mark it as captured
+        if (decision.action === 'goback' && this.currentPostId) {
+            this.visitedPostIds.add(this.currentPostId);
+            console.log(`  📌 Captured post: ${this.currentPostId} (${this.visitedPostIds.size} total)`);
+            this.collector.appendLog(`📌 Captured post: ${this.currentPostId} (${this.visitedPostIds.size} total)`);
+            this.currentPostId = null;
+        }
+
         return super.executeAction(decision);
     }
 
     protected buildUserPrompt(remainingMs: number): string {
         let prompt = super.buildUserPrompt(remainingMs);
         if (this.visitedPostIds.size > 0) {
-            prompt += `\n\nALREADY CAPTURED (skip these — scroll past them):\n${[...this.visitedPostIds].join(', ')}`;
+            prompt += `\n\nALREADY CAPTURED (skip these on the feed — do NOT click their timestamps again):\n${[...this.visitedPostIds].join(', ')}`;
         }
         return prompt;
     }

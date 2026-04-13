@@ -142,8 +142,12 @@ export abstract class BaseVisionAgent {
     // Raw screenshot for debug saving (kept across LLM call)
     protected lastRawScreenshot: Buffer | null = null;
 
+    // Raw screenshot gating — only save when viewing content (post modal, carousel slide)
+    protected lastActionWasContentCapture: boolean = false;
+
     // External stop signal
     protected stopped: boolean = false;
+    protected abortController: AbortController = new AbortController();
 
     constructor(
         page: Page,
@@ -193,6 +197,7 @@ export abstract class BaseVisionAgent {
     /** Stop the agent externally (e.g. Cmd+Shift+K). */
     stop(): void {
         this.stopped = true;
+        this.abortController.abort();
         console.log(`🛑 ${this.getAgentName()}: external stop signal received`);
         this.collector.appendLog(`🛑 ${this.getAgentName()}: external stop signal received`);
     }
@@ -290,7 +295,7 @@ export abstract class BaseVisionAgent {
                 }
 
                 // 2. SETTLE — wait for page to stabilize after action
-                await this.delay(300);
+                await this.settleAfterAction(decision);
 
                 // 3. SCREENSHOT — one screenshot, dual purpose
                 const rawScreenshot = await this.captureScreenshot();
@@ -299,8 +304,10 @@ export abstract class BaseVisionAgent {
                     continue;
                 }
 
-                // 3a. Save raw for analysis/filtering
-                this.saveRawScreenshot(rawScreenshot);
+                // 3a. Save raw for analysis/filtering (only after content actions)
+                if (this.lastActionWasContentCapture) {
+                    this.saveRawScreenshot(rawScreenshot);
+                }
                 this.lastRawScreenshot = rawScreenshot;
 
                 // 3b. Label the SAME screenshot for LLM
@@ -468,6 +475,46 @@ export abstract class BaseVisionAgent {
             case 'goback': return this.executeGoback();
             default: return `unknown action: ${decision.action}`;
         }
+    }
+
+    /**
+     * Smart post-action delay based on what just happened.
+     * Post navigations and carousel advances need more time than scrolls/hovers.
+     */
+    private async settleAfterAction(decision: VisionAction): Promise<void> {
+        if (decision.action === 'click' && decision.element !== undefined) {
+            const el = this.currentElements.get(decision.element);
+            if (el) {
+                // Post click: href contains /p/ or /reel/ → full page navigation
+                if (/\/p\/|\/reel\//.test(el.href)) {
+                    console.log('  ⏳ Post navigation detected — waiting for page load');
+                    this.collector.appendLog('⏳ Waiting for post page to load');
+                    this.lastActionWasContentCapture = true;
+                    try {
+                        await this.page.waitForLoadState('domcontentloaded', { timeout: 5000 });
+                    } catch {
+                        // Timeout — fall through to flat delay
+                    }
+                    await this.delay(800);
+                    return;
+                }
+
+                // Carousel advance: button labeled Next/Previous/Go Forward/Go Back
+                const label = (el.ariaLabel || el.text || '').toLowerCase();
+                if ((el.tag === 'button' || el.role === 'button') &&
+                    /next|previous|go forward|go back|chevron/.test(label)) {
+                    console.log('  ⏳ Carousel advance detected — waiting for slide');
+                    this.collector.appendLog('⏳ Waiting for carousel slide to load');
+                    this.lastActionWasContentCapture = true;
+                    await this.delay(1000);
+                    return;
+                }
+            }
+        }
+
+        // Default settle for everything else
+        this.lastActionWasContentCapture = false;
+        await this.delay(300);
     }
 
     private async executeClick(d: VisionAction): Promise<string> {
@@ -738,6 +785,7 @@ export abstract class BaseVisionAgent {
         // Attempt LLM call with exponential backoff
         const maxRetries = 4;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
+            if (this.stopped) break;
             try {
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
@@ -747,7 +795,8 @@ export abstract class BaseVisionAgent {
                         'anthropic-version': '2023-06-01',
                         'anthropic-beta': 'prompt-caching-2024-07-31'
                     },
-                    body: JSON.stringify(requestBody)
+                    body: JSON.stringify(requestBody),
+                    signal: this.abortController.signal
                 });
 
                 if (!response.ok) {
@@ -795,6 +844,7 @@ export abstract class BaseVisionAgent {
                 return this.parseJsonResponse(content);
 
             } catch (err) {
+                if (this.stopped) break;
                 console.warn(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}/${maxRetries}):`, err);
                 this.collector.appendLog(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}/${maxRetries}): ${err}`);
                 if (attempt < maxRetries - 1) { await this.delay(500); continue; }
@@ -1134,7 +1184,12 @@ export abstract class BaseVisionAgent {
     }
 
     protected delay(ms: number): Promise<void> {
-        return new Promise(r => setTimeout(r, ms));
+        return new Promise((resolve) => {
+            const timer = setTimeout(resolve, ms);
+            const onAbort = () => { clearTimeout(timer); resolve(); };
+            if (this.abortController.signal.aborted) { clearTimeout(timer); resolve(); return; }
+            this.abortController.signal.addEventListener('abort', onAbort, { once: true });
+        });
     }
 
     protected formatAction(d: VisionAction): string {

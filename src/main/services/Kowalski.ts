@@ -151,60 +151,72 @@ export class Kowalski {
             const storiesRawDir = baseRawDir ? path.join(baseRawDir, 'stories') : undefined;
             const feedRawDir = baseRawDir ? path.join(baseRawDir, 'feed') : undefined;
 
+            // Determine which phases to run
+            const phases = config?.phases ?? ['stories', 'feed'];
+            let storiesElapsed = 0;
+
             // ═══════════════════════════════════════════
             // Phase 1: Stories (Haiku — bounded, cheap)
             // ═══════════════════════════════════════════
-            const storiesMaxMs = Infinity; // No time limit — stories end when the ArrowRight button disappears
-            console.log(`\n📖 Phase 1: Stories (no time limit — exits when stories end, model: ${ModelConfig.stories})`);
-            this.screenshotCollector.appendLogRaw(`\n## Phase 1: Stories\n`);
+            if (phases.includes('stories')) {
+                const storiesMaxMs = Infinity; // No time limit — stories end when the ArrowRight button disappears
+                console.log(`\n📖 Phase 1: Stories (no time limit — exits when stories end, model: ${ModelConfig.stories})`);
+                this.screenshotCollector.appendLogRaw(`\n## Phase 1: Stories\n`);
 
-            const storiesAgent = new StoriesAgent(
-                this.page, this.ghost, this.scroll, this.screenshotCollector,
-                {
-                    apiKey: this.apiKey,
-                    maxDurationMs: storiesMaxMs,
-                    debugMode: this.debugMode,
-                    sessionMemoryDigest,
-                    rawDir: storiesRawDir,
-                }
-            );
-            this.activeAgent = storiesAgent;
-            const storiesResult = await storiesAgent.run();
+                const storiesAgent = new StoriesAgent(
+                    this.page, this.ghost, this.scroll, this.screenshotCollector,
+                    {
+                        apiKey: this.apiKey,
+                        maxDurationMs: storiesMaxMs,
+                        debugMode: this.debugMode,
+                        sessionMemoryDigest,
+                        rawDir: storiesRawDir,
+                    }
+                );
+                this.activeAgent = storiesAgent;
+                const storiesResult = await storiesAgent.run();
 
-            totalRawScreenshots += storiesResult.rawScreenshotCount;
-            totalDecisions += storiesResult.decisionCount;
+                totalRawScreenshots += storiesResult.rawScreenshotCount;
+                totalDecisions += storiesResult.decisionCount;
+                storiesElapsed = Date.now() - startTime;
 
-            console.log(`📖 Stories phase complete: ${storiesResult.rawScreenshotCount} screenshots, ${storiesResult.decisionCount} decisions`);
+                console.log(`📖 Stories phase complete: ${storiesResult.rawScreenshotCount} screenshots, ${storiesResult.decisionCount} decisions`);
+            } else {
+                console.log('📖 Skipping stories phase');
+            }
 
             // ═══════════════════════════════════════════
             // Phase 2: Feed (Sonnet — remaining budget)
             // ═══════════════════════════════════════════
-            const storiesElapsed = Date.now() - startTime;
-            const feedMaxMs = targetDurationMs - storiesElapsed;
+            if (phases.includes('feed')) {
+                const feedMaxMs = targetDurationMs - (Date.now() - startTime);
 
-            if (feedMaxMs > 30000) { // Only run feed if >30s remaining
-                console.log(`\n📰 Phase 2: Feed (budget: ${(feedMaxMs / 1000 / 60).toFixed(1)} min, model: ${ModelConfig.navigation})`);
-                this.screenshotCollector.appendLogRaw(`\n## Phase 2: Feed\n`);
+                if (feedMaxMs > 30000) { // Only run feed if >30s remaining
+                    console.log(`\n📰 Phase 2: Feed (budget: ${(feedMaxMs / 1000 / 60).toFixed(1)} min, model: ${ModelConfig.navigation})`);
+                    this.screenshotCollector.appendLogRaw(`\n## Phase 2: Feed\n`);
 
-                const feedAgent = new FeedAgent(
-                    this.page, this.ghost, this.scroll, this.screenshotCollector,
-                    {
-                        apiKey: this.apiKey,
-                        maxDurationMs: feedMaxMs,
-                        debugMode: this.debugMode,
-                        sessionMemoryDigest,
-                        rawDir: feedRawDir,
-                    }
-                );
-                this.activeAgent = feedAgent;
-                const feedResult = await feedAgent.run();
+                    const feedAgent = new FeedAgent(
+                        this.page, this.ghost, this.scroll, this.screenshotCollector,
+                        {
+                            apiKey: this.apiKey,
+                            maxDurationMs: feedMaxMs,
+                            debugMode: this.debugMode,
+                            sessionMemoryDigest,
+                            rawDir: feedRawDir,
+                        }
+                    );
+                    this.activeAgent = feedAgent;
+                    const feedResult = await feedAgent.run();
 
-                totalRawScreenshots += feedResult.rawScreenshotCount;
-                totalDecisions += feedResult.decisionCount;
+                    totalRawScreenshots += feedResult.rawScreenshotCount;
+                    totalDecisions += feedResult.decisionCount;
 
-                console.log(`📰 Feed phase complete: ${feedResult.rawScreenshotCount} screenshots, ${feedResult.decisionCount} decisions`);
+                    console.log(`📰 Feed phase complete: ${feedResult.rawScreenshotCount} screenshots, ${feedResult.decisionCount} decisions`);
+                } else {
+                    console.log('📰 Skipping feed phase — insufficient time remaining');
+                }
             } else {
-                console.log('📰 Skipping feed phase — insufficient time remaining');
+                console.log('📰 Skipping feed phase');
             }
 
             // 6. Write session summary to log
@@ -224,12 +236,12 @@ export class Kowalski {
                     {
                         phase: 'stories',
                         durationMs: storiesElapsed,
-                        capturesProduced: storiesResult.rawScreenshotCount
+                        capturesProduced: phases.includes('stories') ? totalRawScreenshots : 0
                     },
                     {
                         phase: 'feed',
                         durationMs: Date.now() - startTime - storiesElapsed,
-                        capturesProduced: totalRawScreenshots - storiesResult.rawScreenshotCount
+                        capturesProduced: phases.includes('feed') ? totalRawScreenshots : 0
                     }
                 ],
                 stagnationEvents: [],
