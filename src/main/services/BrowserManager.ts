@@ -1,9 +1,11 @@
-import { app, BrowserWindow, screen } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { chromium, BrowserContext, Page } from 'playwright';
+import { chromium, BrowserContext, Page, CDPSession } from 'playwright';
 import { ChromiumVersionHelper } from './ChromiumVersionHelper.js';
 import { SessionValidationResult } from '../../types/instagram.js';
+import { KOWALSKI_VIEWPORT } from '../../shared/viewportConfig.js';
+import { InputForwarder, type InputEventPayload } from './InputForwarder.js';
 
 // GPU profiles for WebGL fingerprint randomization
 // Using common GPU configurations to avoid statistical anomalies
@@ -16,16 +18,21 @@ const GPU_PROFILES = [
     { vendor: 'Google Inc. (Apple)', renderer: 'ANGLE (Apple, Apple M1, OpenGL 4.1)' },
 ];
 
-interface BrowserLaunchConfig {
-    headless: boolean;
-    bounds?: Electron.Rectangle;
-}
+// No config options — headless is always true, enforced at the launch site.
 
 export class BrowserManager {
     private static instance: BrowserManager;
     private browserContext: BrowserContext | null = null;
+    private mainWindow: BrowserWindow | null = null;
+    private cdpSession: CDPSession | null = null;
+    private inputForwarder: InputForwarder = new InputForwarder();
+    private loginActive: boolean = false;
 
     private constructor() { }
+
+    public setMainWindow(window: BrowserWindow | null): void {
+        this.mainWindow = window;
+    }
 
     public static getInstance(): BrowserManager {
         if (!BrowserManager.instance) {
@@ -38,8 +45,8 @@ export class BrowserManager {
      * Launches a persistent browser context.
      * If an instance is already running, it closes it first to prevent zombies.
      */
-    public async launch(config: BrowserLaunchConfig = { headless: true }): Promise<BrowserContext> {
-        // 1. Zombie Prevention: Cleanup any existing instance
+    public async launch(): Promise<BrowserContext> {
+        // Zombie Prevention: Cleanup any existing instance
         if (this.browserContext) {
             console.log('♻️ BrowserManager: Closing existing instance before launch...');
             await this.close();
@@ -49,87 +56,31 @@ export class BrowserManager {
             const userDataPath = app.getPath('userData');
             const persistentContextPath = path.join(userDataPath, 'kowalski_browser');
 
-            console.log(`🚀 BrowserManager: Launching Persistent Context at: ${persistentContextPath}`);
-            console.log(`   Headless: ${config.headless}`);
+            console.log(`🚀 BrowserManager: Launching headless Persistent Context at: ${persistentContextPath}`);
 
-            // 2. Launch Persistent Context
-            // Handle Overlay Args if provided (via some config, or just modify launch to accept args if needed later)
-            // Ideally launch() should accept an args array override, OR we check if we are in "login mode".
-            // Simplify: We will just modify launch to accept launchOptions override.
+            const extraArgs = ['--app=https://www.instagram.com/'];
 
-            // Actually, let's keep launch simple and hardcode the overlay check for now or
-            // refactor launch to accept { headless, bounds? }.
-            // For now, let's assume standard launch is fine, BUT we need the overlay args.
-            // CRITICAL REFACTOR: Updating launch signature to support dynamic args is risky for regression.
-            // Better: launch() accepts optional 'args' array to append.
+            // Explicit viewport ensures page content area matches exactly.
+            const scrapingViewport = { width: KOWALSKI_VIEWPORT.width, height: KOWALSKI_VIEWPORT.height };
+            console.log(`📐 BrowserManager: Viewport ${KOWALSKI_VIEWPORT.width}x${KOWALSKI_VIEWPORT.height}`);
 
-            const extraArgs = [];
-            let scrapingViewport: { width: number; height: number } | null = null;
-
-            if (config.bounds) {
-                // APP MODE: Removes address bar and tabs for a cleaner login experience
-                // Note: --frameless is not a valid Chromium flag, removed to prevent crashes
-                extraArgs.push(`--app=https://www.instagram.com/accounts/login/`);
-                extraArgs.push(`--window-position=${config.bounds.x},${config.bounds.y}`);
-                extraArgs.push(`--window-size=${config.bounds.width},${config.bounds.height}`);
-            } else {
-                // Randomized window size per session for fingerprint diversity
-                const windowSize = BrowserManager.generateWindowSize(config.headless);
-                extraArgs.push('--app=https://www.instagram.com/');
-                extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
-
-                // Center the window on screen so it doesn't open at a random position
-                if (!config.headless) {
-                    try {
-                        const workArea = screen.getPrimaryDisplay().workAreaSize;
-                        const x = Math.round((workArea.width - windowSize.width) / 2);
-                        const y = Math.round((workArea.height - windowSize.height) / 2);
-                        extraArgs.push(`--window-position=${Math.max(0, x)},${Math.max(0, y)}`);
-                    } catch {
-                        // screen API may not be available, skip positioning
-                    }
-                }
-
-                // Explicit viewport ensures page content area matches exactly,
-                // regardless of window chrome. Also guarantees page.viewportSize()
-                // always returns correct values (no null fallback needed).
-                scrapingViewport = { width: 1280, height: 900 };
-                console.log(`📐 BrowserManager: Viewport 1280x900 (headless=${config.headless})`);
-            }
-
-            // 2. Launch Persistent Context
-            // POINT TO CUSTOM "KOWALSKI" APP (Stealth/Icon Mask)
-            // Uses dynamic revision detection for cross-version compatibility
+            // Custom executable path for stealth browser
             const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
-            console.log('🔍 DEBUG: Custom executable path:', customExecutablePath);
-
-            // Verify it exists, else fallback to default (empty string lets PW decide)
             let executablePath = '';
             if (fs.existsSync(customExecutablePath)) {
                 console.log('🕵️‍♀️ BrowserManager: Using Custom Stealth Browser:', customExecutablePath);
                 executablePath = customExecutablePath;
             } else {
-                console.warn('⚠️ BrowserManager: Custom browser not found at:', customExecutablePath);
-                console.warn('⚠️ BrowserManager: Using Playwright default browser.');
+                console.warn('⚠️ BrowserManager: Custom browser not found, using Playwright default.');
             }
 
-            // Detect system timezone for fingerprint consistency
             const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-            console.log('🔍 DEBUG: About to launch with config:', {
-                headless: config.headless,
-                executablePath: executablePath || 'DEFAULT',
-                persistentContextPath,
-                extraArgs,
-                userAgent: ChromiumVersionHelper.generateUserAgent()
-            });
-
             this.browserContext = await chromium.launchPersistentContext(persistentContextPath, {
-                headless: config.headless,
+                headless: true, // ALWAYS headless — no visible Chromium window, ever
                 executablePath: executablePath || undefined,
-                // Explicit viewport for scraping (guarantees page content area size + page.viewportSize() always works).
-                // Null for login mode (window-dictated, user-interactive).
                 viewport: scrapingViewport,
+                deviceScaleFactor: 1,
                 // Dynamic User-Agent that matches actual Chromium version (auto-detected)
                 userAgent: ChromiumVersionHelper.generateUserAgent(),
 
@@ -284,11 +235,184 @@ export class BrowserManager {
         }
     }
 
+    // =========================================================================
+    // CDP Screencast — streams headless viewport frames to the renderer
+    // =========================================================================
+
+    /**
+     * Start a CDP screencast on the given page at ~60fps.
+     * Frames are forwarded to the renderer via 'kowalski:frame' IPC.
+     */
+    public async startScreencast(page: Page): Promise<void> {
+        await this.stopScreencast();
+
+        if (!this.browserContext) {
+            console.warn('⚠️ BrowserManager.startScreencast: no browser context');
+            return;
+        }
+
+        try {
+            const cdp = await this.browserContext.newCDPSession(page);
+            this.cdpSession = cdp;
+
+            cdp.on('Page.screencastFrame', (params: any) => {
+                // Ack FIRST so Chromium never stalls waiting during a slow IPC moment
+                cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
+                if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                    this.mainWindow.webContents.send('kowalski:frame', params.data);
+                }
+            });
+
+            await cdp.send('Page.startScreencast', {
+                format: 'jpeg',
+                quality: 70,
+                everyNthFrame: 1,
+            });
+
+            console.log('📹 BrowserManager: Screencast started (60fps, quality=70)');
+        } catch (err) {
+            console.error('❌ BrowserManager.startScreencast failed:', err);
+            this.cdpSession = null;
+        }
+    }
+
+    /**
+     * Stop the active CDP screencast session.
+     * Idempotent — safe to call multiple times (second call is a no-op).
+     * Emits 'kowalski:screencastEnded' to the renderer so it can tear down the live view.
+     */
+    public async stopScreencast(): Promise<void> {
+        if (!this.cdpSession) return;
+
+        try {
+            await this.cdpSession.send('Page.stopScreencast');
+            await this.cdpSession.detach();
+            console.log('📹 BrowserManager: Screencast stopped');
+        } catch {
+            // Session may already be detached
+        } finally {
+            this.cdpSession = null;
+        }
+
+        // Notify the renderer that the screencast has ended
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('kowalski:screencastEnded');
+        }
+    }
+
+    /**
+     * Switch the screencast to a different page (e.g. after tab navigation).
+     * TODO: Wire into BaseVisionAgent if tab switching is added in a future version.
+     */
+    public async attachScreencastTo(page: Page): Promise<void> {
+        await this.startScreencast(page);
+    }
+
+    // =========================================================================
+    // Login Screencast — headless login via screencast + input forwarding
+    // =========================================================================
+
+    /**
+     * Launch a headless browser, navigate to IG login, start screencast + input forwarding.
+     * The user interacts with the Kowalski canvas; their input is forwarded via CDP.
+     */
+    public async startLoginScreencast(): Promise<void> {
+        console.log('🔐 BrowserManager: Starting login screencast (headless)...');
+        this.loginActive = true;
+
+        // Ensure a headless context is running
+        if (!this.browserContext) {
+            await this.launch();
+        }
+
+        const pages = this.browserContext!.pages();
+        const page = pages[0] || await this.browserContext!.newPage();
+
+        // Navigate to login page
+        try {
+            await page.goto('https://www.instagram.com/accounts/login/', {
+                waitUntil: 'domcontentloaded',
+                timeout: 15000,
+            });
+        } catch {
+            console.warn('⚠️ Login page navigation slow, continuing...');
+        }
+
+        // Start screencast (same 60fps as agent runs)
+        await this.startScreencast(page);
+
+        // Attach input forwarding to the same CDP session
+        if (this.cdpSession) {
+            this.inputForwarder.attach(this.cdpSession);
+        }
+
+        // Notify renderer that frames are flowing
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('kowalski:loginScreencastReady');
+        }
+
+        // Begin polling for login success in the background
+        this.pollForLoginSuccess(page);
+    }
+
+    /**
+     * Stop the login screencast, detach input forwarding, and close the context.
+     * Cookies persist in the profile directory for future runs.
+     */
+    public async stopLoginScreencast(): Promise<void> {
+        console.log('🔐 BrowserManager: Stopping login screencast...');
+        this.loginActive = false;
+        this.inputForwarder.detach();
+        await this.stopScreencast();
+        await this.close();
+    }
+
+    /**
+     * Forward a user input event from the renderer to the headless page.
+     */
+    public async dispatchInput(event: InputEventPayload): Promise<void> {
+        await this.inputForwarder.dispatch(event);
+    }
+
+    /**
+     * Poll for successful Instagram login while the login screencast is active.
+     * On success, notifies the renderer and tears down the screencast.
+     */
+    private async pollForLoginSuccess(page: Page): Promise<void> {
+        while (this.loginActive && this.cdpSession) {
+            await new Promise(r => setTimeout(r, 2000));
+            if (!this.loginActive) break;
+
+            try {
+                const url = page.url();
+                // Still on login/challenge page — keep waiting
+                if (url.includes('/accounts/login') || url.includes('/challenge')) continue;
+
+                // URL changed — verify with CDP accessibility tree
+                if (url.includes('instagram.com')) {
+                    const isLoggedIn = await this.checkLoginStateViaCDP(page);
+                    if (isLoggedIn) {
+                        console.log('✅ Login screencast: Instagram login confirmed');
+                        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                            this.mainWindow.webContents.send('kowalski:loginSuccess');
+                        }
+                        await this.stopLoginScreencast();
+                        return;
+                    }
+                }
+            } catch {
+                // Page may have navigated or closed — keep polling
+            }
+        }
+    }
+
     /**
      * Safely closes the current browser instance.
      */
     public async close(): Promise<void> {
         if (!this.browserContext) return;
+
+        await this.stopScreencast();
 
         try {
             console.log('🛑 BrowserManager: Closing browser...');
@@ -324,85 +448,6 @@ export class BrowserManager {
         } catch (error) {
             console.error('❌ BrowserManager: Failed to wipe data:', error);
             // Don't throw, we want reset to continue best-effort
-        }
-    }
-
-    /**
-     * Launches a frameless overlay for login, locked to the UI.
-     */
-    public async login(bounds: Electron.Rectangle, mainWindow: BrowserWindow): Promise<boolean> {
-        console.log('🔐 BrowserManager: Starting Single Vehicle Login Overlay...');
-
-        // 1. Lock the Main Window
-        mainWindow.setMovable(false);
-
-        try {
-            console.log('🔍 DEBUG login: Bounds received:', bounds);
-
-            // 2. Launch Persistent Context (Frameless at specific coordinates)
-            const context = await this.launch({ headless: false, bounds: bounds }); // Ensure launch cleans up old instances
-            console.log('🔍 DEBUG login: Context launched successfully');
-
-            // 3. Get the Overlay Page (Re-use the one created by --app)
-            // If --app is used, Chromium opens a window immediately. newPage() creates a SECOND window (with UI).
-            const pages = context.pages();
-            console.log('🔍 DEBUG login: Pages count:', pages.length);
-            const page = pages.length > 0 ? pages[0] : await context.newPage();
-            console.log('🔍 DEBUG login: Got page, URL:', page.url());
-
-            // ENFORCE SINGLE WINDOW:
-            // If user clicks Dock Icon, Chrome might spawn a new window. We don't want that.
-            context.on('page', async (newPage) => {
-                // Use a small delay to let the initial page settle
-                await new Promise(resolve => setTimeout(resolve, 100));
-                const allPages = context.pages();
-                if (allPages.length > 1) {
-                    console.log('🚫 BrowserManager: Blocked attempt to open new window.');
-                    try {
-                        await newPage.close();
-                    } catch (e) {
-                        // Page might already be closed
-                    }
-                }
-            });
-
-            // Note: --app=URL already navigates to the login page, so we don't call page.goto()
-            // Just wait for the page to be ready
-            console.log('🌍 Waiting for Instagram Login page to be ready...');
-
-            // Wait for the page to finish loading (or at least get to a stable state)
-            try {
-                await page.waitForLoadState('domcontentloaded', { timeout: 10000 });
-            } catch (e) {
-                console.log('⚠️ Page load state wait timed out, continuing anyway...');
-            }
-
-            // 4. Wait for Login Success
-            // Uses URL polling + CDP accessibility tree (NO waitForSelector - bot detectable!)
-            try {
-                console.log('⏳ Waiting for user to complete login...');
-                const loginSuccess = await this.waitForLoginSuccessViaCDP(page, 300000); // 5 min timeout
-
-                if (loginSuccess) {
-                    console.log('✅ INSTAGRAM LOGIN CONFIRMED (Overlay)');
-                    // 5. Cleanup on Success
-                    await this.close();
-                    mainWindow.setMovable(true);
-                    return true;
-                } else {
-                    throw new Error('Login timeout');
-                }
-            } catch (e) {
-                console.log('❌ Login/Timeout failed.');
-                throw e; // Bubble up to close
-            }
-
-        } catch (error) {
-            console.error('⚠️ Login Overlay Failed/Cancelled:', error);
-            // Cleanup on Error
-            await this.close();
-            mainWindow.setMovable(true);
-            return false;
         }
     }
 
@@ -479,83 +524,8 @@ export class BrowserManager {
     }
 
     // =========================================================================
-    // Window Size Randomization
-    // =========================================================================
-
-    /**
-     * Generate randomized window dimensions per session for fingerprint diversity.
-     * Derives from actual screen size with random 70-92% scaling.
-     */
-    private static generateWindowSize(headless: boolean): { width: number; height: number } {
-        let screenWidth: number;
-        let screenHeight: number;
-
-        if (headless) {
-            screenWidth = 1920;
-            screenHeight = 1080;
-        } else {
-            try {
-                const workArea = screen.getPrimaryDisplay().workAreaSize;
-                screenWidth = workArea.width;
-                screenHeight = workArea.height;
-            } catch {
-                screenWidth = 1920;
-                screenHeight = 1080;
-            }
-        }
-
-        // Random 85-97% of screen for each dimension (independent)
-        const widthRatio = 0.85 + Math.random() * 0.12;
-        const heightRatio = 0.85 + Math.random() * 0.12;
-
-        let width = Math.round(screenWidth * widthRatio);
-        let height = Math.round(screenHeight * heightRatio);
-
-        // Floor: Instagram vertical feed needs a large viewport for good screenshots
-        width = Math.max(width, 1440);
-        height = Math.max(height, 900);
-
-        return { width, height };
-    }
-
-    // =========================================================================
     // CDP-Based Login Detection (Undetectable)
     // =========================================================================
-
-    /**
-     * Wait for login success using URL polling + CDP accessibility tree.
-     * NO waitForSelector - that injects MutationObserver (bot detectable).
-     *
-     * @param page - Playwright page
-     * @param timeout - Maximum wait time in ms
-     * @returns true if login detected, false if timeout
-     */
-    private async waitForLoginSuccessViaCDP(page: Page, timeout: number): Promise<boolean> {
-        const startTime = Date.now();
-        const pollInterval = 1500; // Check every 1.5 seconds
-
-        while (Date.now() - startTime < timeout) {
-            const url = page.url();
-
-            // Fast path: Still on login page
-            if (url.includes('/accounts/login') || url.includes('/challenge')) {
-                await new Promise(r => setTimeout(r, pollInterval));
-                continue;
-            }
-
-            // URL looks good - verify with CDP accessibility tree
-            if (url.includes('instagram.com')) {
-                const isLoggedIn = await this.checkLoginStateViaCDP(page);
-                if (isLoggedIn) {
-                    return true;
-                }
-            }
-
-            await new Promise(r => setTimeout(r, pollInterval));
-        }
-
-        return false;
-    }
 
     /**
      * Check login state using CDP accessibility tree.

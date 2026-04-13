@@ -4,13 +4,14 @@ import { AnimatePresence, motion } from "framer-motion";
 import ZeroStateScreen from "@/components/screens/ZeroStateScreen";
 import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
 import AnalysisReadyScreen from "@/components/screens/AnalysisReadyScreen";
+import LoginScreen from "@/components/screens/LoginScreen";
 import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { pageTransition } from "@/lib/animations";
 
-// Three-Hub Architecture: Index manages only zero, agent, ready.
-// The "gazette" view is now a route under /archive/:id
-type Screen = "zero" | "agent" | "ready";
+// Four-Hub Architecture: zero → login → agent → ready.
+// "login" is shown when an onboarded user's Instagram session has expired.
+type Screen = "zero" | "login" | "agent" | "ready";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -20,11 +21,10 @@ const Index = () => {
   const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
   const [latestAnalysisId, setLatestAnalysisId] = useState<string | null>(null);
 
-  // Determine initial screen based on user state - only runs once on initial load
+  // Determine initial screen based on user state — check IG session for onboarded users
   useEffect(() => {
     console.log("Index useEffect triggered:", { isLoaded, archivesLoaded, currentScreen, hasOnboarded: settings.hasOnboarded });
 
-    // Wait for both settings and archives to load before making decisions
     if (!isLoaded || !archivesLoaded) {
       console.log("Waiting for data...");
       return;
@@ -32,30 +32,46 @@ const Index = () => {
 
     console.log("Screen determination logic running...", { status: settings.analysisStatus });
 
-    // STRICT GATE: If user has onboarded, NEVER show zero state unless settings were wiped.
     if (settings.hasOnboarded) {
-      // LOGIC UPDATE: 'ready' status implies "Unviewed Analysis Available".
-      // It does NOT matter if it's from today or yesterday. 
-      // If the user hasn't viewed it, show it.
-      // Once viewed (in handleViewAnalysis), status becomes 'idle', and we show Agent.
       if (settings.analysisStatus === "ready") {
         setCurrentScreen("ready");
-      } else {
-        setCurrentScreen("agent");
+        return;
       }
+
+      // Check if the Instagram session is still valid before showing the agent screen.
+      // If expired, show the login screen so the user can re-authenticate.
+      window.api.checkInstagramSession().then((result: any) => {
+        if (result.isActive) {
+          setCurrentScreen("agent");
+        } else {
+          console.log("Instagram session expired, showing login screen. Reason:", result.reason);
+          setCurrentScreen("login");
+        }
+      }).catch(() => {
+        // If the check fails, optimistically show agent — the run will detect
+        // SESSION_EXPIRED and the user can re-login then.
+        setCurrentScreen("agent");
+      });
       return;
     }
 
-    // If NOT onboarded, default to zero
     setCurrentScreen("zero");
 
-  }, [isLoaded, archivesLoaded, currentScreen, settings.hasOnboarded, settings.analysisStatus]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, archivesLoaded, settings.hasOnboarded, settings.analysisStatus]);
 
 
 
 
   const handleContinue = () => {
     patchSettings({ hasOnboarded: true, analysisStatus: "idle" });
+    // Go directly to the screencast login screen — at onboarding time there's
+    // never a session, so there's no point checking first.
+    setCurrentScreen("login");
+  };
+
+  const handleLoginSuccess = () => {
+    console.log("Login success — transitioning to agent screen");
     setCurrentScreen("agent");
   };
 
@@ -108,6 +124,17 @@ const Index = () => {
             exit={pageTransition.exit}
           >
             <ZeroStateScreen onContinue={handleContinue} />
+          </motion.div>
+        )}
+
+        {currentScreen === "login" && (
+          <motion.div
+            key="login"
+            initial={pageTransition.initial}
+            animate={pageTransition.animate}
+            exit={pageTransition.exit}
+          >
+            <LoginScreen onLoginSuccess={handleLoginSuccess} />
           </motion.div>
         )}
 

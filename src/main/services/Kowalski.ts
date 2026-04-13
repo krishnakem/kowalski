@@ -18,6 +18,7 @@ import { ScreenshotCollector } from './ScreenshotCollector.js';
 import { StoriesAgent } from './StoriesAgent.js';
 import { FeedAgent } from './FeedAgent.js';
 import { SessionMemory } from './SessionMemory.js';
+import { BrowserManager } from './BrowserManager.js';
 import * as path from 'path';
 import { BrowsingSession } from '../../types/instagram.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
@@ -39,6 +40,7 @@ export class Kowalski {
 
     private sessionMemory: SessionMemory = new SessionMemory();
     private activeAgent: BaseVisionAgent | null = null;
+    private stopped: boolean = false;
 
     constructor(context: BrowserContext, apiKey: string, debugMode: boolean = false) {
         this.context = context;
@@ -49,6 +51,10 @@ export class Kowalski {
 
     /** Stop the active browsing agent externally (e.g. Cmd+Shift+K). */
     stop(): void {
+        this.stopped = true;
+        // Tear down the screencast immediately so the renderer gets the ended signal
+        // right away, rather than waiting for the agent to cooperatively exit.
+        BrowserManager.getInstance().stopScreencast();
         if (this.activeAgent) {
             this.activeAgent.stop();
         }
@@ -78,6 +84,9 @@ export class Kowalski {
         const existingPages = this.context.pages();
         const instagramPage = existingPages.find(p => p.url().includes('instagram.com'));
         this.page = instagramPage || await this.context.newPage();
+
+        // Start live screencast to renderer
+        await BrowserManager.getInstance().startScreencast(this.page);
 
         // Initialize physics layer
         this.ghost = new GhostMouse(this.page);
@@ -158,7 +167,7 @@ export class Kowalski {
             // ═══════════════════════════════════════════
             // Phase 1: Stories (Haiku — bounded, cheap)
             // ═══════════════════════════════════════════
-            if (phases.includes('stories')) {
+            if (phases.includes('stories') && !this.stopped) {
                 const storiesMaxMs = Infinity; // No time limit — stories end when the ArrowRight button disappears
                 console.log(`\n📖 Phase 1: Stories (no time limit — exits when stories end, model: ${ModelConfig.stories})`);
                 this.screenshotCollector.appendLogRaw(`\n## Phase 1: Stories\n`);
@@ -188,7 +197,7 @@ export class Kowalski {
             // ═══════════════════════════════════════════
             // Phase 2: Feed (Sonnet — remaining budget)
             // ═══════════════════════════════════════════
-            if (phases.includes('feed')) {
+            if (phases.includes('feed') && !this.stopped) {
                 const feedMaxMs = targetDurationMs - (Date.now() - startTime);
 
                 if (feedMaxMs > 30000) { // Only run feed if >30s remaining
@@ -258,6 +267,7 @@ export class Kowalski {
             }
         } finally {
             this.activeAgent = null;
+            await BrowserManager.getInstance().stopScreencast();
 
             // Log summary
             console.log(`\n📊 Session Summary:`);

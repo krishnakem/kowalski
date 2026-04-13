@@ -1,19 +1,21 @@
 import { useEffect, useCallback, memo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Settings, Archive, Search, Square, Eye, RotateCcw } from "lucide-react";
+import { Settings, Archive, Search, Square } from "lucide-react";
 import { AnimatedPixelPenguin } from "../icons/PixelIcons";
+import { LiveScreencast } from "../LiveScreencast";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { ease, duration, spring } from "@/lib/animations";
+import { KOWALSKI_VIEWPORT } from "@/shared/viewportConfig";
 
 interface AgentActiveScreenProps {
   onComplete: () => void;
   autoComplete?: boolean;
 }
 
-type RunState = "idle" | "running" | "done";
+type RunState = "idle" | "running" | "generatingDigest";
 
 // Animation transitions defined outside component
 const buttonEntranceTransition = { delay: 0.4, duration: duration.slow, ease: ease.cinematic };
@@ -21,12 +23,11 @@ const contentEntranceTransition = { delay: 0.25, duration: duration.slow, ease: 
 
 const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
-  const { settings, patchSettings } = useSettings();
+  const { settings } = useSettings();
   const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
 
   const [runState, setRunState] = useState<RunState>("idle");
-  const [endTime, setEndTime] = useState<number | null>(null);
-  const [remaining, setRemaining] = useState(0);
+  const [firstFrameReceived, setFirstFrameReceived] = useState(false);
 
   // Check initial run status on mount
   useEffect(() => {
@@ -37,39 +38,27 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
     });
   }, []);
 
-  // Listen for run events
+  // Listen for run lifecycle events
   useEffect(() => {
-    const unsubStart = window.api.settings.onRunStarted(({ durationMs, startTime }) => {
+    const unsubStart = window.api.settings.onRunStarted(() => {
+      setFirstFrameReceived(false);
       setRunState("running");
-      setEndTime(startTime + durationMs);
-      setRemaining(durationMs);
+    });
+
+    const unsubScreencastEnded = window.api.screencast.onEnded(() => {
+      setRunState((prev) => prev === "running" ? "generatingDigest" : prev);
     });
 
     const unsubComplete = window.api.settings.onRunComplete(() => {
       setRunState("idle");
-      setEndTime(null);
     });
 
     return () => {
       unsubStart();
+      unsubScreencastEnded();
       unsubComplete();
     };
   }, []);
-
-  // Countdown ticker
-  useEffect(() => {
-    if (runState !== "running" || !endTime) return;
-
-    const interval = setInterval(() => {
-      const left = Math.max(0, endTime - Date.now());
-      setRemaining(left);
-      if (left === 0) {
-        setRunState("idle");
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [runState, endTime]);
 
   // Navigate to Gazette when analysis is ready
   useEffect(() => {
@@ -81,13 +70,13 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   const showArchiveButton = archivesLoaded && hasPastAnalyses;
 
   const handleRunNow = useCallback(async () => {
+    setFirstFrameReceived(false);
     setRunState("running");
     await window.api.run.start();
   }, []);
 
   const handleStop = useCallback(async () => {
     await window.api.run.stop();
-    setRunState("idle");
   }, []);
 
   const handleNavigateToArchive = useCallback(() => {
@@ -98,18 +87,121 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
     navigate("/settings", { state: { from: "agent" } });
   }, [navigate]);
 
-  // Format milliseconds as MM:SS
-  const formatTime = (ms: number) => {
-    const totalSeconds = Math.ceil(ms / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
+  // --- Running: screencast fills the entire window, STOP + indicator overlay bottom-right ---
+  if (runState === "running") {
+    return (
+      <>
+        {/* Screencast layer — no position/overflow so it can't trap clicks */}
+        <div style={{ width: KOWALSKI_VIEWPORT.width, height: KOWALSKI_VIEWPORT.height }}>
+          <LiveScreencast onFirstFrame={() => setFirstFrameReceived(true)} />
+        </div>
 
+        {/* "Starting session..." overlay — covers the area until the first frame */}
+        {!firstFrameReceived && (
+          <div
+            className="flex flex-col items-center justify-center bg-background"
+            style={{ position: 'fixed', inset: 0 }}
+          >
+            <AnimatedPixelPenguin size={200} />
+            <p className="mt-8 text-foreground font-sans text-lg leading-relaxed animate-pulse">
+              Starting session...
+            </p>
+          </div>
+        )}
+
+        {/* Floating overlay: RUN IN PROGRESS indicator + STOP button.
+            Uses position:fixed so it's outside any stacking context — clicks always reach it. */}
+        {firstFrameReceived && (
+          <div style={{
+            position: 'fixed', bottom: 16, right: 16, zIndex: 9999,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            {/* Run in progress indicator */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 10px', borderRadius: 6,
+              background: 'rgba(255,255,255,0.92)',
+              backdropFilter: 'blur(6px)',
+              WebkitBackdropFilter: 'blur(6px)',
+            }}>
+              <span className="run-indicator-dot" style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: '#ef4444', flexShrink: 0,
+              }} />
+              <span className="run-indicator-text" style={{
+                fontSize: 11, fontWeight: 500, color: '#111',
+                letterSpacing: '0.08em', textTransform: 'uppercase' as const,
+                fontFamily: 'system-ui, sans-serif',
+              }}>
+                Run in progress
+              </span>
+            </div>
+
+            {/* STOP button */}
+            <button
+              onClick={handleStop}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 12px', borderRadius: 6,
+                background: 'rgba(255,255,255,0.92)',
+                backdropFilter: 'blur(6px)',
+                WebkitBackdropFilter: 'blur(6px)',
+                border: '1.5px solid rgba(0,0,0,0.15)',
+                cursor: 'pointer', fontSize: 11, fontWeight: 500,
+                color: '#111', letterSpacing: '0.08em',
+                textTransform: 'uppercase' as const,
+                fontFamily: 'system-ui, sans-serif',
+              }}
+            >
+              <Square style={{ width: 10, height: 10 }} />
+              Stop
+            </button>
+          </div>
+        )}
+
+        {/* Keyframe animations for the indicator */}
+        <style>{`
+          @keyframes indicatorPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+          }
+          .run-indicator-dot {
+            animation: indicatorPulse 1.2s ease-in-out infinite;
+          }
+          .run-indicator-text {
+            animation: indicatorPulse 1.2s ease-in-out infinite;
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .run-indicator-dot, .run-indicator-text {
+              animation: none;
+              opacity: 1;
+            }
+          }
+        `}</style>
+      </>
+    );
+  }
+
+  // --- Generating digest interstitial ---
+  if (runState === "generatingDigest") {
+    return (
+      <div
+        className="flex flex-col items-center justify-center bg-background"
+        style={{ width: KOWALSKI_VIEWPORT.width, height: KOWALSKI_VIEWPORT.height }}
+      >
+        <AnimatedPixelPenguin size={200} />
+        <p className="mt-8 text-foreground font-sans text-lg leading-relaxed animate-pulse">
+          Generating digest...
+        </p>
+      </div>
+    );
+  }
+
+  // --- Idle: centered penguin + buttons ---
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-background relative">
+    <div className="flex flex-col items-center justify-center px-6 bg-background relative overflow-auto"
+         style={{ width: KOWALSKI_VIEWPORT.width, height: KOWALSKI_VIEWPORT.height }}>
 
-      {/* Archive Button */}
       {showArchiveButton && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
@@ -128,7 +220,6 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
         </motion.div>
       )}
 
-      {/* Settings Button */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -145,7 +236,6 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
         </Button>
       </motion.div>
 
-      {/* Animated Pixel Penguin */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -155,57 +245,25 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
         <AnimatedPixelPenguin size={200} />
       </motion.div>
 
-      {/* Content */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={contentEntranceTransition}
         className="text-center max-w-sm space-y-6"
       >
-        {/* Idle State */}
-        {runState === "idle" && (
-          <>
-            <p className="text-foreground font-sans text-lg leading-relaxed">
-              Ready when you are.
-            </p>
-            <button
-              onClick={handleRunNow}
-              className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
-                         text-foreground font-sans text-sm tracking-wider uppercase
-                         hover:bg-foreground hover:text-background transition-all duration-200"
-            >
-              <Search className="w-4 h-4" />
-              <span>Run Now</span>
-            </button>
-            {hasPastAnalyses && (
-              <p className="text-muted-foreground text-sm">
-                Press Cmd+Shift+H to run anytime.
-              </p>
-            )}
-          </>
-        )}
-
-        {/* Running State */}
-        {runState === "running" && (
-          <>
-            <div className="flex items-center justify-center gap-2 text-foreground">
-              <span className="animate-pulse">
-                <Search className="w-5 h-5" />
-              </span>
-              <span className="font-mono text-2xl font-semibold">
-                Browsing: {formatTime(remaining)}
-              </span>
-            </div>
-            <button
-              onClick={handleStop}
-              className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground/40
-                         text-foreground/60 font-sans text-sm tracking-wider uppercase
-                         hover:border-foreground hover:text-foreground transition-all duration-200"
-            >
-              <Square className="w-4 h-4" />
-              <span>Stop</span>
-            </button>
-          </>
+        <button
+          onClick={handleRunNow}
+          className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
+                     text-foreground font-sans text-sm tracking-wider uppercase
+                     hover:bg-foreground hover:text-background transition-all duration-200"
+        >
+          <Search className="w-4 h-4" />
+          <span>Start Digest Run</span>
+        </button>
+        {hasPastAnalyses && (
+          <p className="text-muted-foreground text-sm">
+            Press Cmd+Shift+H to run anytime.
+          </p>
         )}
       </motion.div>
     </div>

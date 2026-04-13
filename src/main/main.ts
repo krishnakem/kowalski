@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, session, globalShortcut, protocol, net } from 'electron';
+import { app, BrowserWindow, ipcMain, session, globalShortcut, protocol, net, clipboard } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { BrowserManager } from './services/BrowserManager.js';
+import { KOWALSKI_VIEWPORT } from '../shared/viewportConfig.js';
 
 // --- GLOBAL ELECTRON FIXES ---
 app.commandLine.appendSwitch('ignore-certificate-errors');
@@ -56,25 +57,24 @@ let mainWindow: BrowserWindow | null = null;
 const SHARED_PARTITION = 'persist:instagram_shared';
 
 const createWindow = () => {
-  // Base laptop size (e.g., 1200x800) + random variance of 0-100px
-  const width = 1280 + Math.floor(Math.random() * 100);
-  const height = 800 + Math.floor(Math.random() * 100);
-
-  // Create the browser window.
+  // Window content area matches the screencast viewport exactly (1280×900).
   mainWindow = new BrowserWindow({
-    width: width,
-    height: height,
+    width: KOWALSKI_VIEWPORT.width,
+    height: KOWALSKI_VIEWPORT.height,
+    useContentSize: true,
+    minWidth: KOWALSKI_VIEWPORT.width,
+    minHeight: KOWALSKI_VIEWPORT.height,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     title: 'Kowalski',
     backgroundColor: '#F9F8F5', // Warm Alabaster for LCD antialiasing
     frame: true,
-    // titleBarStyle property removed to use system default
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.cjs'),
       webviewTag: true,
-      partition: SHARED_PARTITION // Force main window to check this (though webview usually isolates)
+      partition: SHARED_PARTITION
     },
-    // Set icon for Windows/Linux (and Mac if packaged)
-    // Use the processed, standardized icon
     icon: path.join(__dirname, '../../build/icon-standard.png')
   });
 
@@ -85,8 +85,9 @@ const createWindow = () => {
     app.dock?.setIcon(iconPath);
   }
 
-  // Share window ref with RunManager
+  // Share window ref with RunManager and BrowserManager (for screencast IPC)
   RunManager.getInstance().setMainWindow(mainWindow);
+  BrowserManager.getInstance().setMainWindow(mainWindow);
 
   // Prevent title from being updated by the renderer (React)
 
@@ -387,16 +388,57 @@ function setupIPCHandlers() {
   });
 
   // --- Run Handlers ---
-  ipcMain.handle('run:start', async () => {
-    await RunManager.getInstance().startRun();
+  // Fire-and-forget: startRun() is a long-lived async operation (minutes).
+  // Awaiting it here would block the IPC response and can interfere with
+  // subsequent invoke() calls from the renderer (e.g. run:stop).
+  // The renderer is notified of progress via separate IPC events (run-started,
+  // kowalski:screencastEnded, run-complete, analysis-ready).
+  ipcMain.handle('run:start', () => {
+    RunManager.getInstance().startRun();
   });
 
-  ipcMain.handle('run:stop', async () => {
+  ipcMain.handle('run:stop', () => {
     RunManager.getInstance().stopRun();
   });
 
   ipcMain.handle('run:status', () => {
     return RunManager.getInstance().getStatus();
+  });
+
+  // --- Login Screencast + Input Forwarding ---
+  ipcMain.handle('login:startScreencast', () => {
+    BrowserManager.getInstance().startLoginScreencast();
+  });
+
+  ipcMain.handle('login:stopScreencast', () => {
+    BrowserManager.getInstance().stopLoginScreencast();
+  });
+
+  ipcMain.on('kowalski:input', (_event, payload) => {
+    BrowserManager.getInstance().dispatchInput(payload);
+  });
+
+  ipcMain.on('kowalski:paste', (_event, text?: string) => {
+    const pasteText = text || clipboard.readText();
+    if (pasteText) {
+      BrowserManager.getInstance().dispatchInput({ type: 'paste', text: pasteText });
+    }
+  });
+
+  ipcMain.on('kowalski:copySelection', async () => {
+    try {
+      const ctx = BrowserManager.getInstance().getContext();
+      if (!ctx) return;
+      const pages = ctx.pages();
+      const page = pages[0];
+      if (!page) return;
+      const text = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+      if (text) {
+        clipboard.writeText(text);
+      }
+    } catch {
+      // Page may be closed — swallow
+    }
   });
 
   // --- Secure Storage Handlers ---
@@ -434,42 +476,6 @@ function setupIPCHandlers() {
       return { valid: false, error: 'network_error' };
     }
   });
-  // -------------------------------
-  // -------------------------------
-
-  ipcMain.handle('auth:login', async (_event, bounds) => {
-    if (!mainWindow) return false;
-    return BrowserManager.getInstance().login(bounds, mainWindow);
-  });
-
-  ipcMain.handle('test-headless', async () => {
-    try {
-      console.log('🤖 Starting BrowserManager (Persistent)...');
-
-      const manager = BrowserManager.getInstance();
-      // Launch via Manager (handles persistence, stealth, and zombies)
-      const context = await manager.launch({ headless: false });
-
-      // Create a page for the test
-      const page = await context.newPage();
-
-      console.log('🌍 Navigating to Instagram...');
-      await page.goto('https://www.instagram.com/');
-
-      try {
-        await page.waitForSelector('svg[aria-label="Home"]', { timeout: 10000 });
-        console.log('✅ INSTAGRAM LOGIN CONFIRMED');
-        return 'Success: Logged in automatically (Persistent Profile)';
-      } catch (e) {
-        console.log('❌ NOT LOGGED IN / SELECTOR TIMEOUT');
-        return 'Failed: Still on login page. Please log in manually to save territory.';
-      }
-    } catch (error) {
-      console.error('CRITICAL PW ERROR:', error);
-      return `Error: ${(error as Error).message}`;
-    }
-  });
-
   ipcMain.handle('clear-instagram-session', async () => {
     console.log('🧹 Clearing Instagram Session only...');
     try {

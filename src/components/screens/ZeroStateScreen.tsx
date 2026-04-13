@@ -1,14 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
-import { Eye, EyeOff, Instagram, Check, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Instagram, Loader2 } from "lucide-react";
 import {
   PixelArrow,
   WavingPenguin
 } from "../icons/PixelIcons";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/dialog";
 import { useSettings } from "@/hooks/useSettings";
 
 interface ZeroStateScreenProps {
@@ -16,7 +12,6 @@ interface ZeroStateScreenProps {
 }
 
 type Step = "hook" | "name" | "key" | "instagram";
-type InstagramPhase = "trigger" | "connecting" | "success";
 
 const TypewriterText = ({
   text,
@@ -81,8 +76,6 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
   const [firstLineComplete, setFirstLineComplete] = useState(false);
   const [typingComplete, setTypingComplete] = useState(false);
   const [showBegin, setShowBegin] = useState(false);
-  const [instagramPhase, setInstagramPhase] = useState<InstagramPhase>("trigger");
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
   const [userName, setUserName] = useState("");
@@ -155,76 +148,10 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
     }
   };
 
-  const loginTargetRef = useRef<HTMLDivElement>(null);
-  const hasLaunchedRef = useRef(false);
-
-  // EFFECT 1: Handle Login Success (Global Listener)
-  useEffect(() => {
-    if (!dialogOpen) return;
-
-    console.log("Frontend: Attaching 'login-success' listener...");
-
-    // @ts-ignore
-    const removeListener = window.api.onLoginSuccess(() => {
-      console.log("FRONTEND RECEIVED SUCCESS SIGNAL! Transitioning...");
-      setInstagramPhase("success");
-    });
-
-    return () => {
-      console.log("Frontend: Removing 'login-success' listener");
-      if (removeListener) removeListener();
-    };
-  }, [dialogOpen]);
-
-  // EFFECT 1.5: Auto-proceed after success screen displays for 2.5 seconds
-  useEffect(() => {
-    if (instagramPhase !== "success") return;
-
-    const timer = setTimeout(() => {
-      patchSettings({ hasOnboarded: true, analysisStatus: "working" });
-      onContinue();
-    }, 2500);
-
-    return () => clearTimeout(timer);
-  }, [instagramPhase, patchSettings, onContinue]);
-
-  // EFFECT 2.5: Trigger Overlay Logic
-  useEffect(() => {
-    if (!dialogOpen || instagramPhase !== 'connecting' || hasLaunchedRef.current) return;
-
-    const startOverlay = async () => {
-      if (!loginTargetRef.current) return;
-      hasLaunchedRef.current = true;
-
-      const rect = loginTargetRef.current.getBoundingClientRect();
-      const bounds = {
-        x: Math.round(window.screenX + rect.left),
-        y: Math.round(window.screenY + rect.top),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height)
-      };
-
-      try {
-        // @ts-ignore
-        const success = await window.api.startLogin(bounds);
-        if (success) {
-          setInstagramPhase("success");
-        } else {
-          hasLaunchedRef.current = false;
-        }
-      } catch (e) {
-        console.error("ZeroState Overlay Error:", e);
-        hasLaunchedRef.current = false;
-      }
-    };
-
-    setTimeout(startOverlay, 500);
-
-  }, [dialogOpen, instagramPhase]);
-
+  // "Connect Account" triggers onContinue, which marks the user as onboarded
+  // and transitions to the screencast-based login screen.
   const handleConnectClick = () => {
-    setDialogOpen(true);
-    setInstagramPhase("connecting");
+    onContinue();
   };
 
   return (
@@ -477,100 +404,48 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
             className="max-w-sm w-full"
           >
-            {/* Trigger Card - hidden during success phase to prevent flash on exit */}
-            {instagramPhase !== "success" && (
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              className="bg-background rounded-3xl p-12 flex flex-col items-center gap-12"
+            >
               <motion.div
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                className="bg-background rounded-3xl p-12 flex flex-col items-center gap-12"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.3, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               >
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.3, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                >
-                  <Instagram className="w-16 h-16 text-foreground" strokeWidth={1.5} />
-                </motion.div>
-
-                <motion.div
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                  className="text-center space-y-4"
-                >
-                  <h2 className="text-4xl md:text-5xl font-serif text-foreground leading-tight">
-                    Last step{userName.trim() ? ` ${userName.trim()}` : ""},<br />
-                    <span className="whitespace-nowrap">Connect your Instagram.</span>
-                  </h2>
-                  <p className="text-muted-foreground text-sm font-sans">
-                    Kowalski interacts with Instagram in a local sandbox. Your credentials never leave your device.
-                  </p>
-                </motion.div>
-
-                <motion.button
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.5, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                  onClick={handleConnectClick}
-                  className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
-                             text-foreground font-sans text-sm tracking-wider uppercase
-                             hover:bg-foreground hover:text-background transition-all duration-200"
-                >
-                  Connect Account
-                  <PixelArrow size={16} color="charcoal" />
-                </motion.button>
+                <Instagram className="w-16 h-16 text-foreground" strokeWidth={1.5} />
               </motion.div>
-            )}
 
-            {/* Browser View Dialog */}
-            <Dialog open={dialogOpen} onOpenChange={() => { }}>
-              <DialogContent className="border-0 p-0 w-screen h-screen max-w-none bg-background rounded-none overflow-hidden [&>button]:hidden shadow-none" overlayClassName="bg-transparent backdrop-blur-none">
-                <AnimatePresence mode="wait">
-                  {instagramPhase === "connecting" && (
-                    <motion.div
-                      key="connecting"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.3 }}
-                      className="w-full h-full flex flex-col"
-                    >
-                      <div className="flex-1 w-full h-full bg-transparent flex items-center justify-center overflow-hidden">
-                        <div
-                          ref={loginTargetRef}
-                          id="login-placeholder"
-                          style={{ width: '100%', height: '100%' }}
-                          className="bg-transparent"
-                        />
-                      </div>
-                    </motion.div>
-                  )}
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+                className="text-center space-y-4"
+              >
+                <h2 className="text-4xl md:text-5xl font-serif text-foreground leading-tight">
+                  Last step{userName.trim() ? ` ${userName.trim()}` : ""},<br />
+                  <span className="whitespace-nowrap">Connect your Instagram.</span>
+                </h2>
+                <p className="text-muted-foreground text-sm font-sans">
+                  Kowalski interacts with Instagram in a local sandbox. Your credentials never leave your device.
+                </p>
+              </motion.div>
 
-                  {instagramPhase === "success" && (
-                    <motion.div
-                      key="success"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.3 }}
-                      className="w-full h-full bg-paper text-ink flex flex-col items-center justify-center p-8 text-center"
-                    >
-                      {/* Icon & Text Block */}
-                      <div className="flex flex-col items-center space-y-6">
-                        <div className="p-4 border-2 border-ink/10 rounded-full">
-                          <Check className="w-12 h-12 text-ink" strokeWidth={1.5} />
-                        </div>
-                        <div className="space-y-2">
-                          <h2 className="text-4xl font-serif tracking-tight text-ink">Connection Established</h2>
-                          <p className="text-lg text-ink/60 font-sans tracking-wide uppercase text-sm">Secure session captured</p>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </DialogContent>
-            </Dialog>
+              <motion.button
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+                onClick={handleConnectClick}
+                className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
+                           text-foreground font-sans text-sm tracking-wider uppercase
+                           hover:bg-foreground hover:text-background transition-all duration-200"
+              >
+                Connect Account
+                <PixelArrow size={16} color="charcoal" />
+              </motion.button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

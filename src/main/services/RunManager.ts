@@ -42,6 +42,11 @@ export class RunManager {
     public stopRun(): void {
         if (this.activeScraper) {
             console.log('🛑 Stopping active run...');
+            // Cooperative stop: sets a flag the agent checks between LLM calls.
+            // The agent finishes its current action, sees the flag, and exits.
+            // The browser stays open so the agent's error-handling loops don't
+            // spin on "browser closed" errors — it closes naturally in startRun()
+            // step 8 after browseAndCapture returns.
             this.activeScraper.stop();
         }
         for (const f of this.activeFilters) {
@@ -52,16 +57,15 @@ export class RunManager {
         }
     }
 
-    public async startRun(options?: { headless?: boolean; phases?: ('stories' | 'feed')[] }): Promise<void> {
+    public async startRun(options?: { phases?: ('stories' | 'feed')[] }): Promise<void> {
         if (this.status === 'running') {
             console.log('⚠️ Run already in progress');
             return;
         }
 
         this.status = 'running';
-        const headless = options?.headless ?? false;
         const phases = options?.phases ?? ['stories', 'feed'];
-        console.log(`🚀 Run started (headless: ${headless}, phases: ${phases.join(', ')})`);
+        console.log(`🚀 Run started (phases: ${phases.join(', ')})`);
 
         const MAX_DURATION_MS = 90 * 60 * 1000;
         const browserManager = BrowserManager.getInstance();
@@ -90,9 +94,9 @@ export class RunManager {
                 return;
             }
 
-            // 3. Launch browser
-            console.log(`🚀 Launching browser (headless: ${headless})...`);
-            context = await browserManager.launch({ headless });
+            // 3. Launch browser (always headless)
+            console.log('🚀 Launching browser...');
+            context = await browserManager.launch();
 
             // 4. Validate session
             console.log('🚀 Validating Instagram session...');
@@ -126,7 +130,7 @@ export class RunManager {
 
             // 7. Browse Instagram
             console.log('🚀 Browsing Instagram...');
-            const scraper = new Kowalski(context, apiKey, !headless);
+            const scraper = new Kowalski(context, apiKey, false);
             this.activeScraper = scraper;
             const session = await scraper.browseAndCapture(
                 MAX_DURATION_MS / 60000,

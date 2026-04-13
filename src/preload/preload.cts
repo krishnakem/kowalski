@@ -1,22 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('api', {
-    startAgent: () => ipcRenderer.invoke('start-agent'),
-    startLogin: (bounds: any) => ipcRenderer.invoke('auth:login', bounds),
     resetSession: () => ipcRenderer.invoke('reset-session'),
     clearInstagramSession: () => ipcRenderer.invoke('clear-instagram-session'),
     checkInstagramSession: () => ipcRenderer.invoke('check-instagram-session'),
-    saveLoginSession: () => ipcRenderer.invoke('save-login-session'),
-    onLoginSuccess: (callback: () => void) => {
-        const subscription = (_event: any, _args: any) => callback();
-        ipcRenderer.on('login-success', subscription);
-        return () => {
-            ipcRenderer.removeListener('login-success', subscription);
-        };
-    },
-    testHeadless: () => ipcRenderer.invoke('test-headless'),
-    saveSessionDirectly: (cookies: string) => ipcRenderer.invoke('save-session-directly', cookies),
-    manualSessionSave: () => ipcRenderer.send('manual-session-save'),
     settings: {
         get: () => ipcRenderer.invoke('settings:get'),
         set: (value: any) => ipcRenderer.invoke('settings:set', value),
@@ -66,9 +53,46 @@ contextBridge.exposeInMainWorld('api', {
         stop: () => ipcRenderer.invoke('run:stop'),
         getStatus: () => ipcRenderer.invoke('run:status'),
     },
+    screencast: {
+        onFrame: (cb: (data: string) => void): (() => void) => {
+
+            const handler = (_event: any, data: string) => cb(data);
+            ipcRenderer.on('kowalski:frame', handler);
+            return () => {
+                ipcRenderer.removeListener('kowalski:frame', handler);
+            };
+        },
+        onEnded: (cb: () => void): (() => void) => {
+
+            const handler = () => cb();
+            ipcRenderer.on('kowalski:screencastEnded', handler);
+            return () => {
+                ipcRenderer.removeListener('kowalski:screencastEnded', handler);
+            };
+        },
+    },
     analyses: {
         get: () => ipcRenderer.invoke('analyses:get'),
         set: (value: any) => ipcRenderer.invoke('analyses:set', value),
         getContent: (id: string) => ipcRenderer.invoke('analyses:get-content', id),
-    }
+    },
+    login: {
+        startScreencast: () => ipcRenderer.invoke('login:startScreencast'),
+        stopScreencast: () => ipcRenderer.invoke('login:stopScreencast'),
+        onReady: (cb: () => void): (() => void) => {
+
+            const handler = () => cb();
+            ipcRenderer.on('kowalski:loginScreencastReady', handler);
+            return () => ipcRenderer.removeListener('kowalski:loginScreencastReady', handler);
+        },
+        onSuccess: (cb: () => void): (() => void) => {
+
+            const handler = () => cb();
+            ipcRenderer.on('kowalski:loginSuccess', handler);
+            return () => ipcRenderer.removeListener('kowalski:loginSuccess', handler);
+        },
+    },
+    sendInput: (event: any) => ipcRenderer.send('kowalski:input', event),
+    paste: (text?: string) => ipcRenderer.send('kowalski:paste', text),
+    copySelection: () => ipcRenderer.send('kowalski:copySelection'),
 });

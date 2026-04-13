@@ -168,142 +168,100 @@ export class DigestGeneration {
         dateStr: string,
         captures: CapturedPost[]
     ): string {
-        // Build source summary
+        // Build source summary for metadata line
         const feedCount = captures.filter(c => c.source === 'feed').length;
         const storyCount = captures.filter(c => c.source === 'story').length;
         const profileCount = captures.filter(c => c.source === 'profile').length;
         const carouselCount = captures.filter(c => c.source === 'carousel').length;
 
-        return `You are a STRATEGIC INTELLIGENCE ANALYST creating a personalized morning briefing for ${config.userName}.
+        const sourceParts: string[] = [];
+        if (feedCount) sourceParts.push(`${feedCount} feed`);
+        if (storyCount) sourceParts.push(`${storyCount} stories`);
+        if (profileCount) sourceParts.push(`${profileCount} profile`);
+        if (carouselCount) sourceParts.push(`${carouselCount} carousel`);
 
-═══════════════════════════════════════════════════════════════════════════════
-I. YOUR TASK
-═══════════════════════════════════════════════════════════════════════════════
+        return `You are a text-only digest writer. You will receive ${captures.length} Instagram screenshots (${sourceParts.join(', ')}) captured on ${dayName}, ${dateStr}.
 
-You are viewing ${captures.length} Instagram screenshots captured during a browsing session.
-- Feed posts: ${feedCount}
-- Stories: ${storyCount}
-- Profile views: ${profileCount}
-- Carousel slides: ${carouselCount}
+Your job: extract every concrete fact visible in the screenshots and organize them by Instagram account.
 
-Analyze ALL images and synthesize them into ONE comprehensive digest.
+════════════════════════════════════════════════════════════════
+GROUPING RULES
+════════════════════════════════════════════════════════════════
 
-═══════════════════════════════════════════════════════════════════════════════
-II. USER PROFILE
-═══════════════════════════════════════════════════════════════════════════════
+1. Create ONE section per unique @handle you can identify in the screenshots.
+2. The section "heading" field MUST be exactly the @handle as it appears (e.g. "@espn", "@nba"). Nothing else in the heading — no emojis, no descriptions.
+3. If you cannot read the handle, use "@unknown_N" (incrementing N).
+4. Order sections so that news accounts and accounts matching the user's interests appear first, then order remaining sections by how many frames/screenshots that account had (most first).
 
-Name: ${config.userName}
-Location: ${config.location || 'Not specified'}
-Date: ${dayName}, ${dateStr}
+════════════════════════════════════════════════════════════════
+BULLET RULES — DENSITY IS MANDATORY
+════════════════════════════════════════════════════════════════
 
-═══════════════════════════════════════════════════════════════════════════════
-III. AD & SPONSORED CONTENT FILTERING
-═══════════════════════════════════════════════════════════════════════════════
+Each section's "content" array contains 1–5 bullets (strings). Rules:
 
-Skip ads and sponsored posts unless they contain genuinely newsworthy content.
-Skip screenshots that are mostly blank, loading, or unclear.
+A) EVERY bullet MUST contain at least one concrete fact extracted from the screenshot:
+   a number, score, name, date, quoted overlay text, product & price, headline text, or specific visual detail.
 
-INCLUDE (even if commercial):
-- Content from brands or organizations with newsworthy updates
-- News organization updates (even with subscription CTAs)
-- Personal accounts sharing genuine experiences
-- Entertainment/sports content (games, shows, events)
+B) BANNED phrasings — if any bullet contains these, the output is a failure:
+   "posted about", "shared a story about", "graphics showing", "content related to",
+   "images of", "a post featuring", "the photo shows", "the caption says",
+   "shared a", "posted a", "featuring a".
+   Instead, write the actual information.
 
-═══════════════════════════════════════════════════════════════════════════════
-IV. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
-═══════════════════════════════════════════════════════════════════════════════
+C) MERGE rule: if multiple frames show the same underlying information (e.g. video
+   frames of one play, multi-slide carousel on one topic), combine into ONE bullet.
 
-1. **ATTRIBUTION (MANDATORY)**:
-   - Every bullet MUST start with **@handle** in bold (extract username from screenshot)
-   - If you cannot read the handle clearly, use **@[unclear]** but still include the content
-   - Format: "• **@handle**: [Fact]. [Contextual Analysis if warranted]."
+D) OMIT rule: if a frame is unreadable, a loading spinner, a pure logo with no info,
+   or adds nothing new, skip it entirely. Do not pad bullet counts.
 
-2. **DEPTH - THE "SO WHAT?" PROTOCOL**:
-   For HIGH-VALUE content (news, user interests, breaking updates):
-   - Level 1: What's literally in the image
-   - Level 2: What trend does this connect to?
-   - Level 3: Why should the reader care?
+E) No "see screenshot", no references to image numbers or image indices.
 
-   For LOW-VALUE content (generic updates, lifestyle posts):
-   - Level 1 only: Just the facts, one sentence
+F) Examples of correct vs. incorrect bullets:
+   BAD:  "NBA shared graphics about last night's game."
+   GOOD: "Lakers 118, Warriors 112 — LeBron 34 pts / 8 reb / 6 ast, Curry 29 on 10-22 FG."
 
-3. **PRIORITIZATION**:
-   - Breaking news / time-sensitive content = HIGH PRIORITY
-   - Stories from friends/followed accounts = HIGH (personal relevance)
-   - Generic lifestyle posts = LOW (brief mention or skip)
+   BAD:  "Posted about a new sneaker release."
+   GOOD: "Nike Air Max Dn8 releasing Apr 17, $180, colorway 'Midnight Navy'."
 
-4. **NO HALLUCINATIONS**:
-   - Only report what you can SEE in the screenshots
-   - If you can't read text clearly, say "[text unclear]"
-   - Label any inference as [Contextual Analysis: ...]
-   - NEVER invent emotional narrative ("celebrating team spirit," "fostering connections")
+   BAD:  "Shared a story about weather."
+   GOOD: "Heat advisory through Friday, high of 108°F in Phoenix."
 
-5. **NEGATIVE CONSTRAINTS**:
-   ❌ Do NOT use filler phrases: "The photo shows," "The caption says," "Interestingly"
-   ❌ Do NOT summarize 5 posts into 1 bland bullet
-   ❌ Do NOT mix handles across bullet points
-   ❌ Do NOT generate deep analysis for ads or sponsored content
-   ❌ Do NOT report on duplicate/similar screenshots multiple times
+════════════════════════════════════════════════════════════════
+TONE & CONSTRAINTS
+════════════════════════════════════════════════════════════════
 
-═══════════════════════════════════════════════════════════════════════════════
-V. OUTPUT STRUCTURE
-═══════════════════════════════════════════════════════════════════════════════
+- Pure extraction. Only report what is literally visible in the screenshots + any JSON metadata provided.
+- No outside context, no "why it matters", no implications, no LLM training knowledge.
+- If text is partially unreadable, transcribe what you can and mark unclear portions with [unclear].
+- Skip ads and sponsored posts unless they contain genuinely newsworthy facts.
+- Skip blank, loading, or duplicate screenshots.
 
-Return valid JSON with this structure:
+════════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+════════════════════════════════════════════════════════════════
+
+Return valid JSON matching this schema exactly:
+
 {
-    "title": "[Compelling headline based on top story - be specific and engaging]",
-    "subtitle": "[Key strategic insight in one sentence] — ${dayName}, ${dateStr}",
-    "sections": [
-        {
-            "heading": "[Your chosen heading with emoji - based on content themes you observe]",
-            "content": [
-                "• **@handle**: [Fact from screenshot]. [Contextual Analysis: trend/implication].",
-                "• **@handle**: [Another fact with depth]."
-            ]
-        }
-    ]
+  "title": "Instagram Digest — ${dayName}, ${dateStr}",
+  "subtitle": "[N] accounts, [M] items captured",
+  "sections": [
+    {
+      "heading": "@handle",
+      "content": [
+        "Concrete fact bullet 1.",
+        "Concrete fact bullet 2."
+      ]
+    }
+  ]
 }
 
-**SECTION RULES** (CRITICAL):
-- CREATE YOUR OWN HEADINGS based on the content themes you observe
-- Group related content into logical sections with descriptive headings
-- Use emojis at the start of each heading (e.g., "🏈 Football Updates", "🌐 World News", "🎬 Entertainment")
-- Do NOT use generic headings like "Section 1" - be specific to the content
-- Aim for 2-5 sections depending on content variety
-- Each section should have a clear theme that groups related posts
+- "title": always "Instagram Digest — ${dayName}, ${dateStr}".
+- "subtitle": fill in the actual count of unique accounts (N) and total meaningful items (M) you extracted.
+- "sections": one object per account. "heading" is the raw @handle. "content" is 1–5 fact-dense bullet strings.
 
-**HEADING EXAMPLES** (create your own based on what you see):
-- "🏈 Cal Football Recruiting" (if you see multiple football-related posts)
-- "🌍 Breaking News" (for urgent/important news items)
-- "🎭 Entertainment & Pop Culture" (for entertainment content)
-- "📱 Tech & Innovation" (for technology content)
-- "🏠 Local Bay Area" (for location-specific content)
-- "👥 Friends & Following" (for personal updates from followed accounts)
-
-TARGET: 15-25 high-quality bullets total across sections.
-SKIP: Ads, sponsored content, empty/unclear screenshots, duplicate content.
-
-═══════════════════════════════════════════════════════════════════════════════
-VI. EXAMPLES
-═══════════════════════════════════════════════════════════════════════════════
-
-✅ CORRECT (with depth):
-• **@CalFootball**: Posted recruiting update showing new 5-star commit. [Contextual Analysis: This brings Cal's 2026 class to #18 nationally during early signing period.]
-
-✅ CORRECT (quick hit):
-• **@friend_account**: Shared a sunset photo from Malibu.
-
-❌ WRONG (missing handle):
-• Someone posted about a new restaurant opening...
-
-❌ WRONG (hallucinating):
-• **@UniversityAccount**: "Fostering lifelong connections through education" (if you can't read this in the screenshot, don't invent it)
-
-✅ CORRECT SECTION HEADING (based on content):
-"🏈 Cal Football & ACC News" (when you see multiple football posts)
-
-❌ WRONG SECTION HEADING (generic):
-"Strategic Interests" (too generic - be specific to what you observe)`;
+Do NOT add any keys beyond title, subtitle, sections, heading, content.
+Do NOT wrap the JSON in markdown code fences.`;
     }
 
     /**

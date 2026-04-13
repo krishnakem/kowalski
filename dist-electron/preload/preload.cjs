@@ -1,22 +1,9 @@
 // src/preload/preload.cts
 var import_electron = require("electron");
 import_electron.contextBridge.exposeInMainWorld("api", {
-  startAgent: () => import_electron.ipcRenderer.invoke("start-agent"),
-  startLogin: (bounds) => import_electron.ipcRenderer.invoke("auth:login", bounds),
   resetSession: () => import_electron.ipcRenderer.invoke("reset-session"),
   clearInstagramSession: () => import_electron.ipcRenderer.invoke("clear-instagram-session"),
   checkInstagramSession: () => import_electron.ipcRenderer.invoke("check-instagram-session"),
-  saveLoginSession: () => import_electron.ipcRenderer.invoke("save-login-session"),
-  onLoginSuccess: (callback) => {
-    const subscription = (_event, _args) => callback();
-    import_electron.ipcRenderer.on("login-success", subscription);
-    return () => {
-      import_electron.ipcRenderer.removeListener("login-success", subscription);
-    };
-  },
-  testHeadless: () => import_electron.ipcRenderer.invoke("test-headless"),
-  saveSessionDirectly: (cookies) => import_electron.ipcRenderer.invoke("save-session-directly", cookies),
-  manualSessionSave: () => import_electron.ipcRenderer.send("manual-session-save"),
   settings: {
     get: () => import_electron.ipcRenderer.invoke("settings:get"),
     set: (value) => import_electron.ipcRenderer.invoke("settings:set", value),
@@ -66,10 +53,43 @@ import_electron.contextBridge.exposeInMainWorld("api", {
     stop: () => import_electron.ipcRenderer.invoke("run:stop"),
     getStatus: () => import_electron.ipcRenderer.invoke("run:status")
   },
+  screencast: {
+    onFrame: (cb) => {
+      const handler = (_event, data) => cb(data);
+      import_electron.ipcRenderer.on("kowalski:frame", handler);
+      return () => {
+        import_electron.ipcRenderer.removeListener("kowalski:frame", handler);
+      };
+    },
+    onEnded: (cb) => {
+      const handler = () => cb();
+      import_electron.ipcRenderer.on("kowalski:screencastEnded", handler);
+      return () => {
+        import_electron.ipcRenderer.removeListener("kowalski:screencastEnded", handler);
+      };
+    }
+  },
   analyses: {
     get: () => import_electron.ipcRenderer.invoke("analyses:get"),
     set: (value) => import_electron.ipcRenderer.invoke("analyses:set", value),
     getContent: (id) => import_electron.ipcRenderer.invoke("analyses:get-content", id)
-  }
+  },
+  login: {
+    startScreencast: () => import_electron.ipcRenderer.invoke("login:startScreencast"),
+    stopScreencast: () => import_electron.ipcRenderer.invoke("login:stopScreencast"),
+    onReady: (cb) => {
+      const handler = () => cb();
+      import_electron.ipcRenderer.on("kowalski:loginScreencastReady", handler);
+      return () => import_electron.ipcRenderer.removeListener("kowalski:loginScreencastReady", handler);
+    },
+    onSuccess: (cb) => {
+      const handler = () => cb();
+      import_electron.ipcRenderer.on("kowalski:loginSuccess", handler);
+      return () => import_electron.ipcRenderer.removeListener("kowalski:loginSuccess", handler);
+    }
+  },
+  sendInput: (event) => import_electron.ipcRenderer.send("kowalski:input", event),
+  paste: (text) => import_electron.ipcRenderer.send("kowalski:paste", text),
+  copySelection: () => import_electron.ipcRenderer.send("kowalski:copySelection")
 });
 //# sourceMappingURL=preload.cjs.map

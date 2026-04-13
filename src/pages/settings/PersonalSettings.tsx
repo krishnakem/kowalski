@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useSettings } from "@/hooks/useSettings";
 import SettingsLayout from "@/components/layouts/SettingsLayout";
-import { InstagramConnectModal } from "@/components/modals/InstagramConnectModal";
 
 const PersonalSettings = () => {
   const navigate = useNavigate();
@@ -16,7 +15,6 @@ const PersonalSettings = () => {
   const [editName, setEditName] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [sessionStatus, setSessionStatus] = useState<{ isActive: boolean; reason?: string } | null>(null);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
 
@@ -160,9 +158,9 @@ const PersonalSettings = () => {
               size="sm"
               onClick={async () => {
                 try {
-                  await (window as any).api.clearInstagramSession();
-                  toast.success("Logged out. Please sign in.");
-                  setIsLoginOpen(true); // Open Modal
+                  await window.api.clearInstagramSession();
+                  toast.success("Logged out. Redirecting to login...");
+                  navigate("/");
                 } catch (e) {
                   toast.error("Failed to switch account");
                 }
@@ -174,39 +172,6 @@ const PersonalSettings = () => {
           </div>
         </div>
 
-        {/* Debug Tools (Temporary) */}
-        <div className="mt-10 pt-4 border-t border-dashed border-border/40">
-          <Label className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-sans mb-3 block">
-            Debug Tools (Temporary)
-          </Label>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={async () => {
-              try {
-                // @ts-ignore
-                const result = await window.api.testHeadless();
-                toast.info("Test Result: " + result);
-              } catch (e) {
-                toast.error("Test failed");
-              }
-            }}
-            className="text-xs h-8 text-muted-foreground hover:text-foreground hover:bg-transparent px-0 justify-start"
-          >
-            ▶ TEST CONNECTION (HEADED)
-          </Button>
-        </div>
-
-        {/* Login Modal */}
-        <InstagramConnectModal
-          isOpen={isLoginOpen}
-          onClose={() => setIsLoginOpen(false)}
-          onSuccess={() => {
-            // Session captured - re-check status to update indicator
-            checkSessionStatus();
-          }}
-          autoCloseDelay={2500} // 2.5 Seconds wait
-        />
       </div>
     </SettingsLayout>
   );

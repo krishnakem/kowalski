@@ -27053,6 +27053,174 @@ var ChromiumVersionHelper = class {
   }
 };
 
+// src/shared/viewportConfig.ts
+var KOWALSKI_VIEWPORT = { width: 1280, height: 900 };
+
+// src/main/services/InputForwarder.ts
+var InputForwarder = class {
+  cdp = null;
+  attach(cdp) {
+    this.cdp = cdp;
+  }
+  detach() {
+    this.cdp = null;
+  }
+  async dispatch(event) {
+    if (!this.cdp) return;
+    try {
+      switch (event.type) {
+        // --- Clipboard ---
+        case "paste":
+          if (event.text) {
+            await this.cdp.send("Input.insertText", { text: event.text });
+          }
+          break;
+        // --- Mouse wheel ---
+        case "mouseWheel":
+          await this.cdp.send("Input.dispatchMouseEvent", {
+            type: "mouseWheel",
+            x: event.x ?? 0,
+            y: event.y ?? 0,
+            deltaX: event.deltaX ?? 0,
+            deltaY: event.deltaY ?? 0
+          });
+          break;
+        // --- Mouse buttons + movement ---
+        case "mousePressed":
+        case "mouseReleased":
+        case "mouseMoved":
+          await this.cdp.send("Input.dispatchMouseEvent", {
+            type: event.type,
+            x: event.x ?? 0,
+            y: event.y ?? 0,
+            button: event.button || "none",
+            buttons: event.buttons ?? 0,
+            clickCount: event.clickCount ?? (event.type === "mousePressed" ? 1 : 0),
+            modifiers: event.modifiers ?? 0
+          });
+          break;
+        // --- Keyboard ---
+        // keyDown with text IS the character insert — no separate char event.
+        case "keyDown": {
+          const text = event.text ?? "";
+          await this.cdp.send("Input.dispatchKeyEvent", {
+            type: "keyDown",
+            key: event.key ?? "",
+            code: event.code ?? "",
+            text,
+            unmodifiedText: text,
+            modifiers: event.modifiers ?? 0,
+            windowsVirtualKeyCode: codeToVirtualKeyCode(event.code ?? "", event.key ?? "")
+          });
+          break;
+        }
+        case "keyUp":
+          await this.cdp.send("Input.dispatchKeyEvent", {
+            type: "keyUp",
+            key: event.key ?? "",
+            code: event.code ?? "",
+            modifiers: event.modifiers ?? 0
+          });
+          break;
+      }
+    } catch {
+    }
+  }
+};
+function codeToVirtualKeyCode(code, key) {
+  const codeMap = {
+    // Letters (KeyA=65 .. KeyZ=90)
+    KeyA: 65,
+    KeyB: 66,
+    KeyC: 67,
+    KeyD: 68,
+    KeyE: 69,
+    KeyF: 70,
+    KeyG: 71,
+    KeyH: 72,
+    KeyI: 73,
+    KeyJ: 74,
+    KeyK: 75,
+    KeyL: 76,
+    KeyM: 77,
+    KeyN: 78,
+    KeyO: 79,
+    KeyP: 80,
+    KeyQ: 81,
+    KeyR: 82,
+    KeyS: 83,
+    KeyT: 84,
+    KeyU: 85,
+    KeyV: 86,
+    KeyW: 87,
+    KeyX: 88,
+    KeyY: 89,
+    KeyZ: 90,
+    // Digits
+    Digit0: 48,
+    Digit1: 49,
+    Digit2: 50,
+    Digit3: 51,
+    Digit4: 52,
+    Digit5: 53,
+    Digit6: 54,
+    Digit7: 55,
+    Digit8: 56,
+    Digit9: 57,
+    // Punctuation / OEM keys
+    Period: 190,
+    Comma: 188,
+    Slash: 191,
+    Semicolon: 186,
+    Quote: 222,
+    BracketLeft: 219,
+    BracketRight: 221,
+    Backslash: 220,
+    Minus: 189,
+    Equal: 187,
+    Backquote: 192,
+    // Whitespace / editing
+    Space: 32,
+    Enter: 13,
+    Tab: 9,
+    Backspace: 8,
+    Delete: 46,
+    Escape: 27,
+    // Navigation
+    ArrowLeft: 37,
+    ArrowUp: 38,
+    ArrowRight: 39,
+    ArrowDown: 40,
+    Home: 36,
+    End: 35,
+    PageUp: 33,
+    PageDown: 34,
+    // Modifiers
+    ShiftLeft: 16,
+    ShiftRight: 16,
+    ControlLeft: 17,
+    ControlRight: 17,
+    AltLeft: 18,
+    AltRight: 18,
+    MetaLeft: 91,
+    MetaRight: 93
+  };
+  if (codeMap[code] !== void 0) return codeMap[code];
+  const keyMap = {
+    Enter: 13,
+    Tab: 9,
+    Escape: 27,
+    Backspace: 8,
+    Delete: 46,
+    Shift: 16,
+    Control: 17,
+    Alt: 18,
+    Meta: 91
+  };
+  if (keyMap[key] !== void 0) return keyMap[key];
+  return 0;
+}
+
 // src/main/services/BrowserManager.ts
 var GPU_PROFILES = [
   { vendor: "Intel Inc.", renderer: "Intel Iris OpenGL Engine" },
@@ -27065,7 +27233,14 @@ var GPU_PROFILES = [
 var BrowserManager = class _BrowserManager {
   static instance;
   browserContext = null;
+  mainWindow = null;
+  cdpSession = null;
+  inputForwarder = new InputForwarder();
+  loginActive = false;
   constructor() {
+  }
+  setMainWindow(window2) {
+    this.mainWindow = window2;
   }
   static getInstance() {
     if (!_BrowserManager.instance) {
@@ -27077,7 +27252,7 @@ var BrowserManager = class _BrowserManager {
    * Launches a persistent browser context.
    * If an instance is already running, it closes it first to prevent zombies.
    */
-  async launch(config = { headless: true }) {
+  async launch() {
     if (this.browserContext) {
       console.log("\u267B\uFE0F BrowserManager: Closing existing instance before launch...");
       await this.close();
@@ -27085,54 +27260,25 @@ var BrowserManager = class _BrowserManager {
     try {
       const userDataPath = import_electron2.app.getPath("userData");
       const persistentContextPath = import_path2.default.join(userDataPath, "kowalski_browser");
-      console.log(`\u{1F680} BrowserManager: Launching Persistent Context at: ${persistentContextPath}`);
-      console.log(`   Headless: ${config.headless}`);
-      const extraArgs = [];
-      let scrapingViewport = null;
-      if (config.bounds) {
-        extraArgs.push(`--app=https://www.instagram.com/accounts/login/`);
-        extraArgs.push(`--window-position=${config.bounds.x},${config.bounds.y}`);
-        extraArgs.push(`--window-size=${config.bounds.width},${config.bounds.height}`);
-      } else {
-        const windowSize = _BrowserManager.generateWindowSize(config.headless);
-        extraArgs.push("--app=https://www.instagram.com/");
-        extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
-        if (!config.headless) {
-          try {
-            const workArea = import_electron2.screen.getPrimaryDisplay().workAreaSize;
-            const x2 = Math.round((workArea.width - windowSize.width) / 2);
-            const y2 = Math.round((workArea.height - windowSize.height) / 2);
-            extraArgs.push(`--window-position=${Math.max(0, x2)},${Math.max(0, y2)}`);
-          } catch {
-          }
-        }
-        scrapingViewport = { width: 1280, height: 900 };
-        console.log(`\u{1F4D0} BrowserManager: Viewport 1280x900 (headless=${config.headless})`);
-      }
+      console.log(`\u{1F680} BrowserManager: Launching headless Persistent Context at: ${persistentContextPath}`);
+      const extraArgs = ["--app=https://www.instagram.com/"];
+      const scrapingViewport = { width: KOWALSKI_VIEWPORT.width, height: KOWALSKI_VIEWPORT.height };
+      console.log(`\u{1F4D0} BrowserManager: Viewport ${KOWALSKI_VIEWPORT.width}x${KOWALSKI_VIEWPORT.height}`);
       const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
-      console.log("\u{1F50D} DEBUG: Custom executable path:", customExecutablePath);
       let executablePath = "";
       if (import_fs2.default.existsSync(customExecutablePath)) {
         console.log("\u{1F575}\uFE0F\u200D\u2640\uFE0F BrowserManager: Using Custom Stealth Browser:", customExecutablePath);
         executablePath = customExecutablePath;
       } else {
-        console.warn("\u26A0\uFE0F BrowserManager: Custom browser not found at:", customExecutablePath);
-        console.warn("\u26A0\uFE0F BrowserManager: Using Playwright default browser.");
+        console.warn("\u26A0\uFE0F BrowserManager: Custom browser not found, using Playwright default.");
       }
       const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      console.log("\u{1F50D} DEBUG: About to launch with config:", {
-        headless: config.headless,
-        executablePath: executablePath || "DEFAULT",
-        persistentContextPath,
-        extraArgs,
-        userAgent: ChromiumVersionHelper.generateUserAgent()
-      });
       this.browserContext = await import_playwright.chromium.launchPersistentContext(persistentContextPath, {
-        headless: config.headless,
+        headless: true,
+        // ALWAYS headless — no visible Chromium window, ever
         executablePath: executablePath || void 0,
-        // Explicit viewport for scraping (guarantees page content area size + page.viewportSize() always works).
-        // Null for login mode (window-dictated, user-interactive).
         viewport: scrapingViewport,
+        deviceScaleFactor: 1,
         // Dynamic User-Agent that matches actual Chromium version (auto-detected)
         userAgent: ChromiumVersionHelper.generateUserAgent(),
         // Fingerprint consistency options
@@ -27245,11 +27391,147 @@ var BrowserManager = class _BrowserManager {
       throw error;
     }
   }
+  // =========================================================================
+  // CDP Screencast — streams headless viewport frames to the renderer
+  // =========================================================================
+  /**
+   * Start a CDP screencast on the given page at ~60fps.
+   * Frames are forwarded to the renderer via 'kowalski:frame' IPC.
+   */
+  async startScreencast(page) {
+    await this.stopScreencast();
+    if (!this.browserContext) {
+      console.warn("\u26A0\uFE0F BrowserManager.startScreencast: no browser context");
+      return;
+    }
+    try {
+      const cdp = await this.browserContext.newCDPSession(page);
+      this.cdpSession = cdp;
+      cdp.on("Page.screencastFrame", (params) => {
+        cdp.send("Page.screencastFrameAck", { sessionId: params.sessionId }).catch(() => {
+        });
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send("kowalski:frame", params.data);
+        }
+      });
+      await cdp.send("Page.startScreencast", {
+        format: "jpeg",
+        quality: 70,
+        everyNthFrame: 1
+      });
+      console.log("\u{1F4F9} BrowserManager: Screencast started (60fps, quality=70)");
+    } catch (err) {
+      console.error("\u274C BrowserManager.startScreencast failed:", err);
+      this.cdpSession = null;
+    }
+  }
+  /**
+   * Stop the active CDP screencast session.
+   * Idempotent — safe to call multiple times (second call is a no-op).
+   * Emits 'kowalski:screencastEnded' to the renderer so it can tear down the live view.
+   */
+  async stopScreencast() {
+    if (!this.cdpSession) return;
+    try {
+      await this.cdpSession.send("Page.stopScreencast");
+      await this.cdpSession.detach();
+      console.log("\u{1F4F9} BrowserManager: Screencast stopped");
+    } catch {
+    } finally {
+      this.cdpSession = null;
+    }
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("kowalski:screencastEnded");
+    }
+  }
+  /**
+   * Switch the screencast to a different page (e.g. after tab navigation).
+   * TODO: Wire into BaseVisionAgent if tab switching is added in a future version.
+   */
+  async attachScreencastTo(page) {
+    await this.startScreencast(page);
+  }
+  // =========================================================================
+  // Login Screencast — headless login via screencast + input forwarding
+  // =========================================================================
+  /**
+   * Launch a headless browser, navigate to IG login, start screencast + input forwarding.
+   * The user interacts with the Kowalski canvas; their input is forwarded via CDP.
+   */
+  async startLoginScreencast() {
+    console.log("\u{1F510} BrowserManager: Starting login screencast (headless)...");
+    this.loginActive = true;
+    if (!this.browserContext) {
+      await this.launch();
+    }
+    const pages = this.browserContext.pages();
+    const page = pages[0] || await this.browserContext.newPage();
+    try {
+      await page.goto("https://www.instagram.com/accounts/login/", {
+        waitUntil: "domcontentloaded",
+        timeout: 15e3
+      });
+    } catch {
+      console.warn("\u26A0\uFE0F Login page navigation slow, continuing...");
+    }
+    await this.startScreencast(page);
+    if (this.cdpSession) {
+      this.inputForwarder.attach(this.cdpSession);
+    }
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("kowalski:loginScreencastReady");
+    }
+    this.pollForLoginSuccess(page);
+  }
+  /**
+   * Stop the login screencast, detach input forwarding, and close the context.
+   * Cookies persist in the profile directory for future runs.
+   */
+  async stopLoginScreencast() {
+    console.log("\u{1F510} BrowserManager: Stopping login screencast...");
+    this.loginActive = false;
+    this.inputForwarder.detach();
+    await this.stopScreencast();
+    await this.close();
+  }
+  /**
+   * Forward a user input event from the renderer to the headless page.
+   */
+  async dispatchInput(event) {
+    await this.inputForwarder.dispatch(event);
+  }
+  /**
+   * Poll for successful Instagram login while the login screencast is active.
+   * On success, notifies the renderer and tears down the screencast.
+   */
+  async pollForLoginSuccess(page) {
+    while (this.loginActive && this.cdpSession) {
+      await new Promise((r) => setTimeout(r, 2e3));
+      if (!this.loginActive) break;
+      try {
+        const url = page.url();
+        if (url.includes("/accounts/login") || url.includes("/challenge")) continue;
+        if (url.includes("instagram.com")) {
+          const isLoggedIn = await this.checkLoginStateViaCDP(page);
+          if (isLoggedIn) {
+            console.log("\u2705 Login screencast: Instagram login confirmed");
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+              this.mainWindow.webContents.send("kowalski:loginSuccess");
+            }
+            await this.stopLoginScreencast();
+            return;
+          }
+        }
+      } catch {
+      }
+    }
+  }
   /**
    * Safely closes the current browser instance.
    */
   async close() {
     if (!this.browserContext) return;
+    await this.stopScreencast();
     try {
       console.log("\u{1F6D1} BrowserManager: Closing browser...");
       await this.browserContext.close();
@@ -27277,59 +27559,6 @@ var BrowserManager = class _BrowserManager {
       }
     } catch (error) {
       console.error("\u274C BrowserManager: Failed to wipe data:", error);
-    }
-  }
-  /**
-   * Launches a frameless overlay for login, locked to the UI.
-   */
-  async login(bounds, mainWindow2) {
-    console.log("\u{1F510} BrowserManager: Starting Single Vehicle Login Overlay...");
-    mainWindow2.setMovable(false);
-    try {
-      console.log("\u{1F50D} DEBUG login: Bounds received:", bounds);
-      const context = await this.launch({ headless: false, bounds });
-      console.log("\u{1F50D} DEBUG login: Context launched successfully");
-      const pages = context.pages();
-      console.log("\u{1F50D} DEBUG login: Pages count:", pages.length);
-      const page = pages.length > 0 ? pages[0] : await context.newPage();
-      console.log("\u{1F50D} DEBUG login: Got page, URL:", page.url());
-      context.on("page", async (newPage) => {
-        await new Promise((resolve2) => setTimeout(resolve2, 100));
-        const allPages = context.pages();
-        if (allPages.length > 1) {
-          console.log("\u{1F6AB} BrowserManager: Blocked attempt to open new window.");
-          try {
-            await newPage.close();
-          } catch (e) {
-          }
-        }
-      });
-      console.log("\u{1F30D} Waiting for Instagram Login page to be ready...");
-      try {
-        await page.waitForLoadState("domcontentloaded", { timeout: 1e4 });
-      } catch (e) {
-        console.log("\u26A0\uFE0F Page load state wait timed out, continuing anyway...");
-      }
-      try {
-        console.log("\u23F3 Waiting for user to complete login...");
-        const loginSuccess = await this.waitForLoginSuccessViaCDP(page, 3e5);
-        if (loginSuccess) {
-          console.log("\u2705 INSTAGRAM LOGIN CONFIRMED (Overlay)");
-          await this.close();
-          mainWindow2.setMovable(true);
-          return true;
-        } else {
-          throw new Error("Login timeout");
-        }
-      } catch (e) {
-        console.log("\u274C Login/Timeout failed.");
-        throw e;
-      }
-    } catch (error) {
-      console.error("\u26A0\uFE0F Login Overlay Failed/Cancelled:", error);
-      await this.close();
-      mainWindow2.setMovable(true);
-      return false;
     }
   }
   /**
@@ -27388,66 +27617,8 @@ var BrowserManager = class _BrowserManager {
     }
   }
   // =========================================================================
-  // Window Size Randomization
-  // =========================================================================
-  /**
-   * Generate randomized window dimensions per session for fingerprint diversity.
-   * Derives from actual screen size with random 70-92% scaling.
-   */
-  static generateWindowSize(headless) {
-    let screenWidth;
-    let screenHeight;
-    if (headless) {
-      screenWidth = 1920;
-      screenHeight = 1080;
-    } else {
-      try {
-        const workArea = import_electron2.screen.getPrimaryDisplay().workAreaSize;
-        screenWidth = workArea.width;
-        screenHeight = workArea.height;
-      } catch {
-        screenWidth = 1920;
-        screenHeight = 1080;
-      }
-    }
-    const widthRatio = 0.85 + Math.random() * 0.12;
-    const heightRatio = 0.85 + Math.random() * 0.12;
-    let width = Math.round(screenWidth * widthRatio);
-    let height = Math.round(screenHeight * heightRatio);
-    width = Math.max(width, 1440);
-    height = Math.max(height, 900);
-    return { width, height };
-  }
-  // =========================================================================
   // CDP-Based Login Detection (Undetectable)
   // =========================================================================
-  /**
-   * Wait for login success using URL polling + CDP accessibility tree.
-   * NO waitForSelector - that injects MutationObserver (bot detectable).
-   *
-   * @param page - Playwright page
-   * @param timeout - Maximum wait time in ms
-   * @returns true if login detected, false if timeout
-   */
-  async waitForLoginSuccessViaCDP(page, timeout) {
-    const startTime = Date.now();
-    const pollInterval = 1500;
-    while (Date.now() - startTime < timeout) {
-      const url = page.url();
-      if (url.includes("/accounts/login") || url.includes("/challenge")) {
-        await new Promise((r) => setTimeout(r, pollInterval));
-        continue;
-      }
-      if (url.includes("instagram.com")) {
-        const isLoggedIn = await this.checkLoginStateViaCDP(page);
-        if (isLoggedIn) {
-          return true;
-        }
-      }
-      await new Promise((r) => setTimeout(r, pollInterval));
-    }
-    return false;
-  }
   /**
    * Check login state using CDP accessibility tree.
    * Looks for navigation elements that only appear when logged in.
@@ -35560,7 +35731,7 @@ __export(composite_modes_exports, {
   multiply: () => multiply,
   names: () => names2,
   overlay: () => overlay,
-  screen: () => screen2,
+  screen: () => screen,
   srcOver: () => srcOver
 });
 function srcOver(src, dst, ops = 1) {
@@ -35607,7 +35778,7 @@ function add(src, dst, ops = 1) {
   const b = (sba + dba) / a;
   return { r, g, b, a };
 }
-function screen2(src, dst, ops = 1) {
+function screen(src, dst, ops = 1) {
   src.a *= ops;
   const a = dst.a + src.a - dst.a * src.a;
   const sra = src.r * src.a;
@@ -35710,7 +35881,7 @@ var names2 = [
   dstOver,
   multiply,
   add,
-  screen2,
+  screen,
   overlay,
   darken2,
   lighten2,
@@ -42942,6 +43113,7 @@ var Kowalski = class {
   page;
   sessionMemory = new SessionMemory();
   activeAgent = null;
+  stopped = false;
   constructor(context, apiKey, debugMode = false) {
     this.context = context;
     this.apiKey = apiKey;
@@ -42950,6 +43122,8 @@ var Kowalski = class {
   }
   /** Stop the active browsing agent externally (e.g. Cmd+Shift+K). */
   stop() {
+    this.stopped = true;
+    BrowserManager.getInstance().stopScreencast();
     if (this.activeAgent) {
       this.activeAgent.stop();
     }
@@ -42969,6 +43143,7 @@ var Kowalski = class {
     const existingPages = this.context.pages();
     const instagramPage = existingPages.find((p) => p.url().includes("instagram.com"));
     this.page = instagramPage || await this.context.newPage();
+    await BrowserManager.getInstance().startScreencast(this.page);
     this.ghost = new GhostMouse(this.page);
     this.scroll = new HumanScroll(this.page);
     const estimatedMaxCaptures = Math.max(150, Math.ceil(targetMinutes * 4));
@@ -43026,7 +43201,7 @@ var Kowalski = class {
       const feedRawDir = baseRawDir ? path6.join(baseRawDir, "feed") : void 0;
       const phases = config?.phases ?? ["stories", "feed"];
       let storiesElapsed = 0;
-      if (phases.includes("stories")) {
+      if (phases.includes("stories") && !this.stopped) {
         const storiesMaxMs = Infinity;
         console.log(`
 \u{1F4D6} Phase 1: Stories (no time limit \u2014 exits when stories end, model: ${ModelConfig.stories})`);
@@ -43055,7 +43230,7 @@ var Kowalski = class {
       } else {
         console.log("\u{1F4D6} Skipping stories phase");
       }
-      if (phases.includes("feed")) {
+      if (phases.includes("feed") && !this.stopped) {
         const feedMaxMs = targetDurationMs - (Date.now() - startTime);
         if (feedMaxMs > 3e4) {
           console.log(`
@@ -43125,6 +43300,7 @@ var Kowalski = class {
       }
     } finally {
       this.activeAgent = null;
+      await BrowserManager.getInstance().stopScreencast();
       console.log(`
 \u{1F4CA} Session Summary:`);
       console.log(`   - Total decisions: ${totalDecisions}`);
@@ -43258,136 +43434,93 @@ var DigestGeneration = class {
     const storyCount = captures.filter((c2) => c2.source === "story").length;
     const profileCount = captures.filter((c2) => c2.source === "profile").length;
     const carouselCount = captures.filter((c2) => c2.source === "carousel").length;
-    return `You are a STRATEGIC INTELLIGENCE ANALYST creating a personalized morning briefing for ${config.userName}.
+    const sourceParts = [];
+    if (feedCount) sourceParts.push(`${feedCount} feed`);
+    if (storyCount) sourceParts.push(`${storyCount} stories`);
+    if (profileCount) sourceParts.push(`${profileCount} profile`);
+    if (carouselCount) sourceParts.push(`${carouselCount} carousel`);
+    return `You are a text-only digest writer. You will receive ${captures.length} Instagram screenshots (${sourceParts.join(", ")}) captured on ${dayName}, ${dateStr}.
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-I. YOUR TASK
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+Your job: extract every concrete fact visible in the screenshots and organize them by Instagram account.
 
-You are viewing ${captures.length} Instagram screenshots captured during a browsing session.
-- Feed posts: ${feedCount}
-- Stories: ${storyCount}
-- Profile views: ${profileCount}
-- Carousel slides: ${carouselCount}
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+GROUPING RULES
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-Analyze ALL images and synthesize them into ONE comprehensive digest.
+1. Create ONE section per unique @handle you can identify in the screenshots.
+2. The section "heading" field MUST be exactly the @handle as it appears (e.g. "@espn", "@nba"). Nothing else in the heading \u2014 no emojis, no descriptions.
+3. If you cannot read the handle, use "@unknown_N" (incrementing N).
+4. Order sections so that news accounts and accounts matching the user's interests appear first, then order remaining sections by how many frames/screenshots that account had (most first).
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-II. USER PROFILE
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+BULLET RULES \u2014 DENSITY IS MANDATORY
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-Name: ${config.userName}
-Location: ${config.location || "Not specified"}
-Date: ${dayName}, ${dateStr}
+Each section's "content" array contains 1\u20135 bullets (strings). Rules:
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-III. AD & SPONSORED CONTENT FILTERING
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+A) EVERY bullet MUST contain at least one concrete fact extracted from the screenshot:
+   a number, score, name, date, quoted overlay text, product & price, headline text, or specific visual detail.
 
-Skip ads and sponsored posts unless they contain genuinely newsworthy content.
-Skip screenshots that are mostly blank, loading, or unclear.
+B) BANNED phrasings \u2014 if any bullet contains these, the output is a failure:
+   "posted about", "shared a story about", "graphics showing", "content related to",
+   "images of", "a post featuring", "the photo shows", "the caption says",
+   "shared a", "posted a", "featuring a".
+   Instead, write the actual information.
 
-INCLUDE (even if commercial):
-- Content from brands or organizations with newsworthy updates
-- News organization updates (even with subscription CTAs)
-- Personal accounts sharing genuine experiences
-- Entertainment/sports content (games, shows, events)
+C) MERGE rule: if multiple frames show the same underlying information (e.g. video
+   frames of one play, multi-slide carousel on one topic), combine into ONE bullet.
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-IV. ANALYSIS RULES (CRITICAL - VIOLATIONS = FAILURE)
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+D) OMIT rule: if a frame is unreadable, a loading spinner, a pure logo with no info,
+   or adds nothing new, skip it entirely. Do not pad bullet counts.
 
-1. **ATTRIBUTION (MANDATORY)**:
-   - Every bullet MUST start with **@handle** in bold (extract username from screenshot)
-   - If you cannot read the handle clearly, use **@[unclear]** but still include the content
-   - Format: "\u2022 **@handle**: [Fact]. [Contextual Analysis if warranted]."
+E) No "see screenshot", no references to image numbers or image indices.
 
-2. **DEPTH - THE "SO WHAT?" PROTOCOL**:
-   For HIGH-VALUE content (news, user interests, breaking updates):
-   - Level 1: What's literally in the image
-   - Level 2: What trend does this connect to?
-   - Level 3: Why should the reader care?
+F) Examples of correct vs. incorrect bullets:
+   BAD:  "NBA shared graphics about last night's game."
+   GOOD: "Lakers 118, Warriors 112 \u2014 LeBron 34 pts / 8 reb / 6 ast, Curry 29 on 10-22 FG."
 
-   For LOW-VALUE content (generic updates, lifestyle posts):
-   - Level 1 only: Just the facts, one sentence
+   BAD:  "Posted about a new sneaker release."
+   GOOD: "Nike Air Max Dn8 releasing Apr 17, $180, colorway 'Midnight Navy'."
 
-3. **PRIORITIZATION**:
-   - Breaking news / time-sensitive content = HIGH PRIORITY
-   - Stories from friends/followed accounts = HIGH (personal relevance)
-   - Generic lifestyle posts = LOW (brief mention or skip)
+   BAD:  "Shared a story about weather."
+   GOOD: "Heat advisory through Friday, high of 108\xB0F in Phoenix."
 
-4. **NO HALLUCINATIONS**:
-   - Only report what you can SEE in the screenshots
-   - If you can't read text clearly, say "[text unclear]"
-   - Label any inference as [Contextual Analysis: ...]
-   - NEVER invent emotional narrative ("celebrating team spirit," "fostering connections")
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+TONE & CONSTRAINTS
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-5. **NEGATIVE CONSTRAINTS**:
-   \u274C Do NOT use filler phrases: "The photo shows," "The caption says," "Interestingly"
-   \u274C Do NOT summarize 5 posts into 1 bland bullet
-   \u274C Do NOT mix handles across bullet points
-   \u274C Do NOT generate deep analysis for ads or sponsored content
-   \u274C Do NOT report on duplicate/similar screenshots multiple times
+- Pure extraction. Only report what is literally visible in the screenshots + any JSON metadata provided.
+- No outside context, no "why it matters", no implications, no LLM training knowledge.
+- If text is partially unreadable, transcribe what you can and mark unclear portions with [unclear].
+- Skip ads and sponsored posts unless they contain genuinely newsworthy facts.
+- Skip blank, loading, or duplicate screenshots.
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-V. OUTPUT STRUCTURE
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+OUTPUT FORMAT
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-Return valid JSON with this structure:
+Return valid JSON matching this schema exactly:
+
 {
-    "title": "[Compelling headline based on top story - be specific and engaging]",
-    "subtitle": "[Key strategic insight in one sentence] \u2014 ${dayName}, ${dateStr}",
-    "sections": [
-        {
-            "heading": "[Your chosen heading with emoji - based on content themes you observe]",
-            "content": [
-                "\u2022 **@handle**: [Fact from screenshot]. [Contextual Analysis: trend/implication].",
-                "\u2022 **@handle**: [Another fact with depth]."
-            ]
-        }
-    ]
+  "title": "Instagram Digest \u2014 ${dayName}, ${dateStr}",
+  "subtitle": "[N] accounts, [M] items captured",
+  "sections": [
+    {
+      "heading": "@handle",
+      "content": [
+        "Concrete fact bullet 1.",
+        "Concrete fact bullet 2."
+      ]
+    }
+  ]
 }
 
-**SECTION RULES** (CRITICAL):
-- CREATE YOUR OWN HEADINGS based on the content themes you observe
-- Group related content into logical sections with descriptive headings
-- Use emojis at the start of each heading (e.g., "\u{1F3C8} Football Updates", "\u{1F310} World News", "\u{1F3AC} Entertainment")
-- Do NOT use generic headings like "Section 1" - be specific to the content
-- Aim for 2-5 sections depending on content variety
-- Each section should have a clear theme that groups related posts
+- "title": always "Instagram Digest \u2014 ${dayName}, ${dateStr}".
+- "subtitle": fill in the actual count of unique accounts (N) and total meaningful items (M) you extracted.
+- "sections": one object per account. "heading" is the raw @handle. "content" is 1\u20135 fact-dense bullet strings.
 
-**HEADING EXAMPLES** (create your own based on what you see):
-- "\u{1F3C8} Cal Football Recruiting" (if you see multiple football-related posts)
-- "\u{1F30D} Breaking News" (for urgent/important news items)
-- "\u{1F3AD} Entertainment & Pop Culture" (for entertainment content)
-- "\u{1F4F1} Tech & Innovation" (for technology content)
-- "\u{1F3E0} Local Bay Area" (for location-specific content)
-- "\u{1F465} Friends & Following" (for personal updates from followed accounts)
-
-TARGET: 15-25 high-quality bullets total across sections.
-SKIP: Ads, sponsored content, empty/unclear screenshots, duplicate content.
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-VI. EXAMPLES
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-\u2705 CORRECT (with depth):
-\u2022 **@CalFootball**: Posted recruiting update showing new 5-star commit. [Contextual Analysis: This brings Cal's 2026 class to #18 nationally during early signing period.]
-
-\u2705 CORRECT (quick hit):
-\u2022 **@friend_account**: Shared a sunset photo from Malibu.
-
-\u274C WRONG (missing handle):
-\u2022 Someone posted about a new restaurant opening...
-
-\u274C WRONG (hallucinating):
-\u2022 **@UniversityAccount**: "Fostering lifelong connections through education" (if you can't read this in the screenshot, don't invent it)
-
-\u2705 CORRECT SECTION HEADING (based on content):
-"\u{1F3C8} Cal Football & ACC News" (when you see multiple football posts)
-
-\u274C WRONG SECTION HEADING (generic):
-"Strategic Interests" (too generic - be specific to what you observe)`;
+Do NOT add any keys beyond title, subtitle, sections, heading, content.
+Do NOT wrap the JSON in markdown code fences.`;
   }
   /**
    * Parse the LLM response into a structured AnalysisObject.
@@ -43664,9 +43797,8 @@ var RunManager = class _RunManager {
       return;
     }
     this.status = "running";
-    const headless = options?.headless ?? false;
     const phases = options?.phases ?? ["stories", "feed"];
-    console.log(`\u{1F680} Run started (headless: ${headless}, phases: ${phases.join(", ")})`);
+    console.log(`\u{1F680} Run started (phases: ${phases.join(", ")})`);
     const MAX_DURATION_MS = 90 * 60 * 1e3;
     const browserManager = BrowserManager.getInstance();
     let context = null;
@@ -43687,8 +43819,8 @@ var RunManager = class _RunManager {
         this.finishRun();
         return;
       }
-      console.log(`\u{1F680} Launching browser (headless: ${headless})...`);
-      context = await browserManager.launch({ headless });
+      console.log("\u{1F680} Launching browser...");
+      context = await browserManager.launch();
       console.log("\u{1F680} Validating Instagram session...");
       const sessionCheck = await browserManager.validateSession();
       if (!sessionCheck.valid) {
@@ -43714,7 +43846,7 @@ var RunManager = class _RunManager {
       const storiesFilterPromise = storiesFilter.start();
       const feedFilterPromise = feedFilter.start();
       console.log("\u{1F680} Browsing Instagram...");
-      const scraper = new Kowalski(context, apiKey, !headless);
+      const scraper = new Kowalski(context, apiKey, false);
       this.activeScraper = scraper;
       const session2 = await scraper.browseAndCapture(
         MAX_DURATION_MS / 6e4,
@@ -43862,24 +43994,24 @@ var isQuitting = false;
 var mainWindow = null;
 var SHARED_PARTITION = "persist:instagram_shared";
 var createWindow = () => {
-  const width = 1280 + Math.floor(Math.random() * 100);
-  const height = 800 + Math.floor(Math.random() * 100);
   mainWindow = new import_electron7.BrowserWindow({
-    width,
-    height,
+    width: KOWALSKI_VIEWPORT.width,
+    height: KOWALSKI_VIEWPORT.height,
+    useContentSize: true,
+    minWidth: KOWALSKI_VIEWPORT.width,
+    minHeight: KOWALSKI_VIEWPORT.height,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     title: "Kowalski",
     backgroundColor: "#F9F8F5",
     // Warm Alabaster for LCD antialiasing
     frame: true,
-    // titleBarStyle property removed to use system default
     webPreferences: {
       preload: import_path6.default.join(__dirname3, "../preload/preload.cjs"),
       webviewTag: true,
       partition: SHARED_PARTITION
-      // Force main window to check this (though webview usually isolates)
     },
-    // Set icon for Windows/Linux (and Mac if packaged)
-    // Use the processed, standardized icon
     icon: import_path6.default.join(__dirname3, "../../build/icon-standard.png")
   });
   if (process.platform === "darwin" && process.env.VITE_DEV_SERVER_URL) {
@@ -43887,6 +44019,7 @@ var createWindow = () => {
     import_electron7.app.dock?.setIcon(iconPath);
   }
   RunManager.getInstance().setMainWindow(mainWindow);
+  BrowserManager.getInstance().setMainWindow(mainWindow);
   mainWindow.on("page-title-updated", (e) => {
     e.preventDefault();
   });
@@ -44089,14 +44222,43 @@ function setupIPCHandlers() {
       return null;
     }
   });
-  import_electron7.ipcMain.handle("run:start", async () => {
-    await RunManager.getInstance().startRun();
+  import_electron7.ipcMain.handle("run:start", () => {
+    RunManager.getInstance().startRun();
   });
-  import_electron7.ipcMain.handle("run:stop", async () => {
+  import_electron7.ipcMain.handle("run:stop", () => {
     RunManager.getInstance().stopRun();
   });
   import_electron7.ipcMain.handle("run:status", () => {
     return RunManager.getInstance().getStatus();
+  });
+  import_electron7.ipcMain.handle("login:startScreencast", () => {
+    BrowserManager.getInstance().startLoginScreencast();
+  });
+  import_electron7.ipcMain.handle("login:stopScreencast", () => {
+    BrowserManager.getInstance().stopLoginScreencast();
+  });
+  import_electron7.ipcMain.on("kowalski:input", (_event, payload) => {
+    BrowserManager.getInstance().dispatchInput(payload);
+  });
+  import_electron7.ipcMain.on("kowalski:paste", (_event, text) => {
+    const pasteText = text || import_electron7.clipboard.readText();
+    if (pasteText) {
+      BrowserManager.getInstance().dispatchInput({ type: "paste", text: pasteText });
+    }
+  });
+  import_electron7.ipcMain.on("kowalski:copySelection", async () => {
+    try {
+      const ctx = BrowserManager.getInstance().getContext();
+      if (!ctx) return;
+      const pages = ctx.pages();
+      const page = pages[0];
+      if (!page) return;
+      const text = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+      if (text) {
+        import_electron7.clipboard.writeText(text);
+      }
+    } catch {
+    }
   });
   import_electron7.ipcMain.handle("settings:set-secure", async (_event, { apiKey }) => {
     return SecureKeyManager.getInstance().setKey(apiKey);
@@ -44127,31 +44289,6 @@ function setupIPCHandlers() {
       return { valid: true };
     } catch (error) {
       return { valid: false, error: "network_error" };
-    }
-  });
-  import_electron7.ipcMain.handle("auth:login", async (_event, bounds) => {
-    if (!mainWindow) return false;
-    return BrowserManager.getInstance().login(bounds, mainWindow);
-  });
-  import_electron7.ipcMain.handle("test-headless", async () => {
-    try {
-      console.log("\u{1F916} Starting BrowserManager (Persistent)...");
-      const manager = BrowserManager.getInstance();
-      const context = await manager.launch({ headless: false });
-      const page = await context.newPage();
-      console.log("\u{1F30D} Navigating to Instagram...");
-      await page.goto("https://www.instagram.com/");
-      try {
-        await page.waitForSelector('svg[aria-label="Home"]', { timeout: 1e4 });
-        console.log("\u2705 INSTAGRAM LOGIN CONFIRMED");
-        return "Success: Logged in automatically (Persistent Profile)";
-      } catch (e) {
-        console.log("\u274C NOT LOGGED IN / SELECTOR TIMEOUT");
-        return "Failed: Still on login page. Please log in manually to save territory.";
-      }
-    } catch (error) {
-      console.error("CRITICAL PW ERROR:", error);
-      return `Error: ${error.message}`;
     }
   });
   import_electron7.ipcMain.handle("clear-instagram-session", async () => {

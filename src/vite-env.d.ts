@@ -2,14 +2,9 @@
 
 interface Window {
     api: {
-        startAgent: () => Promise<void>;
         resetSession: () => Promise<boolean>;
         clearInstagramSession: () => Promise<boolean>;
-        saveLoginSession: () => Promise<void>;
-        onLoginSuccess: (callback: () => void) => () => void;
-        testHeadless: () => Promise<string>;
-        saveSessionDirectly: (cookies: string) => Promise<void>;
-        manualSessionSave: () => void;
+        checkInstagramSession: () => Promise<{ isActive: boolean; reason: string }>;
         settings: {
             get: () => Promise<any>;
             set: (settings: any) => Promise<boolean>;
@@ -31,10 +26,23 @@ interface Window {
             stop: () => Promise<void>;
             getStatus: () => Promise<'idle' | 'running'>;
         };
+        screencast: {
+            onFrame: (cb: (data: string) => void) => () => void;
+            onEnded: (cb: () => void) => () => void;
+        };
         analyses: {
             get: () => Promise<any[]>;
             set: (value: any[]) => Promise<boolean>;
             getContent: (id: string) => Promise<any | null>;
         };
+        login: {
+            startScreencast: () => Promise<void>;
+            stopScreencast: () => Promise<void>;
+            onReady: (cb: () => void) => () => void;
+            onSuccess: (cb: () => void) => () => void;
+        };
+        sendInput: (event: any) => void;
+        paste: (text?: string) => void;
+        copySelection: () => void;
     }
 }
