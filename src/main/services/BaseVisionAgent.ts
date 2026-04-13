@@ -481,7 +481,7 @@ export abstract class BaseVisionAgent {
      * Smart post-action delay based on what just happened.
      * Post navigations and carousel advances need more time than scrolls/hovers.
      */
-    private async settleAfterAction(decision: VisionAction): Promise<void> {
+    protected async settleAfterAction(decision: VisionAction): Promise<void> {
         if (decision.action === 'click' && decision.element !== undefined) {
             const el = this.currentElements.get(decision.element);
             if (el) {

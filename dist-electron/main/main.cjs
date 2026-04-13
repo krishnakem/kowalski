@@ -42511,18 +42511,18 @@ HOW INSTAGRAM STORIES WORK
 - When all stories are exhausted, the viewer closes and you return to the feed.
 
 KEY ACTIONS
-- click(n) to click a labeled element (story avatars, dismiss buttons, close buttons)
-- press("ArrowRight") to advance to the next story frame \u2014 this is your PRIMARY action once inside the viewer
-- press("Escape") to exit the story viewer
-- scroll("down") if you need to scroll the feed to find story avatars
+- click(n) to click a labeled element \u2014 this is your ONLY action type
+- To advance to the next story frame, click the Next button (>) visible on the right side of the story viewer
+- To exit, click the X / Close button in the top-right corner
+- scroll("down") only if you need to scroll the feed to find story avatars
 
-Most turns inside the story viewer should just be press("ArrowRight"). Stories navigation is mechanical.
+Most turns inside the story viewer should just be clicking the Next button. Stories navigation is mechanical.
 
 WORKFLOW SCENARIOS
 You were shown 3 reference images at the start of this session. Use them as your guide:
 
 - "stories1 scenario" \u2014 You see the feed with story avatars at the top. Click the leftmost avatar with a gradient ring.
-- "stories2 scenario" \u2014 You're inside the story viewer. Press ArrowRight to advance to the next frame.
+- "stories2 scenario" \u2014 You're inside the story viewer. Click the Next button (>) to advance to the next frame.
 - "stories.end scenario" \u2014 You've reached the last story. Click the X in the top-right to exit back to the feed.
 
 When deciding what to do, identify which scenario matches your current screen.
@@ -42566,28 +42566,41 @@ var StoriesAgent = class extends BaseVisionAgent {
   }
   async executeAction(decision) {
     const result = await super.executeAction(decision);
-    this.lastActionWasContentCapture = true;
-    const shouldAutoPause = decision.action === "click" || decision.action === "press" && decision.key === "ArrowRight";
+    const shouldAutoPause = (() => {
+      if (decision.action === "click" && decision.element !== void 0) {
+        const el = this.currentElements.get(decision.element);
+        if (el) {
+          const text = (el.text || el.ariaLabel || "").toLowerCase();
+          if (/^(next|previous)$/.test(text)) return true;
+          if (el.ariaLabel?.toLowerCase().includes("story by")) return true;
+        }
+      }
+      if (decision.action === "press" && decision.key === "ArrowRight") return true;
+      return false;
+    })();
     if (shouldAutoPause) {
-      await this.delay(3e3);
-      await this.page.keyboard.press(" ");
-      await this.delay(200);
-      const stillPlaying = await this.page.evaluate(
-        () => document.querySelector('[aria-label="Pause"]') !== null
-      ).catch(() => false);
-      if (stillPlaying) {
+      const isAvatarClick = decision.element !== void 0 && (this.currentElements.get(decision.element)?.ariaLabel || "").toLowerCase().includes("story by");
+      await this.delay(isAvatarClick ? 3e3 : 1e3);
+      const pauseClicked = await this.page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('div[role="button"], button'));
+        const pauseBtn = buttons.find((el) => el.textContent?.trim() === "Pause");
+        if (pauseBtn) {
+          pauseBtn.click();
+          return true;
+        }
+        return false;
+      }).catch(() => false);
+      if (pauseClicked) {
+        await this.delay(200);
+        console.log("  \u23F8\uFE0F Auto-pause: clicked Pause button");
+        this.collector.appendLog("\u23F8\uFE0F Auto-pause: clicked Pause button");
+      } else {
         await this.page.keyboard.press(" ");
         await this.delay(200);
-        const retriedStillPlaying = await this.page.evaluate(
-          () => document.querySelector('[aria-label="Pause"]') !== null
-        ).catch(() => false);
-        console.log(`  \u23F8\uFE0F Auto-pause: retry needed, final=${retriedStillPlaying ? "FAILED" : "paused"}`);
-        this.collector.appendLog(`\u23F8\uFE0F Auto-pause: retry needed, final=${retriedStillPlaying ? "FAILED" : "paused"}`);
-      } else {
-        console.log("  \u23F8\uFE0F Auto-pause: paused on first try");
-        this.collector.appendLog("\u23F8\uFE0F Auto-pause: paused on first try");
+        console.log("  \u23F8\uFE0F Auto-pause: Pause button not found, used Space fallback");
+        this.collector.appendLog("\u23F8\uFE0F Auto-pause: Pause button not found, used Space fallback");
       }
-      if (decision.action === "press" && decision.key === "ArrowRight") {
+      if (decision.action === "press" && decision.key === "ArrowRight" || decision.action === "click" && decision.element !== void 0 && /^(next)$/i.test((this.currentElements.get(decision.element)?.text || this.currentElements.get(decision.element)?.ariaLabel || "").trim())) {
         const storyViewerOpen = await this.page.evaluate(() => {
           if (document.querySelector('[aria-label="Story viewer"]')) return true;
           if (document.querySelector('[aria-label="Close"]')?.closest('[role="dialog"]')) return true;
@@ -42608,6 +42621,10 @@ var StoriesAgent = class extends BaseVisionAgent {
       }
     }
     return result;
+  }
+  async settleAfterAction(_decision) {
+    this.lastActionWasContentCapture = true;
+    await this.delay(300);
   }
   getWorkflowSummary() {
     return `I've studied the reference images. Here's my workflow:

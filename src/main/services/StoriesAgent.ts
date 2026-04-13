@@ -55,43 +55,56 @@ export class StoriesAgent extends BaseVisionAgent {
     protected async executeAction(decision: VisionAction): Promise<string> {
         const result = await super.executeAction(decision);
 
-        // Every story frame is content worth capturing
-        this.lastActionWasContentCapture = true;
-
         // Auto-pause after actions that change the story frame
-        const shouldAutoPause =
-            decision.action === 'click' ||
-            (decision.action === 'press' && decision.key === 'ArrowRight');
+        const shouldAutoPause = (() => {
+            if (decision.action === 'click' && decision.element !== undefined) {
+                const el = this.currentElements.get(decision.element);
+                if (el) {
+                    const text = (el.text || el.ariaLabel || '').toLowerCase();
+                    // Next/Previous navigation buttons
+                    if (/^(next|previous)$/.test(text)) return true;
+                    // Clicking a story avatar to open stories
+                    if (el.ariaLabel?.toLowerCase().includes('story by')) return true;
+                }
+            }
+            // Keep ArrowRight as fallback in case LLM still uses it
+            if (decision.action === 'press' && decision.key === 'ArrowRight') return true;
+            return false;
+        })();
 
         if (shouldAutoPause) {
-            await this.delay(3000);
+            const isAvatarClick = decision.element !== undefined &&
+                (this.currentElements.get(decision.element)?.ariaLabel || '').toLowerCase().includes('story by');
 
-            await this.page.keyboard.press(' ');
-            await this.delay(200);
+            await this.delay(isAvatarClick ? 3000 : 1000);
 
-            // Verify pause worked — if Pause button still visible, story is still playing
-            const stillPlaying = await this.page.evaluate(() =>
-                document.querySelector('[aria-label="Pause"]') !== null
-            ).catch(() => false);
+            // Click the Pause button directly instead of pressing Space (avoids focus issues)
+            const pauseClicked = await this.page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('div[role="button"], button'));
+                const pauseBtn = buttons.find(el => el.textContent?.trim() === 'Pause');
+                if (pauseBtn) {
+                    (pauseBtn as HTMLElement).click();
+                    return true;
+                }
+                return false;
+            }).catch(() => false);
 
-            if (stillPlaying) {
-                // Retry once
+            if (pauseClicked) {
+                await this.delay(200);
+                console.log('  ⏸️ Auto-pause: clicked Pause button');
+                this.collector.appendLog('⏸️ Auto-pause: clicked Pause button');
+            } else {
+                // Fallback: try Space in case Pause button wasn't found
                 await this.page.keyboard.press(' ');
                 await this.delay(200);
-
-                const retriedStillPlaying = await this.page.evaluate(() =>
-                    document.querySelector('[aria-label="Pause"]') !== null
-                ).catch(() => false);
-
-                console.log(`  ⏸️ Auto-pause: retry needed, final=${retriedStillPlaying ? 'FAILED' : 'paused'}`);
-                this.collector.appendLog(`⏸️ Auto-pause: retry needed, final=${retriedStillPlaying ? 'FAILED' : 'paused'}`);
-            } else {
-                console.log('  ⏸️ Auto-pause: paused on first try');
-                this.collector.appendLog('⏸️ Auto-pause: paused on first try');
+                console.log('  ⏸️ Auto-pause: Pause button not found, used Space fallback');
+                this.collector.appendLog('⏸️ Auto-pause: Pause button not found, used Space fallback');
             }
 
             // Story-end detection: only after ArrowRight, check if viewer closed
-            if (decision.action === 'press' && decision.key === 'ArrowRight') {
+            if (decision.action === 'press' && decision.key === 'ArrowRight' ||
+                (decision.action === 'click' && decision.element !== undefined &&
+                 /^(next)$/i.test((this.currentElements.get(decision.element)?.text || this.currentElements.get(decision.element)?.ariaLabel || '').trim()))) {
                 const storyViewerOpen = await this.page.evaluate(() => {
                     // Check for story-viewer-specific DOM elements
                     if (document.querySelector('[aria-label="Story viewer"]')) return true;
@@ -117,6 +130,11 @@ export class StoriesAgent extends BaseVisionAgent {
         }
 
         return result;
+    }
+
+    protected async settleAfterAction(_decision: VisionAction): Promise<void> {
+        this.lastActionWasContentCapture = true;
+        await this.delay(300);
     }
 
     protected getWorkflowSummary(): string {

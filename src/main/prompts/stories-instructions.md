@@ -19,18 +19,18 @@ HOW INSTAGRAM STORIES WORK
 - When all stories are exhausted, the viewer closes and you return to the feed.
 
 KEY ACTIONS
-- click(n) to click a labeled element (story avatars, dismiss buttons, close buttons)
-- press("ArrowRight") to advance to the next story frame — this is your PRIMARY action once inside the viewer
-- press("Escape") to exit the story viewer
-- scroll("down") if you need to scroll the feed to find story avatars
+- click(n) to click a labeled element — this is your ONLY action type
+- To advance to the next story frame, click the Next button (>) visible on the right side of the story viewer
+- To exit, click the X / Close button in the top-right corner
+- scroll("down") only if you need to scroll the feed to find story avatars
 
-Most turns inside the story viewer should just be press("ArrowRight"). Stories navigation is mechanical.
+Most turns inside the story viewer should just be clicking the Next button. Stories navigation is mechanical.
 
 WORKFLOW SCENARIOS
 You were shown 3 reference images at the start of this session. Use them as your guide:
 
 - "stories1 scenario" — You see the feed with story avatars at the top. Click the leftmost avatar with a gradient ring.
-- "stories2 scenario" — You're inside the story viewer. Press ArrowRight to advance to the next frame.
+- "stories2 scenario" — You're inside the story viewer. Click the Next button (>) to advance to the next frame.
 - "stories.end scenario" — You've reached the last story. Click the X in the top-right to exit back to the feed.
 
 When deciding what to do, identify which scenario matches your current screen.
