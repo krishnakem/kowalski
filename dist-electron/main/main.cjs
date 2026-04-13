@@ -27095,6 +27095,7 @@ var BrowserManager = class _BrowserManager {
         extraArgs.push(`--window-size=${config.bounds.width},${config.bounds.height}`);
       } else {
         const windowSize = _BrowserManager.generateWindowSize(config.headless);
+        extraArgs.push("--app=https://www.instagram.com/");
         extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
         if (!config.headless) {
           try {

@@ -75,6 +75,7 @@ export class BrowserManager {
             } else {
                 // Randomized window size per session for fingerprint diversity
                 const windowSize = BrowserManager.generateWindowSize(config.headless);
+                extraArgs.push('--app=https://www.instagram.com/');
                 extraArgs.push(`--window-size=${windowSize.width},${windowSize.height}`);
 
                 // Center the window on screen so it doesn't open at a random position
