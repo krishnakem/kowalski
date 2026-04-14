@@ -19,46 +19,54 @@ Kowalski is built around a three-agent pipeline. Each agent has a single job and
 
 The whole run is time-bounded (configurable, default 90 minutes max), and the agents use [GhostMouse](src/main/services/GhostMouse.ts) and [HumanScroll](src/main/services/HumanScroll.ts) plus a stealth-patched Chromium so the activity blends into normal browsing.
 
+## Gets Better The More You Run It
+
+Kowalski keeps a lightweight memory of past sessions via [SessionMemory](src/main/services/SessionMemory.ts), stored at `{userData}/session_memory/summaries.json`. Each completed run adds a compact summary — which accounts produced the most useful captures, which phases were productive, where the agent stalled or recovered — and the most recent summaries are folded into the navigator's context on the next run.
+
+The practical effect:
+
+- **Sharper capture decisions.** The agent learns which accounts tend to post signal vs. noise on your feed and spends more attention where it pays off.
+- **Fewer dead ends.** Patterns of getting stuck (particular popup types, layouts, carousel edge cases) surface as hints in subsequent runs, so recovery is faster.
+- **Tuned to your feed.** Because the memory is local to your machine, the agent specialises to *your* Instagram — the accounts you follow, the kinds of posts you care about, the rhythm of your usage.
+
+Memory is capped at the last 20 sessions and costs nothing to maintain (it's pure file I/O, no LLM calls). You can reset it any time with **Cmd+Shift+R** or the Reset button in Settings.
+
 ## Tech Stack
 
 - **Desktop shell** — Electron 39 with a custom main-process build pipeline ([scripts/build-electron.mjs](scripts/build-electron.mjs))
 - **Browser automation** — Playwright + `playwright-extra` + `puppeteer-extra-plugin-stealth`
 - **Frontend** — React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, Radix primitives, Framer Motion
 - **AI** — Claude API (Anthropic) — Sonnet 4.6 for navigation and vision, Haiku 4.5 for text-only digest synthesis
-- **Storage** — `better-sqlite3` (local archive of digests), `electron-store` (settings), macOS Keychain / OS keyring via [SecureKeyManager](src/main/services/SecureKeyManager.ts) for the API key
+- **Storage** — JSON records on disk for the digest archive, `electron-store` for settings and indexing, `safeStorage`-encrypted API key via [SecureKeyManager](src/main/services/SecureKeyManager.ts) (encryption key held in macOS Keychain)
 - **Live preview** — CDP screencast piped to a [LiveScreencast](src/components/LiveScreencast.tsx) React component so you can watch the agent work
 
-## Getting Started
+## Download
 
-### Prerequisites
+The latest release is available on GitHub:
 
-- Node.js v18+
-- npm
-- An Anthropic API key (set in-app; stored in the OS keychain)
-- For the packaged `.app`: macOS on Apple Silicon (arm64)
+**[Download Kowalski v0.1.0 →](https://github.com/krishnakem/kowalski/releases/latest)**
 
-### Run the packaged app
+Grab the `Kowalski-0.1.0-arm64.dmg` asset from the release page.
 
-```sh
-open release/mac-arm64/Kowalski.app
-```
+**Requirements:** macOS on Apple Silicon (M1 / M2 / M3 / M4). Intel Macs are not supported.
 
-The bundle is self-contained — its own Chromium ships inside `Contents/Resources/playwright-browsers/`, so there's nothing to install on the target machine. Because the build is unsigned, the first launch may require right-click → **Open** to bypass Gatekeeper.
+### Disclaimer
 
-### Building the .app
+Instagram's terms of service prohibit automated access, and Instagram actively works to prevent AI agents and bots from using the platform. Running Kowalski may result in rate limiting, challenges, temporary restrictions, or permanent suspension of your Instagram account.
 
-```sh
-npm install
-npm run dist:dir
-```
+**Use of Kowalski is entirely at your own risk.** I am not responsible for any consequences that arise from running this software, including but not limited to account bans, data loss, API costs, or any other issues. This is an experimental personal project provided as-is, with no warranty of any kind.
 
-`dist:dir` ([package.json](package.json)) chains: TypeScript + Vite build → Electron main bundle → [stage Playwright Chromium](scripts/stage-playwright-browsers.mjs) → [generate icon](scripts/generate-icns.mjs) → `electron-builder --mac --dir`. Output lands at `release/mac-arm64/Kowalski.app/`.
+### Install
 
-Unsigned, unnotarized, arm64 only — for local use, not distribution.
+1. Open the downloaded `.dmg` and drag **Kowalski** into your `Applications` folder.
+2. On first launch, right-click `Kowalski.app` → **Open** → **Open**. This bypasses Gatekeeper for the unsigned build — you only need to do it once.
+
+
+The app is self-contained — its own Chromium ships inside the bundle, so there's nothing else to install.
 
 ## Configuration
 
-Set your Anthropic API key in the app's **Settings** page — it's stored in the OS keychain via [SecureKeyManager](src/main/services/SecureKeyManager.ts), not in plaintext on disk.
+Set your Anthropic API key in the app's **Settings** page — it's `safeStorage`-encrypted via [SecureKeyManager](src/main/services/SecureKeyManager.ts) before being written to disk, with the encryption key held in macOS Keychain.
 
 Models are centralised in [src/shared/modelConfig.ts](src/shared/modelConfig.ts) and every one is overridable via environment variable:
 
@@ -77,46 +85,48 @@ Models are centralised in [src/shared/modelConfig.ts](src/shared/modelConfig.ts)
 
 ```
 src/
-├── main/                         # Electron main process
-│   ├── main.ts                   # Entry point, window + IPC handlers
-│   ├── prompts/                  # Markdown prompts shipped to the agents
+├── main/                          # Electron main process
+│   ├── main.ts                    # Entry point, window + IPC handlers, custom protocol
+│   ├── prompts/                   # Markdown prompts shipped to the agents
 │   │   ├── navigator-agent.md
 │   │   ├── stories-instructions.md
 │   │   ├── feed-instructions.md
 │   │   ├── capabilities.md
-│   │   └── examples/
+│   │   └── examples/              # Few-shot screenshots + action traces
 │   └── services/
-│       ├── Kowalski.ts           # Phase orchestrator (stories → feed)
-│       ├── RunManager.ts         # Run lifecycle: start, stop, status
-│       ├── BrowserManager.ts     # Playwright lifecycle + CDP screencast
-│       ├── BaseVisionAgent.ts    # Abstract screenshot → Claude → act loop
-│       ├── StoriesAgent.ts       # Phase 1 — stories
-│       ├── FeedAgent.ts          # Phase 2 — feed
-│       ├── Extractor.ts          # Phase 2.5 — async per-image extraction
-│       ├── DigestGeneration.ts   # Phase 3 — text-only editorial synthesis
-│       ├── AnalysisGenerator.ts  # Insights pass over the digest
-│       ├── ContentVision.ts      # Shared Claude vision call helpers
-│       ├── ImageTagger.ts        # Per-image tagging utilities
-│       ├── ScreenshotCollector.ts# raw/ + sidecar writer, session log
-│       ├── SessionMemory.ts      # Cross-session memory digest
-│       ├── GhostMouse.ts         # Human-like mouse paths (Bezier + jitter)
-│       ├── HumanScroll.ts        # Human-like scroll dynamics
-│       ├── Scroller.ts           # Lower-level scroll primitives
-│       ├── InputForwarder.ts     # Renderer → page keystroke/paste bridge
-│       ├── SecureKeyManager.ts   # OS keychain wrapper for API keys
-│       ├── UsageService.ts       # Token + cost accounting
+│       ├── Kowalski.ts            # Phase orchestrator (stories → feed)
+│       ├── RunManager.ts          # Run lifecycle: start, stop, offline handling
+│       ├── BrowserManager.ts      # Playwright lifecycle + CDP screencast
+│       ├── BaseVisionAgent.ts     # Abstract screenshot → Claude → act loop
+│       ├── StoriesAgent.ts        # Phase 1 — stories navigation
+│       ├── FeedAgent.ts           # Phase 2 — feed navigation
+│       ├── Extractor.ts           # Phase 2.5 — async per-image structured extraction
+│       ├── DigestGeneration.ts    # Phase 3 — text-only editorial synthesis
+│       ├── AnalysisGenerator.ts   # Insights pass over the digest
+│       ├── ContentVision.ts       # Shared Claude vision call helpers
+│       ├── ImageTagger.ts         # Per-image tagging utilities
+│       ├── ScreenshotCollector.ts # raw/ + sidecar writer, session log
+│       ├── SessionMemory.ts       # Cross-session memory digest
+│       ├── NetworkMonitor.ts      # Offline watchdog + error classification
+│       ├── GhostMouse.ts          # Human-like mouse paths (Bezier + jitter)
+│       ├── HumanScroll.ts         # Human-like scroll dynamics
+│       ├── Scroller.ts            # Lower-level scroll primitives
+│       ├── InputForwarder.ts      # Renderer → page keystroke/paste bridge
+│       ├── SecureKeyManager.ts    # safeStorage-encrypted API key store
+│       ├── UsageService.ts        # Token + cost accounting
 │       └── ChromiumVersionHelper.ts
 ├── components/
-│   ├── screens/                  # ZeroState, AgentActive, AnalysisReady, Gazette, Login
-│   ├── gazette/                  # Digest rendering (DigestView, SectionCard, ContentItem)
-│   ├── LiveScreencast.tsx        # Live CDP screencast viewer
+│   ├── screens/                   # ZeroState, AgentActive, AnalysisReady, Gazette, Login, DigestFailed
+│   ├── gazette/                   # Digest rendering (DigestView, SectionCard, ContentItem)
+│   ├── LiveScreencast.tsx         # Live CDP screencast viewer
 │   ├── modals/, layouts/, ui/, icons/
 │   └── ErrorBoundary.tsx
-├── pages/                        # Top-level routes (Index, Settings, AnalysisArchive)
+├── pages/                         # Top-level routes (Index, Settings, AnalysisArchive, NotFound)
 ├── shared/
-│   └── modelConfig.ts            # Centralised LLM model config
-└── types/                        # TypeScript type definitions
-scripts/                          # Browser setup, icon generation, test:* runners
+│   ├── modelConfig.ts             # Centralised LLM model config
+│   └── viewportConfig.ts          # Shared viewport dimensions
+└── types/                         # TypeScript type definitions (analysis, instagram, navigation, session-memory)
+scripts/                           # Build pipeline: Chromium staging, icon generation, test runners
 ```
 
 ## Stopping a Run
@@ -125,8 +135,11 @@ Use **Cmd/Ctrl + Shift + K** (or the Stop button in the active-run screen). Stop
 
 ## Where Things Live on Disk
 
-- **Captured screenshots + sidecars** — `~/Downloads/kowalski-debug/<run>/raw/{stories,feed}/`
-- **Generated digests** — local SQLite database managed by `better-sqlite3`, surfaced through the **Archive** page
+Everything lives under `~/Library/Application Support/Kowalski/`:
+
+- **Captured screenshots + sidecars** — `kowalski-runs/<timestamp>/raw/{stories,feed}/` — one JPEG plus a JSON sidecar per meaningful frame
+- **Generated digests** — `analysis_records/` as JSON, indexed via `electron-store` and surfaced through the **Archive** page
+- **Cross-session memory** — `session_memory/summaries.json` — compact per-run summaries that condition the next run
 - **Settings** — `electron-store` JSON
-- **API key** — OS keychain (macOS Keychain / Windows Credential Vault / libsecret)
-- **Browser profile** — dedicated Chromium profile created by `npm run setup:browser`
+- **API key** — `safeStorage`-encrypted in `electron-store`; the encryption key itself is held in macOS Keychain
+- **Browser profile** — dedicated Chromium user-data dir so the Instagram session persists between runs
