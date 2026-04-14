@@ -80,7 +80,8 @@ const GazetteScreen = memo(({ onClose, analysisData: propData, analysisId: propI
       if (!effectiveId) return;
 
       // Only fetch if data is missing or incomplete
-      const needsFetch = !effectiveData || !effectiveData.sections || effectiveData.sections.length === 0;
+      const hasBody = !!effectiveData?.markdown || (effectiveData?.sections?.length ?? 0) > 0;
+      const needsFetch = !effectiveData || !hasBody;
 
       if (needsFetch) {
         setIsFetchingContent(true);
@@ -134,7 +135,7 @@ const GazetteScreen = memo(({ onClose, analysisData: propData, analysisId: propI
   // Loading state
   // Fix: Check if sections are missing. If so, treat as loading (waiting for fetch)
   // This prevents AnalysisRenderer from crashing on undefined 'sections'
-  const isDataIncomplete = effectiveData && (!effectiveData.sections || effectiveData.sections.length === 0);
+  const isDataIncomplete = effectiveData && !effectiveData.markdown && (!effectiveData.sections || effectiveData.sections.length === 0);
 
   if (!effectiveData || isFetchingContent || isDataIncomplete) {
     if (!archivesLoaded || isFetchingContent || isDataIncomplete) {

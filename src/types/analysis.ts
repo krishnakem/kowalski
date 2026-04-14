@@ -30,6 +30,10 @@ export interface AnalysisObject {
     scheduledTime: string; // e.g., "10:00 AM" - the slot this was triggered for
     sections: AnalysisSection[];
 
+    // Editorial markdown body (new format). When present, renderer prefers this
+    // over `sections`. Begins with `# Title` chosen by the digest agent.
+    markdown?: string;
+
     // Image gallery data
     images?: DigestImage[];
     featuredImages?: number[];  // Image IDs highlighted as hero images

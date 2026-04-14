@@ -155,16 +155,31 @@ export class RunManager {
                 console.warn(`🚀 Very few filtered captures (${totalKept}), digest quality may be low`);
             }
 
-            // 10. Load filtered images
+            // 10. Load filtered images + filterReason sidecars
             const loadFiltered = (dir: string, source: 'story' | 'feed') => {
-                if (!fs.existsSync(dir)) return [] as Array<{ screenshot: Buffer; source: 'story' | 'feed' }>;
+                if (!fs.existsSync(dir)) return [] as Array<{ screenshot: Buffer; source: 'story' | 'feed'; filterReason?: string }>;
                 return fs.readdirSync(dir)
                     .filter((f: string) => f.endsWith('.jpg'))
                     .sort()
-                    .map((filename: string) => ({
-                        screenshot: fs.readFileSync(path.join(dir, filename)),
-                        source
-                    }));
+                    .map((filename: string) => {
+                        const jsonPath = path.join(dir, filename.replace('.jpg', '.json'));
+                        let filterReason: string | undefined;
+                        if (fs.existsSync(jsonPath)) {
+                            try {
+                                const sidecar = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+                                if (typeof sidecar?.filterReason === 'string') {
+                                    filterReason = sidecar.filterReason;
+                                }
+                            } catch {
+                                // ignore malformed sidecar
+                            }
+                        }
+                        return {
+                            screenshot: fs.readFileSync(path.join(dir, filename)),
+                            source,
+                            filterReason
+                        };
+                    });
             };
             const allFiltered = [...loadFiltered(filteredStoriesDir, 'story'), ...loadFiltered(filteredFeedDir, 'feed')];
 
@@ -172,9 +187,9 @@ export class RunManager {
                 id: index + 1,
                 screenshot: cap.screenshot,
                 source: cap.source as 'feed' | 'story' | 'profile' | 'carousel',
-                interest: undefined as string | undefined,
                 timestamp: Date.now(),
-                scrollPosition: 0
+                scrollPosition: 0,
+                filterReason: cap.filterReason
             }));
             console.log(`🚀 Loaded ${bestCaptures.length} filtered screenshots`);
 
@@ -193,7 +208,7 @@ export class RunManager {
             const imagesDir = path.join(recordDir, recordId, 'images');
             await fs.promises.mkdir(imagesDir, { recursive: true });
 
-            const imageMetadata: { id: number; filename: string; source: string; interest?: string }[] = [];
+            const imageMetadata: { id: number; filename: string; source: string }[] = [];
             for (const capture of bestCaptures) {
                 const filename = `${capture.id}.jpg`;
                 const imagePath = path.join(imagesDir, filename);
@@ -201,17 +216,19 @@ export class RunManager {
                 imageMetadata.push({
                     id: capture.id,
                     filename,
-                    source: capture.source,
-                    interest: capture.interest
+                    source: capture.source
                 });
             }
 
             // 13. Save analysis JSON
             const analysisWithImages = { ...analysis, images: imageMetadata };
+            const previewSource = analysis.markdown
+                ? analysis.markdown.replace(/^#.*$/m, '').replace(/[#*_>`-]/g, '').trim().slice(0, 100)
+                : analysis.sections[0]?.content[0]?.substring(0, 100);
             const newRecord = {
                 id: recordId,
                 data: analysisWithImages,
-                leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+                leadStoryPreview: (previewSource || "No preview available.") + (previewSource ? "..." : "")
             };
 
             const recordPath = path.join(recordDir, `${recordId}.json`);

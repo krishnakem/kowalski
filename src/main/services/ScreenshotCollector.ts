@@ -170,7 +170,7 @@ export class ScreenshotCollector {
      * @param clip - Optional viewport crop region from LLM coordinates
      * @returns true if captured, false if skipped (max reached or duplicate)
      */
-    async captureCurrentPost(source: CaptureSource, interest?: string, clip?: { x: number; y: number; width: number; height: number }): Promise<boolean> {
+    async captureCurrentPost(source: CaptureSource, clip?: { x: number; y: number; width: number; height: number }): Promise<boolean> {
         // Check memory limit
         if (this.captures.length >= this.config.maxCaptures) {
             console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached`);
@@ -221,7 +221,6 @@ export class ScreenshotCollector {
                 id: this.captures.length + 1,
                 screenshot,
                 source,
-                interest,
                 timestamp: Date.now(),
                 scrollPosition
             });
@@ -241,7 +240,7 @@ export class ScreenshotCollector {
             // Save to disk for debugging if configured
             this.saveScreenshotToDisk(screenshot, source);
 
-            console.log(`📸 Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ''})`);
+            console.log(`📸 Captured #${this.captures.length} (${source})`);
             return true;
 
         } catch (error) {

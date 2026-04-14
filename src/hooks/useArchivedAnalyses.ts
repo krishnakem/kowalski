@@ -5,17 +5,6 @@ import type { SettingsData } from "@/hooks/useSettings";
 
 const MAX_ANALYSES_PER_DAY = 2;
 
-// Memoize today's start time at module level (reset on page refresh)
-let cachedTodayStart: number | null = null;
-const getTodayStart = (): number => {
-  if (cachedTodayStart === null) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    cachedTodayStart = today.getTime();
-  }
-  return cachedTodayStart;
-};
-
 const getDayKey = (date: Date): string => {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 };
@@ -132,14 +121,9 @@ export const useArchivedAnalyses = () => {
     return Array.from(yearsSet).sort((a, b) => b - a);
   }, [analyses]);
 
-  const hasPastAnalyses = useMemo(() => {
-    const todayStart = getTodayStart();
-    return analyses.some((analysis) => {
-      const d = new Date(analysis.data.date);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime() < todayStart;
-    });
-  }, [analyses]);
+  // True whenever any archived analysis exists (today or earlier).
+  // Drives the archive button visibility.
+  const hasPastAnalyses = useMemo(() => analyses.length > 0, [analyses]);
 
   // Stable reference for getAvailableYears
   const getAvailableYears = useCallback(() => availableYears, [availableYears]);

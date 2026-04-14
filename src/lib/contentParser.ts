@@ -33,9 +33,10 @@ export function parseContentItem(raw: string): ParsedItem {
     // Clean up the string
     const cleaned = raw.trim().replace(/^[•·]\s*/, '');
 
-    // Extract handle: **@handle** or just @handle
+    // Extract handle: **@handle** or just @handle. Empty string when missing —
+    // upstream agent should not be emitting handle-less items.
     const handleMatch = cleaned.match(/\*\*(@[\w._]+)\*\*:?|(@[\w._]+):/);
-    const handle = handleMatch?.[1] || handleMatch?.[2] || '@unknown';
+    const handle = handleMatch?.[1] || handleMatch?.[2] || '';
 
     // Remove the handle part from the content
     let remaining = cleaned

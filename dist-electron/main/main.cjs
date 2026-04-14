@@ -41082,7 +41082,7 @@ var ScreenshotCollector = class {
    * @param clip - Optional viewport crop region from LLM coordinates
    * @returns true if captured, false if skipped (max reached or duplicate)
    */
-  async captureCurrentPost(source, interest, clip) {
+  async captureCurrentPost(source, clip) {
     if (this.captures.length >= this.config.maxCaptures) {
       console.log(`[CAPTURE-REJECT] max_captures: limit ${this.config.maxCaptures} reached`);
       return false;
@@ -41119,7 +41119,6 @@ var ScreenshotCollector = class {
         id: this.captures.length + 1,
         screenshot,
         source,
-        interest,
         timestamp: Date.now(),
         scrollPosition
       });
@@ -41132,7 +41131,7 @@ var ScreenshotCollector = class {
         this.lastScrollPosition = scrollPosition;
       }
       this.saveScreenshotToDisk(screenshot, source);
-      console.log(`\u{1F4F8} Captured #${this.captures.length} (${source}${interest ? `: ${interest}` : ""})`);
+      console.log(`\u{1F4F8} Captured #${this.captures.length} (${source})`);
       return true;
     } catch (error) {
       console.error("\u{1F4F8} Screenshot capture failed:", error);
@@ -43336,14 +43335,6 @@ var DigestGeneration = class {
     this.apiKey = apiKey;
     this.usageService = UsageService.getInstance();
   }
-  /**
-   * Generate a digest from all captured screenshots in one API call.
-   * Uses Anthropic Claude with multiple images.
-   *
-   * @param captures - Array of captured screenshots from browsing session
-   * @param config - User configuration (name, interests, location)
-   * @returns Complete analysis object ready for display
-   */
   async generateDigest(captures, config) {
     if (captures.length === 0) {
       throw new Error("INSUFFICIENT_CONTENT: No screenshots captured");
@@ -43363,10 +43354,11 @@ var DigestGeneration = class {
         data: capture.screenshot.toString("base64")
       }
     }));
-    const prompt = this.buildDigestPrompt(config, dayName, dateStr, captures);
+    const systemPrompt = this.buildSystemPrompt();
+    const userPrompt = this.buildUserPrompt(captures, dayName, dateStr);
     console.log(`\u{1F916} Generating digest from ${captures.length} screenshots...`);
     const messageContent = [
-      { type: "text", text: prompt },
+      { type: "text", text: userPrompt },
       ...imageContents
     ];
     const maxRetries = 4;
@@ -43381,6 +43373,7 @@ var DigestGeneration = class {
         },
         body: JSON.stringify({
           model: ModelConfig.digest,
+          system: systemPrompt,
           messages: [{
             role: "user",
             content: messageContent
@@ -43415,136 +43408,170 @@ var DigestGeneration = class {
       console.log(`\u{1F4B0} Digest cost tracked: ${totalTokens} tokens`);
     }
     const contentBlocks = data.content;
-    const content = contentBlocks?.filter((b) => b.type === "text").map((b) => b.text).join("") || "";
-    if (!content) {
+    const markdown = contentBlocks?.filter((b) => b.type === "text").map((b) => b.text).join("").trim() || "";
+    if (!markdown) {
       throw new Error("DIGEST_GENERATION_FAILED: No content in response");
     }
-    try {
-      return this.parseDigestResponse(content, config, dayName, dateStr);
-    } catch (parseError) {
-      console.error("\u274C Failed to parse digest response:", parseError);
-      throw new Error("DIGEST_GENERATION_FAILED");
-    }
+    return this.buildAnalysisObject(markdown, config, dayName, dateStr, captures);
   }
-  /**
-   * Build the system prompt for digest generation.
-   */
-  buildDigestPrompt(config, dayName, dateStr, captures) {
-    const feedCount = captures.filter((c2) => c2.source === "feed").length;
+  buildSystemPrompt() {
+    return `You are the Kowalski digest writer. You compose a single short markdown editorial column summarizing what happened on the Instagram accounts a reader follows. You write like a beat reporter filing a morning column \u2014 not a log parser, not a UI describer.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+VOICE
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+The reader wants to know what happened in the world their accounts cover, NOT what was on screen. Write prose, not captions.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+CORE PRINCIPLES
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+1. SYNTHESIZE, DON'T ENUMERATE. Thirty-five frames of a single game become ONE paragraph about the game. Group every item by narrative first, then by account. Never emit one item per captured frame.
+
+2. LEAD WITH THE STORY, NOT THE FORMAT. Never reference the medium. Forbidden words and phrases:
+   "graphic", "infographic", "story card", "story frame", "post modal", "visible", "clearly visible", "posted", "shared a post about", "was featured", "full-screen", "overlay", "screenshot", "frame showing".
+   Do not mention sponsor tags ("presented by Google", "presented by Chase", "presented by Advantant", "presented by DoorDash", "presented by PagerDuty", "presented by AWS") unless the sponsorship itself is the news.
+
+3. BE SPECIFIC OR CUT IT. Every sentence must carry a name, number, score, date, or concrete fact. If the underlying data is vague or partial, CUT the item entirely rather than write around it.
+
+4. NEVER SHOW DATA-QUALITY ARTIFACTS. No "@unknown", no "[unclear]", no "[team]", no raw turn numbers, no timestamps like "22h ago", no "Instagram", no image indices. If a handle didn't resolve from context, drop the item or fold it into a section whose ownership is obvious. The reader should never see scaffolding.
+
+5. LEAD WITH THE BIGGEST STORY. Pick the single most consequential item of the day and make it a "Top Story" with a real headline. Everything else is a shorter section beneath it.
+
+6. USE ACCOUNT NAMES AS SECTION HEADERS. Sections are like "@nba", "@warriors", "@uofmichigan". Lowercase the handle. Never emit per-item "@unknown" labels.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+TITLE GENERATION
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+Generate a short (2\u20135 words) editorial title that captures the day's dominant theme or mood. The title changes every run \u2014 it is NOT a fixed masthead. It should feel like a newspaper front-page banner or newsletter issue title.
+
+Examples:
+  - "Play-In Night" (Warriors-heavy Play-In day)
+  - "Milestones & Margins" (milestone-heavy NBA day)
+  - "Spring in Ann Arbor" (Michigan-heavy day)
+  - "Quiet Monday" (slow news day)
+
+Rules:
+  - Do NOT use "The Kowalski Gazette", "Instagram Digest", "Daily Digest", or any generic brand-style title.
+  - Do NOT include the date in the title \u2014 the UI renders the date/time/location subtitle automatically.
+  - No clickbait. No puns. No exclamation marks.
+  - Title case. No trailing punctuation.
+  - If nothing confident to title around, fall back to a neutral one-word title (e.g., "Today").
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+REQUIRED MARKDOWN STRUCTURE
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+Output exactly this structure \u2014 no preamble, no JSON, no code fences, no commentary. Just the markdown:
+
+# [Generated Title]
+
+## [emoji] Top Story: [Headline]
+[2\u20134 sentence paragraph. Name key players, scores, and turning points in narrative order. End with a forward-looking hook if relevant.]
+
+## [emoji] @[account]
+[Prose paragraph, 2\u20133 sentences. Fold related items together. Bold the single most quotable fact with **double asterisks**.]
+
+## [emoji] @[next account]
+[Same treatment.]
+
+---
+*[N] story frames and [M] posts reviewed across [K] accounts.*
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+DO
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+- Short declarative leads: "The Warriors' night at Chase Center went the distance and came up short, falling 110\u2013115 to the Clippers."
+- Sequence scoreboard moments: "Seth Curry beat the first-quarter buzzer, Brandin Podziemski beat the second, and the Warriors still walked into the locker room trailing 48\u201352."
+- Milestones as milestones: "Cooper Flagg leads the 2025\u201326 rookie scoring race at 21.0 PPG."
+- Bold the single number, name, or date per paragraph that matters most.
+- Dates in natural English: "Saturday, April 18 at 2 PM" not "2026-04-18T14:00".
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+DON'T
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+- List standings table-style unless the standings themselves are the news. If you must, name the top 3\u20135 teams in prose; never dump all 15.
+- Include sponsor disclosures, ad frames, or League Pass tune-in copy.
+- Write paragraphs longer than ~4 sentences per section.
+- Use "graphic", "infographic", or any format-describing noun.
+- Invent. If the data is ambiguous, cut the item.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+THE "WOULD A SPORTSWRITER WRITE THIS?" TEST
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+Before any sentence ships, ask: would this appear in a newspaper sports section? If it reads like a screenshot caption, a CMS field, or a debug log \u2014 rewrite or cut.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+HANDLE RESOLUTION
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+Many filterReason strings will not name the source account explicitly. Resolve ownership from context:
+  - A "Warriors Instagram story" or "Starting Five lineup" or game scoreboard from the Warriors' tray belongs to @warriors.
+  - "NBA Instagram story" or "NBA post" belongs to @nba.
+  - "uofmichigan" or Michigan campus content belongs to @uofmichigan.
+  - "NBA Spain" \u2192 @nbaspain. "NBA Indonesia" \u2192 @nbaindonesia.
+If you genuinely cannot place an item with confidence, drop it.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+OUTPUT
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+Return ONLY the markdown document. Begin immediately with "# " and the generated title. No JSON, no code fences, no preamble.`;
+  }
+  buildUserPrompt(captures, dayName, dateStr) {
+    const feedItems = captures.filter((c2) => c2.source === "feed");
+    const storyItems = captures.filter((c2) => c2.source === "story");
+    const feedCount = feedItems.length;
+    const storyCount = storyItems.length;
+    const renderItem = (c2, index) => {
+      const reason = c2.filterReason?.trim() || "(no description available)";
+      return `[${index + 1}] ${reason}`;
+    };
+    const storiesBlock = storyItems.length ? storyItems.map(renderItem).join("\n") : "(none)";
+    const feedBlock = feedItems.length ? feedItems.map(renderItem).join("\n") : "(none)";
+    return `Today is ${dayName}, ${dateStr}.
+
+You have ${captures.length} filtered Instagram captures from this morning's run: ${storyCount} story frames and ${feedCount} feed posts.
+
+Each item below is a one-line description written by the upstream filter agent describing what was on the screen. Use these descriptions plus the attached images to determine WHAT happened in the world the reader's accounts cover. Then write the editorial column following the rules in your system prompt.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+STORY FRAMES (chronological, ${storyCount} total)
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+${storiesBlock}
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+FEED POSTS (chronological, ${feedCount} total)
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+${feedBlock}
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+ATTACHED IMAGES
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+${captures.length} JPEGs are attached after this message in the same order: stories first (${storyCount}), then feed (${feedCount}). Use them to disambiguate handles, scores, and details, but write about the underlying events \u2014 never about the screens themselves.
+
+Now write the editorial column. Begin immediately with "# " followed by your generated title. No preamble.`;
+  }
+  buildAnalysisObject(markdown, config, dayName, dateStr, captures) {
+    const cleaned = this.stripCodeFences(markdown).trim();
+    const titleMatch = cleaned.match(/^#\s+(.+?)\s*$/m);
+    const title = titleMatch?.[1]?.trim() || "Today";
     const storyCount = captures.filter((c2) => c2.source === "story").length;
-    const profileCount = captures.filter((c2) => c2.source === "profile").length;
-    const carouselCount = captures.filter((c2) => c2.source === "carousel").length;
-    const sourceParts = [];
-    if (feedCount) sourceParts.push(`${feedCount} feed`);
-    if (storyCount) sourceParts.push(`${storyCount} stories`);
-    if (profileCount) sourceParts.push(`${profileCount} profile`);
-    if (carouselCount) sourceParts.push(`${carouselCount} carousel`);
-    return `You are a text-only digest writer. You will receive ${captures.length} Instagram screenshots (${sourceParts.join(", ")}) captured on ${dayName}, ${dateStr}.
-
-Your job: extract every concrete fact visible in the screenshots and organize them by Instagram account.
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-GROUPING RULES
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-1. Create ONE section per unique @handle you can identify in the screenshots.
-2. The section "heading" field MUST be exactly the @handle as it appears (e.g. "@espn", "@nba"). Nothing else in the heading \u2014 no emojis, no descriptions.
-3. If you cannot read the handle, use "@unknown_N" (incrementing N).
-4. Order sections so that news accounts and accounts matching the user's interests appear first, then order remaining sections by how many frames/screenshots that account had (most first).
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-BULLET RULES \u2014 DENSITY IS MANDATORY
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-Each section's "content" array contains 1\u20135 bullets (strings). Rules:
-
-A) EVERY bullet MUST contain at least one concrete fact extracted from the screenshot:
-   a number, score, name, date, quoted overlay text, product & price, headline text, or specific visual detail.
-
-B) BANNED phrasings \u2014 if any bullet contains these, the output is a failure:
-   "posted about", "shared a story about", "graphics showing", "content related to",
-   "images of", "a post featuring", "the photo shows", "the caption says",
-   "shared a", "posted a", "featuring a".
-   Instead, write the actual information.
-
-C) MERGE rule: if multiple frames show the same underlying information (e.g. video
-   frames of one play, multi-slide carousel on one topic), combine into ONE bullet.
-
-D) OMIT rule: if a frame is unreadable, a loading spinner, a pure logo with no info,
-   or adds nothing new, skip it entirely. Do not pad bullet counts.
-
-E) No "see screenshot", no references to image numbers or image indices.
-
-F) Examples of correct vs. incorrect bullets:
-   BAD:  "NBA shared graphics about last night's game."
-   GOOD: "Lakers 118, Warriors 112 \u2014 LeBron 34 pts / 8 reb / 6 ast, Curry 29 on 10-22 FG."
-
-   BAD:  "Posted about a new sneaker release."
-   GOOD: "Nike Air Max Dn8 releasing Apr 17, $180, colorway 'Midnight Navy'."
-
-   BAD:  "Shared a story about weather."
-   GOOD: "Heat advisory through Friday, high of 108\xB0F in Phoenix."
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-TONE & CONSTRAINTS
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-- Pure extraction. Only report what is literally visible in the screenshots + any JSON metadata provided.
-- No outside context, no "why it matters", no implications, no LLM training knowledge.
-- If text is partially unreadable, transcribe what you can and mark unclear portions with [unclear].
-- Skip ads and sponsored posts unless they contain genuinely newsworthy facts.
-- Skip blank, loading, or duplicate screenshots.
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-OUTPUT FORMAT
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-Return valid JSON matching this schema exactly:
-
-{
-  "title": "Instagram Digest \u2014 ${dayName}, ${dateStr}",
-  "subtitle": "[N] accounts, [M] items captured",
-  "sections": [
-    {
-      "heading": "@handle",
-      "content": [
-        "Concrete fact bullet 1.",
-        "Concrete fact bullet 2."
-      ]
-    }
-  ]
-}
-
-- "title": always "Instagram Digest \u2014 ${dayName}, ${dateStr}".
-- "subtitle": fill in the actual count of unique accounts (N) and total meaningful items (M) you extracted.
-- "sections": one object per account. "heading" is the raw @handle. "content" is 1\u20135 fact-dense bullet strings.
-
-Do NOT add any keys beyond title, subtitle, sections, heading, content.
-Do NOT wrap the JSON in markdown code fences.`;
-  }
-  /**
-   * Parse the LLM response into a structured AnalysisObject.
-   */
-  parseDigestResponse(content, config, dayName, dateStr) {
-    let cleaned = content.trim();
-    const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (codeBlockMatch) {
-      cleaned = codeBlockMatch[1].trim();
-    }
-    const parsed = JSON.parse(cleaned);
-    if (!parsed.title || !parsed.sections || !Array.isArray(parsed.sections)) {
-      throw new Error("Invalid response structure: missing title or sections");
-    }
-    const sections = parsed.sections.map((s) => ({
-      heading: s.heading || "Untitled Section",
-      content: Array.isArray(s.content) ? s.content : [s.content || ""]
-    }));
-    console.log(`\u2705 Digest generated successfully`);
-    console.log(`   Sections: ${sections.length}`);
+    const feedCount = captures.filter((c2) => c2.source === "feed").length;
+    const subtitle = `${storyCount} story frames and ${feedCount} posts reviewed`;
+    console.log(`\u2705 Digest generated: "${title}"`);
     return {
-      title: parsed.title,
-      subtitle: parsed.subtitle || `Your Instagram Digest \u2014 ${dayName}, ${dateStr}`,
-      sections,
+      title,
+      subtitle,
+      markdown: cleaned,
+      sections: [],
+      // legacy field; renderer prefers `markdown`
       date: (/* @__PURE__ */ new Date()).toISOString(),
       location: config.location || "",
       scheduledTime: (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", {
@@ -43553,6 +43580,10 @@ Do NOT wrap the JSON in markdown code fences.`;
         hour12: true
       })
     };
+  }
+  stripCodeFences(text) {
+    const fenceMatch = text.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/);
+    return fenceMatch ? fenceMatch[1] : text;
   }
 };
 
@@ -43867,19 +43898,33 @@ var RunManager = class _RunManager {
       }
       const loadFiltered = (dir, source) => {
         if (!import_fs7.default.existsSync(dir)) return [];
-        return import_fs7.default.readdirSync(dir).filter((f) => f.endsWith(".jpg")).sort().map((filename) => ({
-          screenshot: import_fs7.default.readFileSync(import_path5.default.join(dir, filename)),
-          source
-        }));
+        return import_fs7.default.readdirSync(dir).filter((f) => f.endsWith(".jpg")).sort().map((filename) => {
+          const jsonPath = import_path5.default.join(dir, filename.replace(".jpg", ".json"));
+          let filterReason;
+          if (import_fs7.default.existsSync(jsonPath)) {
+            try {
+              const sidecar = JSON.parse(import_fs7.default.readFileSync(jsonPath, "utf-8"));
+              if (typeof sidecar?.filterReason === "string") {
+                filterReason = sidecar.filterReason;
+              }
+            } catch {
+            }
+          }
+          return {
+            screenshot: import_fs7.default.readFileSync(import_path5.default.join(dir, filename)),
+            source,
+            filterReason
+          };
+        });
       };
       const allFiltered = [...loadFiltered(filteredStoriesDir, "story"), ...loadFiltered(filteredFeedDir, "feed")];
       const bestCaptures = allFiltered.map((cap, index) => ({
         id: index + 1,
         screenshot: cap.screenshot,
         source: cap.source,
-        interest: void 0,
         timestamp: Date.now(),
-        scrollPosition: 0
+        scrollPosition: 0,
+        filterReason: cap.filterReason
       }));
       console.log(`\u{1F680} Loaded ${bestCaptures.length} filtered screenshots`);
       console.log("\u{1F680} Generating digest...");
@@ -43901,15 +43946,15 @@ var RunManager = class _RunManager {
         imageMetadata.push({
           id: capture.id,
           filename,
-          source: capture.source,
-          interest: capture.interest
+          source: capture.source
         });
       }
       const analysisWithImages = { ...analysis, images: imageMetadata };
+      const previewSource = analysis.markdown ? analysis.markdown.replace(/^#.*$/m, "").replace(/[#*_>`-]/g, "").trim().slice(0, 100) : analysis.sections[0]?.content[0]?.substring(0, 100);
       const newRecord = {
         id: recordId,
         data: analysisWithImages,
-        leadStoryPreview: analysis.sections[0]?.content[0]?.substring(0, 100) + "..." || "No preview available."
+        leadStoryPreview: (previewSource || "No preview available.") + (previewSource ? "..." : "")
       };
       const recordPath = import_path5.default.join(recordDir, `${recordId}.json`);
       const tempPath = import_path5.default.join(recordDir, `${recordId}.tmp`);

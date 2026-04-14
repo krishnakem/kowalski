@@ -148,7 +148,7 @@ async function detectElements(
     const { results, debug } = await page.evaluate(({ selector, vpW, vpH, safetyPattern }) => {
         const els = document.querySelectorAll(selector);
         const results: Array<{
-            tag: string; text: string; ariaLabel: string; href: string;
+            tag: string; text: string; ariaLabel: string; href: string; role: string;
             x: number; y: number; width: number; height: number;
         }> = [];
         const debug: string[] = [];

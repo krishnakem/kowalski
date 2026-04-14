@@ -192,6 +192,7 @@ export interface CapturedPost {
     source: CaptureSource;
     timestamp: number;            // Unix timestamp of capture
     scrollPosition: number;       // Y scroll position for deduplication
+    filterReason?: string;        // Description from the filter agent (filtered/*.json sidecar)
 }
 
 /**

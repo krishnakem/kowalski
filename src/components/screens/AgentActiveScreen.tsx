@@ -109,48 +109,42 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
           </div>
         )}
 
-        {/* Floating overlay: RUN IN PROGRESS indicator + STOP button.
-            Uses position:fixed so it's outside any stacking context — clicks always reach it. */}
+        {/* Floating overlay: a single pill with two sections — the "Run in progress"
+            indicator (non-interactive) and the Stop button (always visible, clickable).
+            position:fixed keeps it outside any stacking context so clicks always reach it. */}
         {firstFrameReceived && (
           <div style={{
             position: 'fixed', bottom: 16, right: 16, zIndex: 9999,
-            display: 'flex', alignItems: 'center', gap: 8,
+            display: 'inline-flex', alignItems: 'stretch',
+            borderRadius: 6, overflow: 'hidden',
+            background: 'rgba(255,255,255,0.92)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+            border: '1.5px solid rgba(0,0,0,0.15)',
+            fontSize: 11, fontWeight: 500, color: '#111',
+            letterSpacing: '0.08em', textTransform: 'uppercase' as const,
+            fontFamily: 'system-ui, sans-serif',
           }}>
-            {/* Run in progress indicator */}
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '6px 10px', borderRadius: 6,
-              background: 'rgba(255,255,255,0.92)',
-              backdropFilter: 'blur(6px)',
-              WebkitBackdropFilter: 'blur(6px)',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '6px 10px',
             }}>
               <span className="run-indicator-dot" style={{
                 width: 8, height: 8, borderRadius: '50%',
                 background: '#ef4444', flexShrink: 0,
               }} />
-              <span className="run-indicator-text" style={{
-                fontSize: 11, fontWeight: 500, color: '#111',
-                letterSpacing: '0.08em', textTransform: 'uppercase' as const,
-                fontFamily: 'system-ui, sans-serif',
-              }}>
-                Run in progress
-              </span>
+              <span className="run-indicator-text">Run in progress</span>
             </div>
-
-            {/* STOP button */}
             <button
               onClick={handleStop}
+              className="run-stop-button"
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '6px 12px', borderRadius: 6,
-                background: 'rgba(255,255,255,0.92)',
-                backdropFilter: 'blur(6px)',
-                WebkitBackdropFilter: 'blur(6px)',
-                border: '1.5px solid rgba(0,0,0,0.15)',
-                cursor: 'pointer', fontSize: 11, fontWeight: 500,
-                color: '#111', letterSpacing: '0.08em',
-                textTransform: 'uppercase' as const,
-                fontFamily: 'system-ui, sans-serif',
+                padding: '6px 12px',
+                borderLeft: '1.5px solid rgba(0,0,0,0.15)',
+                background: 'transparent', cursor: 'pointer',
+                font: 'inherit', color: 'inherit',
+                letterSpacing: 'inherit', textTransform: 'inherit' as const,
               }}
             >
               <Square style={{ width: 10, height: 10 }} />
@@ -159,18 +153,17 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
           </div>
         )}
 
-        {/* Keyframe animations for the indicator */}
+        {/* Keyframe animations for the indicator + Stop hover state */}
         <style>{`
           @keyframes indicatorPulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.3; }
           }
-          .run-indicator-dot {
-            animation: indicatorPulse 1.2s ease-in-out infinite;
-          }
+          .run-indicator-dot,
           .run-indicator-text {
             animation: indicatorPulse 1.2s ease-in-out infinite;
           }
+          .run-stop-button:hover { background: rgba(0,0,0,0.06); }
           @media (prefers-reduced-motion: reduce) {
             .run-indicator-dot, .run-indicator-text {
               animation: none;
@@ -260,11 +253,6 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
           <Search className="w-4 h-4" />
           <span>Start Digest Run</span>
         </button>
-        {hasPastAnalyses && (
-          <p className="text-muted-foreground text-sm">
-            Press Cmd+Shift+H to run anytime.
-          </p>
-        )}
       </motion.div>
     </div>
   );
