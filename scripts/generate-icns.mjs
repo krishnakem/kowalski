@@ -2,12 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { Jimp, ResizeStrategy } from 'jimp';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 
-const sourcePng = path.join(projectRoot, 'build', 'icon.png');
+// Squircle-masked, HIG-sized canvas produced by scripts/standardize-icon.ts.
+// Using the raw icon.png skips the squircle/keyline mask and ships an
+// un-rounded square in the dock.
+const sourcePng = path.join(projectRoot, 'build', 'icon-standard.png');
 const outIcns = path.join(projectRoot, 'build', 'icon.icns');
 const iconsetDir = path.join(projectRoot, 'build', '.icon.iconset');
 
@@ -27,35 +29,19 @@ const slots = [
 
 if (!fs.existsSync(sourcePng)) {
     console.error(`❌ Source PNG not found: ${sourcePng}`);
+    console.error(`   Run 'npx tsx scripts/standardize-icon.ts' first.`);
     process.exit(1);
 }
 
 if (fs.existsSync(iconsetDir)) fs.rmSync(iconsetDir, { recursive: true, force: true });
 fs.mkdirSync(iconsetDir, { recursive: true });
 
-const source = await Jimp.read(sourcePng);
-const srcSize = source.width;
-
-// Step-downsample by halves until close, then a final step to the target size.
-// Single-pass 1024→16 kills detail; stepping (1024→512→256→…→target) preserves
-// more edge structure at each stage. Bicubic resampling at each step.
-async function stepDownsample(targetSize) {
-    if (targetSize === srcSize) return source.clone();
-    let img = source.clone();
-    let current = srcSize;
-    while (current / 2 >= targetSize) {
-        current = Math.floor(current / 2);
-        img.resize({ w: current, h: current, mode: ResizeStrategy.BICUBIC });
-    }
-    if (current !== targetSize) {
-        img.resize({ w: targetSize, h: targetSize, mode: ResizeStrategy.BICUBIC });
-    }
-    return img;
-}
-
+// Use sips for resampling. Jimp's PNG encoder produced icns slots that
+// Electron's nativeImage rejected at runtime ("Failed to load image from path").
+// sips writes PNGs that Skia decodes reliably.
 for (const slot of slots) {
-    const img = await stepDownsample(slot.size);
-    await img.write(path.join(iconsetDir, slot.name));
+    const out = path.join(iconsetDir, slot.name);
+    execFileSync('sips', ['-z', String(slot.size), String(slot.size), sourcePng, '--out', out], { stdio: ['ignore', 'ignore', 'inherit'] });
 }
 
 if (fs.existsSync(outIcns)) fs.rmSync(outIcns);
@@ -64,4 +50,4 @@ execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', outIcns], { stdio: 'in
 fs.rmSync(iconsetDir, { recursive: true, force: true });
 
 const stat = fs.statSync(outIcns);
-console.log(`✅ Generated ${path.relative(projectRoot, outIcns)} (${(stat.size / 1024).toFixed(1)} KB) via stepped bicubic from ${path.relative(projectRoot, sourcePng)}`);
+console.log(`✅ Generated ${path.relative(projectRoot, outIcns)} (${(stat.size / 1024).toFixed(1)} KB) via sips from ${path.relative(projectRoot, sourcePng)}`);

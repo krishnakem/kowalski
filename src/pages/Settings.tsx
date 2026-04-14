@@ -156,7 +156,7 @@ const Settings = memo(() => {
             onClick={handleDevReset}
             className="text-xs text-muted-foreground/50 hover:text-muted-foreground underline"
           >
-            Reset all (dev)
+            Reset Settings & Data
           </button>
         </div>
       </div>

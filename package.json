@@ -2,7 +2,7 @@
   "name": "vite_react_shadcn_ts",
   "productName": "Kowalski",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "main": "dist-electron/main/main.cjs",
   "scripts": {
@@ -18,7 +18,7 @@
     "generate:icns": "node scripts/generate-icns.mjs",
     "dist:dir": "npm run build && npm run electron:compile && npm run stage:browsers && npm run generate:icns && electron-builder --mac --dir",
     "setup:browser": "npx tsx scripts/setup-kowalski-browser.ts",
-    "setup:icons": "bash scripts/generate-icons.sh",
+    "setup:icons": "npx tsx scripts/standardize-icon.ts && npm run generate:icns",
     "setup": "npm run setup:icons && npm run setup:browser",
     "test:digest": "npx tsx scripts/test-digest.ts",
     "test:extract": "npx tsx scripts/test-extract.ts"

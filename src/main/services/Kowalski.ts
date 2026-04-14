@@ -61,6 +61,16 @@ export class Kowalski {
     }
 
     /**
+     * Skip the active stories agent and proceed to the feed phase. Unlike stop(),
+     * this leaves `this.stopped` false so the outer loop continues into Phase 2.
+     */
+    skipStoriesPhase(): void {
+        if (this.activeAgent) {
+            this.activeAgent.stop();
+        }
+    }
+
+    /**
      * Main entry point — browse Instagram and return captured screenshots.
      */
     async browseAndCapture(
@@ -98,7 +108,8 @@ export class Kowalski {
             maxCaptures: estimatedMaxCaptures,
             jpegQuality: 85,
             minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.10),
-            saveToDirectory: path.join(app.getPath('downloads'), 'kowalski-debug')
+            // Debug-only screenshot/log dump to ~/Downloads/kowalski-debug — disabled.
+            // saveToDirectory: path.join(app.getPath('downloads'), 'kowalski-debug')
         });
 
         let totalRawScreenshots = 0;
@@ -162,6 +173,7 @@ export class Kowalski {
 
             // Determine which phases to run
             const phases = config?.phases ?? ['stories', 'feed'];
+            const onPhaseChange = config?.onPhaseChange;
             let storiesElapsed = 0;
 
             // ═══════════════════════════════════════════
@@ -171,6 +183,7 @@ export class Kowalski {
                 const storiesMaxMs = Infinity; // No time limit — stories end when the ArrowRight button disappears
                 console.log(`\n📖 Phase 1: Stories (no time limit — exits when stories end, model: ${ModelConfig.stories})`);
                 this.screenshotCollector.appendLogRaw(`\n## Phase 1: Stories\n`);
+                onPhaseChange?.('stories');
 
                 const storiesAgent = new StoriesAgent(
                     this.page, this.ghost, this.scroll, this.screenshotCollector,
@@ -198,11 +211,16 @@ export class Kowalski {
             // Phase 2: Feed (Sonnet — remaining budget)
             // ═══════════════════════════════════════════
             if (phases.includes('feed') && !this.stopped) {
-                const feedMaxMs = targetDurationMs - (Date.now() - startTime);
+                // Hard cap on the feed phase for testing — once it elapses the
+                // FeedAgent exits cooperatively and the run proceeds to digest.
+                const FEED_PHASE_MAX_MS = 30 * 60 * 1000;
+                const remainingMs = targetDurationMs - (Date.now() - startTime);
+                const feedMaxMs = Math.min(remainingMs, FEED_PHASE_MAX_MS);
 
                 if (feedMaxMs > 30000) { // Only run feed if >30s remaining
                     console.log(`\n📰 Phase 2: Feed (budget: ${(feedMaxMs / 1000 / 60).toFixed(1)} min, model: ${ModelConfig.navigation})`);
                     this.screenshotCollector.appendLogRaw(`\n## Phase 2: Feed\n`);
+                    onPhaseChange?.('feed', { maxDurationMs: feedMaxMs });
 
                     const feedAgent = new FeedAgent(
                         this.page, this.ghost, this.scroll, this.screenshotCollector,
@@ -262,7 +280,7 @@ export class Kowalski {
 
         } catch (error: any) {
             console.error('❌ Navigation error:', error.message);
-            if (['SESSION_EXPIRED', 'RATE_LIMITED'].includes(error.message)) {
+            if (['SESSION_EXPIRED', 'RATE_LIMITED', 'OFFLINE', 'CREDITS_DEPLETED'].includes(error.message)) {
                 throw error;
             }
         } finally {

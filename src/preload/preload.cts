@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('api', {
             ipcRenderer.on('analysis-ready', subscription);
             return () => ipcRenderer.removeListener('analysis-ready', subscription);
         },
-        onAnalysisError: (callback: (error: { message: string; canRetry: boolean; nextRetry: string | null }) => void) => {
+        onAnalysisError: (callback: (error: { message: string; kind?: 'offline' | 'credits' | 'general'; canRetry: boolean; nextRetry?: string | null }) => void) => {
             const subscription = (_event: any, error: any) => callback(error);
             ipcRenderer.on('analysis-error', subscription);
             return () => ipcRenderer.removeListener('analysis-error', subscription);
@@ -46,12 +46,21 @@ contextBridge.exposeInMainWorld('api', {
             const subscription = () => callback();
             ipcRenderer.on('run-complete', subscription);
             return () => ipcRenderer.removeListener('run-complete', subscription);
+        },
+        onRunPhase: (callback: (info: { phase: 'stories' | 'feed'; maxDurationMs?: number }) => void) => {
+            const subscription = (_event: any, info: { phase: 'stories' | 'feed'; maxDurationMs?: number }) => callback(info);
+            ipcRenderer.on('run-phase', subscription);
+            return () => ipcRenderer.removeListener('run-phase', subscription);
         }
     },
     run: {
         start: () => ipcRenderer.invoke('run:start'),
         stop: () => ipcRenderer.invoke('run:stop'),
+        skipToFeed: () => ipcRenderer.invoke('run:skipToFeed'),
         getStatus: () => ipcRenderer.invoke('run:status'),
+    },
+    network: {
+        notifyOffline: () => ipcRenderer.send('network:offline'),
     },
     screencast: {
         onFrame: (cb: (data: string) => void): (() => void) => {

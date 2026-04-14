@@ -310,6 +310,48 @@ const wavingFlipperTransition = {
   ease: [0.45, 0.05, 0.55, 0.95] as const,
 };
 
+// Flashing red X animation for the offline / broken-connection state
+const flashingXAnimation = {
+  opacity: [1, 0.2, 1],
+};
+
+const flashingXTransition = {
+  duration: 0.9,
+  repeat: Infinity,
+  ease: "easeInOut" as const,
+};
+
+// Retro Macintosh body with a clean (non-pixelated) WiFi + flashing X on the
+// screen. Body uses the same integer-aligned rects as AnimatedPixelPenguin so
+// it sits in the same visual family; the WiFi arcs and X are stroke-based
+// paths to match the rest of the (lucide) icon set in the app.
+export const BrokenWifiMac = memo(({ className, size = 160 }: { className?: string; size?: number }) => (
+  <div className={className}>
+    <svg width={size} height={size} viewBox="0 0 48 48">
+      {/* Mac body — unchanged */}
+      <rect x="8" y="4" width="32" height="36" fill="#1C1C1E" />
+      <rect x="10" y="6" width="28" height="22" fill="#F9F8F5" />
+      <rect x="10" y="30" width="28" height="2" fill="#1C1C1E" />
+      <rect x="28" y="32" width="8" height="2" fill="#F9F8F5" opacity="0.3" />
+      <rect x="12" y="40" width="24" height="4" fill="#1C1C1E" />
+      <rect x="16" y="44" width="16" height="2" fill="#1C1C1E" />
+
+      {/* Flashing red X — squared-off diagonals */}
+      <motion.g
+        animate={flashingXAnimation}
+        transition={flashingXTransition}
+        stroke="#ef4444"
+        strokeWidth="3"
+        strokeLinecap="square"
+      >
+        <line x1="19" y1="12" x2="29" y2="23" />
+        <line x1="29" y1="12" x2="19" y2="23" />
+      </motion.g>
+    </svg>
+  </div>
+));
+BrokenWifiMac.displayName = "BrokenWifiMac";
+
 // Standalone waving penguin (matches the Mac screen penguin exactly)
 export const WavingPenguin = memo(({ className, size = 64 }: { className?: string; size?: number }) => (
   <div className={className} style={{ willChange: "transform" }}>

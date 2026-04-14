@@ -74,18 +74,12 @@ const createWindow = () => {
       preload: path.join(__dirname, '../preload/preload.cjs'),
       webviewTag: true,
       partition: SHARED_PARTITION
-    },
-    icon: path.join(__dirname, '../../build/icon-standard.png')
+    }
+    // No `icon` on macOS: the dock/finder icon comes from the .app bundle's
+    // Contents/Resources/icon.icns, which electron-builder writes from
+    // package.json's `build.mac.icon`. Passing a path here is redundant and
+    // can throw "Failed to load image from path" at runtime.
   });
-
-  // macOS Dock Icon — run in dev and packaged. macOS's runtime PNG scaler
-  // produces a sharper Dock icon than the baked .icns slots. The .icns is
-  // built from the same source (icon-standard.png) so the pre-launch icon
-  // LaunchServices paints matches this one — no visible swap.
-  if (process.platform === 'darwin') {
-    const iconPath = path.join(__dirname, '../../build/icon-standard.png');
-    app.dock?.setIcon(iconPath);
-  }
 
   // Share window ref with RunManager and BrowserManager (for screencast IPC)
   RunManager.getInstance().setMainWindow(mainWindow);
@@ -424,8 +418,19 @@ function setupIPCHandlers() {
     RunManager.getInstance().stopRun();
   });
 
+  ipcMain.handle('run:skipToFeed', () => {
+    RunManager.getInstance().skipToFeed();
+  });
+
   ipcMain.handle('run:status', () => {
     return RunManager.getInstance().getStatus();
+  });
+
+  // Renderer forwards `navigator.onLine` transitions; on offline we abort any
+  // active run immediately so the UI can flip to the failed screen without
+  // waiting for fetch timeouts.
+  ipcMain.on('network:offline', () => {
+    RunManager.getInstance().notifyOffline();
   });
 
   // --- Login Screencast + Input Forwarding ---

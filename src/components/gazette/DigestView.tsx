@@ -57,7 +57,7 @@ export function DigestView({
         }
         // Strip trailing review-summary line ("*N story frames and M posts reviewed across K accounts.*")
         // and any trailing horizontal rule / blank lines preceding it.
-        const reviewSummaryRe = /^\*?\s*\d+\s+story\s+frames?\s+and\s+\d+\s+(feed\s+)?posts?\s+reviewed\s+across\s+\d+\s+accounts?\.?\s*\*?$/i;
+        const reviewSummaryRe = /^\*?\s*\d+\s+story\s+frames?\s+and\s+(?:\d+\s+)?(?:feed\s+)?posts?\s+reviewed\s+across\s+\d+\s+accounts?\.?\s*\*?$/i;
         while (bodyLines.length) {
             const last = bodyLines[bodyLines.length - 1].trim();
             if (!last || /^-{3,}$/.test(last) || reviewSummaryRe.test(last)) {

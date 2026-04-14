@@ -15,6 +15,7 @@ import path from 'path';
 import { GhostMouse } from './GhostMouse.js';
 import { HumanScroll } from './HumanScroll.js';
 import { ScreenshotCollector } from './ScreenshotCollector.js';
+import { isOnline, isNetworkError, isCreditsDepletedError, OFFLINE_ERROR, CREDITS_DEPLETED_ERROR } from './NetworkMonitor.js';
 import { labelElements, type LabeledElement } from '../../utils/elementLabeler.js';
 import capabilitiesPrompt from '../prompts/capabilities.md';
 
@@ -787,6 +788,10 @@ export abstract class BaseVisionAgent {
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             if (this.stopped) break;
             try {
+                // Bound each request at 20s. Undici's default headers timeout is
+                // 5 minutes — way too long when WiFi drops mid-request. The
+                // composed signal still honors run-level stop from this.abortController.
+                const perRequestTimeout = AbortSignal.timeout(20_000);
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
@@ -796,13 +801,18 @@ export abstract class BaseVisionAgent {
                         'anthropic-beta': 'prompt-caching-2024-07-31'
                     },
                     body: JSON.stringify(requestBody),
-                    signal: this.abortController.signal
+                    signal: AbortSignal.any([this.abortController.signal, perRequestTimeout])
                 });
 
                 if (!response.ok) {
                     const errText = await response.text();
                     console.warn(`  ⚠️ LLM API error (${response.status}): ${errText.slice(0, 200)}`);
                     this.collector.appendLog(`  ⚠️ LLM API error (${response.status}): ${errText.slice(0, 200)}`);
+                    // Credit exhaustion is unrecoverable — fail the run now so
+                    // the UI can surface the "refill API balance" screen.
+                    if (isCreditsDepletedError(response.status, errText)) {
+                        throw new Error(CREDITS_DEPLETED_ERROR);
+                    }
                     if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
                         const baseDelay = response.status === 429 ? 10000 : 5000;
                         const backoff = Math.min(baseDelay * Math.pow(2, attempt), 60000);
@@ -845,8 +855,24 @@ export abstract class BaseVisionAgent {
 
             } catch (err) {
                 if (this.stopped) break;
+
+                // Credit exhaustion thrown from the !response.ok branch above —
+                // re-throw so it propagates past Kowalski to RunManager.
+                if (err instanceof Error && err.message === CREDITS_DEPLETED_ERROR) {
+                    throw err;
+                }
+
                 console.warn(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}/${maxRetries}):`, err);
                 this.collector.appendLog(`  ⚠️ LLM call/parse error (attempt ${attempt + 1}/${maxRetries}): ${err}`);
+
+                // If this looks like a network failure, confirm with a fast probe
+                // and bail out of the whole run rather than burning 4 retries on
+                // a dead connection. The throw bubbles up through the agent's
+                // run() to Kowalski → RunManager, which emits kind: 'offline'.
+                if (isNetworkError(err) && !(await isOnline())) {
+                    throw new Error(OFFLINE_ERROR);
+                }
+
                 if (attempt < maxRetries - 1) { await this.delay(500); continue; }
             }
         }

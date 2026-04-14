@@ -46,12 +46,21 @@ import_electron.contextBridge.exposeInMainWorld("api", {
       const subscription = () => callback();
       import_electron.ipcRenderer.on("run-complete", subscription);
       return () => import_electron.ipcRenderer.removeListener("run-complete", subscription);
+    },
+    onRunPhase: (callback) => {
+      const subscription = (_event, info) => callback(info);
+      import_electron.ipcRenderer.on("run-phase", subscription);
+      return () => import_electron.ipcRenderer.removeListener("run-phase", subscription);
     }
   },
   run: {
     start: () => import_electron.ipcRenderer.invoke("run:start"),
     stop: () => import_electron.ipcRenderer.invoke("run:stop"),
+    skipToFeed: () => import_electron.ipcRenderer.invoke("run:skipToFeed"),
     getStatus: () => import_electron.ipcRenderer.invoke("run:status")
+  },
+  network: {
+    notifyOffline: () => import_electron.ipcRenderer.send("network:offline")
   },
   screencast: {
     onFrame: (cb) => {

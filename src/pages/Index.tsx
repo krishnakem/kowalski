@@ -5,13 +5,14 @@ import ZeroStateScreen from "@/components/screens/ZeroStateScreen";
 import AgentActiveScreen from "@/components/screens/AgentActiveScreen";
 import AnalysisReadyScreen from "@/components/screens/AnalysisReadyScreen";
 import LoginScreen from "@/components/screens/LoginScreen";
+import DigestFailedScreen from "@/components/screens/DigestFailedScreen";
 import { useSettings } from "@/hooks/useSettings";
 import { useArchivedAnalyses } from "@/hooks/useArchivedAnalyses";
 import { pageTransition } from "@/lib/animations";
 
-// Four-Hub Architecture: zero → login → agent → ready.
-// "login" is shown when an onboarded user's Instagram session has expired.
-type Screen = "zero" | "login" | "agent" | "ready";
+// Hubs: zero → login → agent → ready, plus "failed" for offline/network drops
+// during a run or digest generation.
+type Screen = "zero" | "login" | "agent" | "ready" | "failed";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ const Index = () => {
   const { analyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
   const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
   const [latestAnalysisId, setLatestAnalysisId] = useState<string | null>(null);
+  const [failureMessage, setFailureMessage] = useState<string | undefined>(undefined);
 
   // Determine initial screen based on user state — check IG session for onboarded users
   useEffect(() => {
@@ -59,6 +61,28 @@ const Index = () => {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, archivesLoaded, settings.hasOnboarded, settings.analysisStatus]);
+
+  // Network-failure handler: when RunManager emits `analysis-error` with
+  // kind="offline", route the user to the connection-lost screen. Other error
+  // kinds remain on the current screen (future: toast).
+  useEffect(() => {
+    const unsub = window.api.settings.onAnalysisError((error) => {
+      if (error?.kind === "offline" || error?.kind === "credits") {
+        setFailureMessage(error.message);
+        setCurrentScreen("failed");
+      }
+    });
+    return unsub;
+  }, []);
+
+  // OS-level connectivity: forward `navigator.onLine` offline events to main
+  // so an active run can abort in milliseconds. On reconnect the failed
+  // screen stays up — the user decides when to restart via Try Again.
+  useEffect(() => {
+    const handleOffline = () => window.api.network.notifyOffline();
+    window.addEventListener("offline", handleOffline);
+    return () => window.removeEventListener("offline", handleOffline);
+  }, []);
 
 
 
@@ -159,6 +183,28 @@ const Index = () => {
             <AnalysisReadyScreen
               onViewAnalysis={handleViewAnalysis}
               lastAnalysisDate={settings.lastAnalysisDate}
+            />
+          </motion.div>
+        )}
+
+        {currentScreen === "failed" && (
+          <motion.div
+            key="failed"
+            initial={pageTransition.initial}
+            animate={pageTransition.animate}
+            exit={pageTransition.exit}
+          >
+            <DigestFailedScreen
+              message={failureMessage}
+              onRetry={async () => {
+                setFailureMessage(undefined);
+                setCurrentScreen("agent");
+                try {
+                  await window.api.run.start();
+                } catch (e) {
+                  console.error("Retry failed:", e);
+                }
+              }}
             />
           </motion.div>
         )}

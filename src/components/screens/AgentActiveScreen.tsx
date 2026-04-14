@@ -1,7 +1,7 @@
 import { useEffect, useCallback, memo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Settings, Archive, Search, Square } from "lucide-react";
+import { Settings, Archive, Search, Square, SkipForward } from "lucide-react";
 import { AnimatedPixelPenguin } from "../icons/PixelIcons";
 import { LiveScreencast } from "../LiveScreencast";
 import { Button } from "@/components/ui/button";
@@ -16,10 +16,18 @@ interface AgentActiveScreenProps {
 }
 
 type RunState = "idle" | "running" | "generatingDigest";
+type RunPhase = "stories" | "feed" | null;
 
 // Animation transitions defined outside component
 const buttonEntranceTransition = { delay: 0.4, duration: duration.slow, ease: ease.cinematic };
 const contentEntranceTransition = { delay: 0.25, duration: duration.slow, ease: ease.cinematic };
+
+const formatCountdown = (ms: number): string => {
+  const totalSec = Math.ceil(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+};
 
 const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActiveScreenProps) => {
   const navigate = useNavigate();
@@ -27,6 +35,9 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   const { hasPastAnalyses, isLoaded: archivesLoaded } = useArchivedAnalyses();
 
   const [runState, setRunState] = useState<RunState>("idle");
+  const [runPhase, setRunPhase] = useState<RunPhase>(null);
+  const [feedDeadline, setFeedDeadline] = useState<number | null>(null);
+  const [nowTs, setNowTs] = useState<number>(Date.now());
   const [firstFrameReceived, setFirstFrameReceived] = useState(false);
 
   // Check initial run status on mount
@@ -42,7 +53,18 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
   useEffect(() => {
     const unsubStart = window.api.settings.onRunStarted(() => {
       setFirstFrameReceived(false);
+      setRunPhase(null);
+      setFeedDeadline(null);
       setRunState("running");
+    });
+
+    const unsubPhase = window.api.settings.onRunPhase(({ phase, maxDurationMs }) => {
+      setRunPhase(phase);
+      if (phase === "feed" && typeof maxDurationMs === "number") {
+        setFeedDeadline(Date.now() + maxDurationMs);
+      } else {
+        setFeedDeadline(null);
+      }
     });
 
     const unsubScreencastEnded = window.api.screencast.onEnded(() => {
@@ -51,14 +73,24 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
 
     const unsubComplete = window.api.settings.onRunComplete(() => {
       setRunState("idle");
+      setRunPhase(null);
+      setFeedDeadline(null);
     });
 
     return () => {
       unsubStart();
+      unsubPhase();
       unsubScreencastEnded();
       unsubComplete();
     };
   }, []);
+
+  // Tick every 250ms while the feed countdown is active
+  useEffect(() => {
+    if (feedDeadline === null) return;
+    const id = setInterval(() => setNowTs(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [feedDeadline]);
 
   // Navigate to Gazette when analysis is ready
   useEffect(() => {
@@ -77,6 +109,10 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
 
   const handleStop = useCallback(async () => {
     await window.api.run.stop();
+  }, []);
+
+  const handleSkipToFeed = useCallback(async () => {
+    await window.api.run.skipToFeed();
   }, []);
 
   const handleNavigateToArchive = useCallback(() => {
@@ -135,6 +171,37 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
               }} />
               <span className="run-indicator-text">Run in progress</span>
             </div>
+            {runPhase === "stories" && (
+              <button
+                onClick={handleSkipToFeed}
+                className="run-stop-button"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px',
+                  borderLeft: '1.5px solid rgba(0,0,0,0.15)',
+                  background: 'transparent', cursor: 'pointer',
+                  font: 'inherit', color: 'inherit',
+                  letterSpacing: 'inherit', textTransform: 'inherit' as const,
+                }}
+              >
+                <SkipForward style={{ width: 10, height: 10 }} />
+                Skip to Feed
+              </button>
+            )}
+            {runPhase === "feed" && feedDeadline !== null && (
+              <div
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px',
+                  borderLeft: '1.5px solid rgba(0,0,0,0.15)',
+                  font: 'inherit', color: 'inherit',
+                  letterSpacing: 'inherit', textTransform: 'inherit' as const,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                Feed {formatCountdown(Math.max(0, feedDeadline - nowTs))}
+              </div>
+            )}
             <button
               onClick={handleStop}
               className="run-stop-button"

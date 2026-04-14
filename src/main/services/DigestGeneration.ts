@@ -11,6 +11,7 @@ import { CapturedPost, DigestConfig, ExtractionBlock } from '../../types/instagr
 import { AnalysisObject } from '../../types/analysis.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
 import { UsageService } from './UsageService.js';
+import { isCreditsDepletedError, CREDITS_DEPLETED_ERROR } from './NetworkMonitor.js';
 
 export class DigestGeneration {
     private apiKey: string;
@@ -23,7 +24,8 @@ export class DigestGeneration {
 
     async generateDigest(
         captures: CapturedPost[],
-        config: DigestConfig
+        config: DigestConfig,
+        runSignal?: AbortSignal
     ): Promise<AnalysisObject> {
         if (captures.length === 0) {
             throw new Error('INSUFFICIENT_CONTENT: No screenshots captured');
@@ -55,6 +57,8 @@ export class DigestGeneration {
         let data: any;
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {
+            // Bound each request at 60s — the digest can be large, but undici's
+            // 5-minute default is far too long when connectivity drops.
             const response = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
@@ -70,7 +74,10 @@ export class DigestGeneration {
                         content: userPrompt
                     }],
                     max_tokens: 16384
-                })
+                }),
+                signal: runSignal
+                    ? AbortSignal.any([runSignal, AbortSignal.timeout(60_000)])
+                    : AbortSignal.timeout(60_000)
             });
 
             if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
@@ -84,8 +91,11 @@ export class DigestGeneration {
             }
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                console.error('❌ Digest generation API error:', errorData);
+                const errText = await response.text().catch(() => '');
+                console.error('❌ Digest generation API error:', errText.slice(0, 300));
+                if (isCreditsDepletedError(response.status, errText)) {
+                    throw new Error(CREDITS_DEPLETED_ERROR);
+                }
                 throw new Error('DIGEST_GENERATION_FAILED');
             }
 

@@ -7,6 +7,7 @@ import { Kowalski } from './Kowalski.js';
 import { DigestGeneration } from './DigestGeneration.js';
 import { Extractor } from './Extractor.js';
 import { SecureKeyManager } from './SecureKeyManager.js';
+import { isOnline, isNetworkError, startOfflineWatchdog, OFFLINE_ERROR, CREDITS_DEPLETED_ERROR } from './NetworkMonitor.js';
 import { ExtractionBlock } from '../../types/instagram.js';
 
 const __filename = decodeURIComponent(new URL(import.meta.url).pathname);
@@ -23,6 +24,13 @@ export class RunManager {
     private activeScraper: Kowalski | null = null;
     private activeExtractors: Extractor[] = [];
 
+    // Run-level abort that fires for offline detection. Fetches in Extractor
+    // and DigestGeneration compose this signal into their AbortController so
+    // they unblock instantly when the network drops mid-run.
+    private runAbortController: AbortController | null = null;
+    private offlineDetected = false;
+    private stopOfflineWatchdog: (() => void) | null = null;
+
     private constructor() {}
 
     public static getInstance(): RunManager {
@@ -38,6 +46,45 @@ export class RunManager {
 
     public getStatus(): RunStatus {
         return this.status;
+    }
+
+    /**
+     * Called from the renderer when `navigator.onLine` flips to false — fires
+     * near-instantly on OS-level network changes. Aborts every in-flight LLM
+     * request so the run fails in milliseconds instead of waiting for fetch
+     * timeouts. The run's catch block then classifies the failure as offline
+     * and routes the UI to DigestFailedScreen.
+     */
+    public notifyOffline(): void {
+        if (this.status !== 'running') return;
+        if (this.offlineDetected) return;
+        console.log('🌐 Offline detected — aborting run');
+        this.offlineDetected = true;
+        // Emit the failed-screen event immediately. If we waited for the run
+        // to unwind first, the browser close would fire `screencast:onEnded`
+        // and AgentActiveScreen would briefly flip to "Generating digest"
+        // before the error arrived.
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('analysis-error', {
+                message: 'Network connection lost',
+                kind: 'offline',
+                canRetry: true
+            });
+        }
+        this.runAbortController?.abort();
+        if (this.activeScraper) this.activeScraper.stop();
+        for (const e of this.activeExtractors) e.stop();
+    }
+
+    /**
+     * Skip the active stories phase and continue into the feed phase.
+     * Only meaningful while the StoriesAgent is running; no-op otherwise.
+     */
+    public skipToFeed(): void {
+        if (this.activeScraper) {
+            console.log('⏭️  Skipping stories phase');
+            this.activeScraper.skipStoriesPhase();
+        }
     }
 
     public stopRun(): void {
@@ -65,8 +112,18 @@ export class RunManager {
         }
 
         this.status = 'running';
+        this.offlineDetected = false;
+        this.runAbortController = new AbortController();
         const phases = options?.phases ?? ['stories', 'feed'];
         console.log(`🚀 Run started (phases: ${phases.join(', ')})`);
+
+        // Background watchdog: probes Anthropic every 2s and trips notifyOffline
+        // after two consecutive failures (~4-6s to detect a real outage). This
+        // is the reliable path — navigator.onLine in Electron/macOS can lag.
+        this.stopOfflineWatchdog = startOfflineWatchdog(() => {
+            console.log('🌐 Offline watchdog: connectivity lost');
+            this.notifyOffline();
+        });
 
         const MAX_DURATION_MS = 90 * 60 * 1000;
         const browserManager = BrowserManager.getInstance();
@@ -95,6 +152,15 @@ export class RunManager {
                 return;
             }
 
+            // 2a. Pre-flight: confirm we can reach Anthropic before spending minutes
+            // in the browser. The browse phase doesn't hit the API directly, but
+            // every extraction and the digest do — and the retry loops inside
+            // those services will burn attempts if the network is actually down.
+            console.log('🚀 Pre-flight: checking network...');
+            if (!(await isOnline())) {
+                throw new Error(OFFLINE_ERROR);
+            }
+
             // 3. Launch browser (always headless)
             console.log('🚀 Launching browser...');
             context = await browserManager.launch();
@@ -107,7 +173,10 @@ export class RunManager {
             }
 
             // 5. Set up directories
-            const screenshotsDir = path.join(app.getPath('downloads'), 'kowalski-debug');
+            // Raw screenshots + sidecars live in userData (extractor watches them).
+            // Previously under ~/Downloads/kowalski-debug; moved out so runs don't
+            // accumulate files in the user's Downloads folder.
+            const screenshotsDir = path.join(app.getPath('userData'), 'kowalski-runs');
             const runStart = new Date();
             const pad = (n: number) => n.toString().padStart(2, '0');
             const dateTime = `${runStart.getFullYear()}-${pad(runStart.getMonth() + 1)}-${pad(runStart.getDate())}_${pad(runStart.getHours())}-${pad(runStart.getMinutes())}-${pad(runStart.getSeconds())}`;
@@ -120,8 +189,8 @@ export class RunManager {
             // 6. Start extractor agents in background — one vision call per raw image,
             // result merged into the existing sidecar JSON in place. No filtered/ dir.
             console.log('🚀 Starting extractor agents...');
-            const storiesExtractor = new Extractor(rawStoriesDir, apiKey);
-            const feedExtractor = new Extractor(rawFeedDir, apiKey);
+            const storiesExtractor = new Extractor(rawStoriesDir, apiKey, this.runAbortController.signal);
+            const feedExtractor = new Extractor(rawFeedDir, apiKey, this.runAbortController.signal);
             this.activeExtractors = [storiesExtractor, feedExtractor];
             const storiesExtractorPromise = storiesExtractor.start();
             const feedExtractorPromise = feedExtractor.start();
@@ -132,10 +201,23 @@ export class RunManager {
             this.activeScraper = scraper;
             const session = await scraper.browseAndCapture(
                 MAX_DURATION_MS / 60000,
-                { rawDir: path.join(sessionDir, 'raw'), phases }
+                {
+                    rawDir: path.join(sessionDir, 'raw'),
+                    phases,
+                    onPhaseChange: (phase, info) => {
+                        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                            this.mainWindow.webContents.send('run-phase', { phase, ...(info ?? {}) });
+                        }
+                    }
+                }
             );
             this.activeScraper = null;
             console.log(`🚀 Browsing complete: ${session.rawScreenshotCount} raw screenshots`);
+
+            // Bail out early if the watchdog tripped during browsing. We must
+            // not proceed to digest generation when the user has no network —
+            // the UI is already on the failed screen.
+            if (this.offlineDetected) throw new Error(OFFLINE_ERROR);
 
             // 8. Close browser before generation
             await browserManager.close();
@@ -197,13 +279,17 @@ export class RunManager {
             }));
             console.log(`🚀 Loaded ${bestCaptures.length} raw screenshots with extractions`);
 
-            // 11. Generate digest
+            // 11. Generate digest — re-check the network first. Browsing can take
+            // up to 90 min and connectivity may have dropped in that window.
+            if (!(await isOnline())) {
+                throw new Error(OFFLINE_ERROR);
+            }
             console.log('🚀 Generating digest...');
             const digestGenerator = new DigestGeneration(apiKey);
             const analysis = await digestGenerator.generateDigest(bestCaptures, {
                 userName: settings.userName || 'User',
                 location: settings.location || ''
-            });
+            }, this.runAbortController.signal);
 
             // 12. Save images to disk
             const recordId = uuidv4();
@@ -279,16 +365,32 @@ export class RunManager {
                 await browserManager.close();
             }
 
-            this.emitError(`Run failed: ${error.message}`);
+            // Classify the failure. Three distinct kinds flow to the UI:
+            //   - credits: Anthropic returned credit_balance_too_low
+            //   - offline: pre-flight OFFLINE, watchdog tripped, or a
+            //       network-layer error surfaced from a fetch
+            //   - general: anything else (rendered as a log-only for now)
+            const creditsDepleted = error?.message === CREDITS_DEPLETED_ERROR;
+            const offline = !creditsDepleted && (this.offlineDetected || error?.message === OFFLINE_ERROR || isNetworkError(error));
+            if (!this.offlineDetected) {
+                if (creditsDepleted) {
+                    this.emitError('Please refill your API Balance', 'credits');
+                } else if (offline) {
+                    this.emitError('Network connection lost', 'offline');
+                } else {
+                    this.emitError(`Run failed: ${error.message}`, 'general');
+                }
+            }
         }
 
         this.finishRun();
     }
 
-    private emitError(message: string) {
+    private emitError(message: string, kind: 'offline' | 'credits' | 'general' = 'general') {
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
             this.mainWindow.webContents.send('analysis-error', {
                 message,
+                kind,
                 canRetry: true
             });
         }
@@ -297,6 +399,10 @@ export class RunManager {
     private finishRun() {
         this.status = 'idle';
         this.activeExtractors = [];
+        if (this.stopOfflineWatchdog) {
+            this.stopOfflineWatchdog();
+            this.stopOfflineWatchdog = null;
+        }
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
             this.mainWindow.webContents.send('run-complete', {});
         }

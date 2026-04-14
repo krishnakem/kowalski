@@ -14,17 +14,22 @@ interface Window {
             getSecureKey: () => Promise<string | null>;
             validateApiKey: (apiKey: string) => Promise<{ valid: boolean; error?: string }>;
             onAnalysisReady: (callback: (analysis: any) => void) => () => void;
-            onAnalysisError: (callback: (error: { message: string; canRetry: boolean; nextRetry: string | null }) => void) => () => void;
+            onAnalysisError: (callback: (error: { message: string; kind?: 'offline' | 'credits' | 'general'; canRetry: boolean; nextRetry?: string | null }) => void) => () => void;
             onSessionExpired: (callback: () => void) => () => void;
             onRateLimited: (callback: (info: { nextRetry: string }) => void) => () => void;
             onInsufficientContent: (callback: (info: { collected: number; required: number; reason: string; nextRetry: string }) => void) => () => void;
             onRunStarted: (callback: (info: { durationMs: number; startTime: number }) => void) => () => void;
             onRunComplete: (callback: () => void) => () => void;
+            onRunPhase: (callback: (info: { phase: 'stories' | 'feed'; maxDurationMs?: number }) => void) => () => void;
         };
         run: {
             start: () => Promise<void>;
             stop: () => Promise<void>;
+            skipToFeed: () => Promise<void>;
             getStatus: () => Promise<'idle' | 'running'>;
+        };
+        network: {
+            notifyOffline: () => void;
         };
         screencast: {
             onFrame: (cb: (data: string) => void) => () => void;

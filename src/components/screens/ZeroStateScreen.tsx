@@ -1,10 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { Eye, EyeOff, Instagram, Loader2 } from "lucide-react";
-import {
-  PixelArrow,
-  WavingPenguin
-} from "../icons/PixelIcons";
+import { WavingPenguin } from "../icons/PixelIcons";
 import { useSettings } from "@/hooks/useSettings";
 
 interface ZeroStateScreenProps {
@@ -99,6 +96,24 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
     return () => window.clearTimeout(t);
   }, [typingComplete]);
 
+  // Enter-to-advance for the button-only steps (hook + instagram). The name
+  // and key steps handle Enter on their own inputs.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      if (step === "hook" && showBegin) {
+        e.preventDefault();
+        handleBegin();
+      } else if (step === "instagram") {
+        e.preventDefault();
+        handleConnectClick();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, showBegin]);
+
   // Smooth penguin animation using springs
   const mouseX = useMotionValue(0);
   const smoothX = useSpring(mouseX, { stiffness: 100, damping: 20, mass: 0.5 });
@@ -184,7 +199,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 transition={{ duration: 0.5, delay: 0.2 }}
               >
                 <TypewriterText
-                  text="Social Media is a drug."
+                  text="Kowalski doomscrolls."
                   onComplete={() => setFirstLineComplete(true)}
                 />
               </motion.div>
@@ -195,7 +210,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                   transition={{ duration: 0.5 }}
                 >
                   <TypewriterText
-                    text="Kowalski gets high for you."
+                    text="So you don't have to."
                     onComplete={() => setTypingComplete(true)}
                   />
                 </motion.div>
@@ -211,14 +226,13 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 tabIndex={showBegin ? 0 : -1}
                 aria-hidden={!showBegin}
                 className={
-                  "inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground " +
+                  "px-8 py-4 border-2 border-foreground " +
                   "text-foreground font-sans text-sm tracking-wider uppercase " +
-                  "hover:bg-foreground hover:text-background transition-colors duration-200" +
+                  "hover:bg-foreground hover:text-background transition-all duration-200" +
                   (showBegin ? "" : " pointer-events-none")
                 }
               >
-                <span>Begin</span>
-                <PixelArrow size={16} color="charcoal" />
+                Begin
               </motion.button>
             </div>
           </motion.div>
@@ -287,12 +301,11 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.3 }}
                     onClick={handleNameContinue}
-                    className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
+                    className="px-8 py-4 border-2 border-foreground
                                text-foreground font-sans text-sm tracking-wider uppercase
                                hover:bg-foreground hover:text-background transition-all duration-200"
                   >
-                    <span>Continue</span>
-                    <PixelArrow size={16} color="charcoal" />
+                    Continue
                   </motion.button>
                 )}
               </AnimatePresence>
@@ -340,6 +353,9 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     setApiKey(e.target.value);
                     setKeyError(null);
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && apiKey && !isValidating) handleInitialize();
+                  }}
                   placeholder="sk-ant-..."
                   className={`w-full input-dotted text-foreground placeholder:text-foreground/30
                              font-sans text-lg tracking-wider pr-12 py-4 ${keyError ? 'border-destructive' : ''}`}
@@ -384,10 +400,7 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                     <span className="text-foreground">Validating...</span>
                   </>
                 ) : (
-                  <>
-                    <span>Next</span>
-                    <PixelArrow size={16} color="charcoal" />
-                  </>
+                  "Next"
                 )}
               </button>
             </motion.div>
@@ -438,12 +451,11 @@ const ZeroStateScreen = ({ onContinue }: ZeroStateScreenProps) => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.5, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 onClick={handleConnectClick}
-                className="inline-flex items-center gap-3 px-8 py-4 border-2 border-foreground
+                className="px-8 py-4 border-2 border-foreground
                            text-foreground font-sans text-sm tracking-wider uppercase
                            hover:bg-foreground hover:text-background transition-all duration-200"
               >
                 Connect Account
-                <PixelArrow size={16} color="charcoal" />
               </motion.button>
             </motion.div>
           </motion.div>

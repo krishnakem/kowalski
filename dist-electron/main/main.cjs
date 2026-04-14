@@ -26881,7 +26881,7 @@ var require_pixelmatch = __commonJS({
 });
 
 // src/main/main.ts
-var import_electron7 = require("electron");
+var import_electron6 = require("electron");
 var import_path6 = __toESM(require("path"), 1);
 var import_url = require("url");
 var import_fs8 = __toESM(require("fs"), 1);
@@ -27864,13 +27864,10 @@ var UsageService = class _UsageService {
 };
 
 // src/main/services/RunManager.ts
-var import_electron6 = require("electron");
+var import_electron5 = require("electron");
 var import_fs7 = __toESM(require("fs"), 1);
 var import_path5 = __toESM(require("path"), 1);
 var import_uuid = require("uuid");
-
-// src/main/services/Kowalski.ts
-var import_electron5 = require("electron");
 
 // src/main/services/GhostMouse.ts
 var GhostMouse = class {
@@ -41343,6 +41340,67 @@ var ScreenshotCollector = class {
 var import_fs5 = __toESM(require("fs"), 1);
 var import_path3 = __toESM(require("path"), 1);
 
+// src/main/services/NetworkMonitor.ts
+var PROBE_URL = "https://api.anthropic.com/v1/messages";
+var PROBE_TIMEOUT_MS = 2e3;
+async function isOnline() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    await fetch(PROBE_URL, { method: "HEAD", signal: controller.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function startOfflineWatchdog(onOffline, intervalMs = 1e3) {
+  let stopped = false;
+  let consecutiveFailures = 0;
+  const REQUIRED_FAILURES = 2;
+  const tick = async () => {
+    while (!stopped) {
+      const ok = await isOnline();
+      if (stopped) return;
+      if (ok) {
+        consecutiveFailures = 0;
+        await new Promise((r) => setTimeout(r, intervalMs));
+      } else {
+        consecutiveFailures++;
+        if (consecutiveFailures >= REQUIRED_FAILURES) {
+          stopped = true;
+          onOffline();
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+  };
+  tick();
+  return () => {
+    stopped = true;
+  };
+}
+function isNetworkError(err) {
+  if (!err) return false;
+  const e = err;
+  if (e.name === "TimeoutError" || e.name === "AbortError") return true;
+  const code = e.code || e.cause?.code || "";
+  if (["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET"].includes(code)) {
+    return true;
+  }
+  const msg = (e.message || "").toLowerCase();
+  return /fetch failed|getaddrinfo|network|enotfound|econnrefused|timeout/.test(msg);
+}
+var OFFLINE_ERROR = "OFFLINE";
+var CREDITS_DEPLETED_ERROR = "CREDITS_DEPLETED";
+function isCreditsDepletedError(status, body) {
+  if (status !== 400 && status !== 403) return false;
+  const lower = body.toLowerCase();
+  return lower.includes("credit balance") || lower.includes("credit_balance");
+}
+
 // src/utils/elementLabeler.ts
 var MIN_SIZE = 15;
 var SAFETY_LABEL_RE = /^(Like|Unlike|Save|Unsave|Share|Send|Follow|Unfollow|Direct|Comment|Reply)/i;
@@ -42302,6 +42360,7 @@ var BaseVisionAgent = class {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (this.stopped) break;
       try {
+        const perRequestTimeout = AbortSignal.timeout(2e4);
         const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
@@ -42311,12 +42370,15 @@ var BaseVisionAgent = class {
             "anthropic-beta": "prompt-caching-2024-07-31"
           },
           body: JSON.stringify(requestBody),
-          signal: this.abortController.signal
+          signal: AbortSignal.any([this.abortController.signal, perRequestTimeout])
         });
         if (!response.ok) {
           const errText = await response.text();
           console.warn(`  \u26A0\uFE0F LLM API error (${response.status}): ${errText.slice(0, 200)}`);
           this.collector.appendLog(`  \u26A0\uFE0F LLM API error (${response.status}): ${errText.slice(0, 200)}`);
+          if (isCreditsDepletedError(response.status, errText)) {
+            throw new Error(CREDITS_DEPLETED_ERROR);
+          }
           if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
             const baseDelay = response.status === 429 ? 1e4 : 5e3;
             const backoff = Math.min(baseDelay * Math.pow(2, attempt), 6e4);
@@ -42355,8 +42417,14 @@ var BaseVisionAgent = class {
         return this.parseJsonResponse(content);
       } catch (err) {
         if (this.stopped) break;
+        if (err instanceof Error && err.message === CREDITS_DEPLETED_ERROR) {
+          throw err;
+        }
         console.warn(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}/${maxRetries}):`, err);
         this.collector.appendLog(`  \u26A0\uFE0F LLM call/parse error (attempt ${attempt + 1}/${maxRetries}): ${err}`);
+        if (isNetworkError(err) && !await isOnline()) {
+          throw new Error(OFFLINE_ERROR);
+        }
         if (attempt < maxRetries - 1) {
           await this.delay(500);
           continue;
@@ -43163,6 +43231,15 @@ var Kowalski = class {
     }
   }
   /**
+   * Skip the active stories agent and proceed to the feed phase. Unlike stop(),
+   * this leaves `this.stopped` false so the outer loop continues into Phase 2.
+   */
+  skipStoriesPhase() {
+    if (this.activeAgent) {
+      this.activeAgent.stop();
+    }
+  }
+  /**
    * Main entry point — browse Instagram and return captured screenshots.
    */
   async browseAndCapture(targetMinutes, config) {
@@ -43184,8 +43261,9 @@ var Kowalski = class {
     this.screenshotCollector = new ScreenshotCollector(this.page, {
       maxCaptures: estimatedMaxCaptures,
       jpegQuality: 85,
-      minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.1),
-      saveToDirectory: path6.join(import_electron5.app.getPath("downloads"), "kowalski-debug")
+      minScrollDelta: Math.round((this.page.viewportSize()?.height || 1920) * 0.1)
+      // Debug-only screenshot/log dump to ~/Downloads/kowalski-debug — disabled.
+      // saveToDirectory: path.join(app.getPath('downloads'), 'kowalski-debug')
     });
     let totalRawScreenshots = 0;
     let totalDecisions = 0;
@@ -43234,6 +43312,7 @@ var Kowalski = class {
       const storiesRawDir = baseRawDir ? path6.join(baseRawDir, "stories") : void 0;
       const feedRawDir = baseRawDir ? path6.join(baseRawDir, "feed") : void 0;
       const phases = config?.phases ?? ["stories", "feed"];
+      const onPhaseChange = config?.onPhaseChange;
       let storiesElapsed = 0;
       if (phases.includes("stories") && !this.stopped) {
         const storiesMaxMs = Infinity;
@@ -43242,6 +43321,7 @@ var Kowalski = class {
         this.screenshotCollector.appendLogRaw(`
 ## Phase 1: Stories
 `);
+        onPhaseChange?.("stories");
         const storiesAgent = new StoriesAgent(
           this.page,
           this.ghost,
@@ -43265,13 +43345,16 @@ var Kowalski = class {
         console.log("\u{1F4D6} Skipping stories phase");
       }
       if (phases.includes("feed") && !this.stopped) {
-        const feedMaxMs = targetDurationMs - (Date.now() - startTime);
+        const FEED_PHASE_MAX_MS = 30 * 60 * 1e3;
+        const remainingMs = targetDurationMs - (Date.now() - startTime);
+        const feedMaxMs = Math.min(remainingMs, FEED_PHASE_MAX_MS);
         if (feedMaxMs > 3e4) {
           console.log(`
 \u{1F4F0} Phase 2: Feed (budget: ${(feedMaxMs / 1e3 / 60).toFixed(1)} min, model: ${ModelConfig.navigation})`);
           this.screenshotCollector.appendLogRaw(`
 ## Phase 2: Feed
 `);
+          onPhaseChange?.("feed", { maxDurationMs: feedMaxMs });
           const feedAgent = new FeedAgent(
             this.page,
             this.ghost,
@@ -43329,7 +43412,7 @@ var Kowalski = class {
       await this.sessionMemory.saveSession(sessionSummary);
     } catch (error) {
       console.error("\u274C Navigation error:", error.message);
-      if (["SESSION_EXPIRED", "RATE_LIMITED"].includes(error.message)) {
+      if (["SESSION_EXPIRED", "RATE_LIMITED", "OFFLINE", "CREDITS_DEPLETED"].includes(error.message)) {
         throw error;
       }
     } finally {
@@ -43370,7 +43453,7 @@ var DigestGeneration = class {
     this.apiKey = apiKey;
     this.usageService = UsageService.getInstance();
   }
-  async generateDigest(captures, config) {
+  async generateDigest(captures, config, runSignal) {
     if (captures.length === 0) {
       throw new Error("INSUFFICIENT_CONTENT: No screenshots captured");
     }
@@ -43409,7 +43492,8 @@ var DigestGeneration = class {
             content: userPrompt
           }],
           max_tokens: 16384
-        })
+        }),
+        signal: runSignal ? AbortSignal.any([runSignal, AbortSignal.timeout(6e4)]) : AbortSignal.timeout(6e4)
       });
       if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
         const baseDelay = response.status === 429 ? 1e4 : 5e3;
@@ -43421,8 +43505,11 @@ var DigestGeneration = class {
         continue;
       }
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error("\u274C Digest generation API error:", errorData);
+        const errText = await response.text().catch(() => "");
+        console.error("\u274C Digest generation API error:", errText.slice(0, 300));
+        if (isCreditsDepletedError(response.status, errText)) {
+          throw new Error(CREDITS_DEPLETED_ERROR);
+        }
         throw new Error("DIGEST_GENERATION_FAILED");
       }
       data = await response.json();
@@ -43666,10 +43753,12 @@ var Extractor = class {
   failed = 0;
   tokensUsed = 0;
   usageService;
-  constructor(rawDir, apiKey) {
+  runSignal;
+  constructor(rawDir, apiKey, runSignal) {
     this.rawDir = rawDir;
     this.apiKey = apiKey;
     this.usageService = UsageService.getInstance();
+    this.runSignal = runSignal;
   }
   /**
    * Start the async extractor loop. Polls raw/ for new screenshots every 2 seconds.
@@ -43747,6 +43836,10 @@ var Extractor = class {
         console.log(`  \u{1F9E0} \u2713 ${filename}: ${handle} \u2014 ${summary}`);
       }
     } catch (error) {
+      if (error instanceof Error && error.message === CREDITS_DEPLETED_ERROR) {
+        this.running = false;
+        throw error;
+      }
       this.failed++;
       console.warn(`  \u{1F9E0} \u26A0\uFE0F ${filename}: extraction failed \u2014`, error);
       const fallback = {
@@ -43804,7 +43897,8 @@ var Extractor = class {
                 { type: "text", text: this.buildExtractionPrompt() }
               ]
             }]
-          })
+          }),
+          signal: this.runSignal ? AbortSignal.any([this.runSignal, AbortSignal.timeout(3e4)]) : AbortSignal.timeout(3e4)
         });
         if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
           const baseDelay = response.status === 429 ? 1e4 : 5e3;
@@ -43816,6 +43910,10 @@ var Extractor = class {
           continue;
         }
         if (!response.ok) {
+          const errText = await response.text().catch(() => "");
+          if (isCreditsDepletedError(response.status, errText)) {
+            throw new Error(CREDITS_DEPLETED_ERROR);
+          }
           throw new Error(`Extractor LLM HTTP ${response.status}`);
         }
         const data = await response.json();
@@ -43831,6 +43929,9 @@ var Extractor = class {
         const text = data.content?.[0]?.text || "";
         return this.parseExtractionResponse(text);
       } catch (err) {
+        if (err instanceof Error && err.message === CREDITS_DEPLETED_ERROR) {
+          throw err;
+        }
         if (attempt < maxRetries - 1) {
           const delay = 5e3 * Math.pow(2, attempt);
           console.warn(`  \u{1F9E0} \u23F3 Extractor LLM network error (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1e3).toFixed(1)}s...`);
@@ -43943,6 +44044,12 @@ var RunManager = class _RunManager {
   // Active run state (for stop support)
   activeScraper = null;
   activeExtractors = [];
+  // Run-level abort that fires for offline detection. Fetches in Extractor
+  // and DigestGeneration compose this signal into their AbortController so
+  // they unblock instantly when the network drops mid-run.
+  runAbortController = null;
+  offlineDetected = false;
+  stopOfflineWatchdog = null;
   constructor() {
   }
   static getInstance() {
@@ -43956,6 +44063,39 @@ var RunManager = class _RunManager {
   }
   getStatus() {
     return this.status;
+  }
+  /**
+   * Called from the renderer when `navigator.onLine` flips to false — fires
+   * near-instantly on OS-level network changes. Aborts every in-flight LLM
+   * request so the run fails in milliseconds instead of waiting for fetch
+   * timeouts. The run's catch block then classifies the failure as offline
+   * and routes the UI to DigestFailedScreen.
+   */
+  notifyOffline() {
+    if (this.status !== "running") return;
+    if (this.offlineDetected) return;
+    console.log("\u{1F310} Offline detected \u2014 aborting run");
+    this.offlineDetected = true;
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("analysis-error", {
+        message: "Network connection lost",
+        kind: "offline",
+        canRetry: true
+      });
+    }
+    this.runAbortController?.abort();
+    if (this.activeScraper) this.activeScraper.stop();
+    for (const e of this.activeExtractors) e.stop();
+  }
+  /**
+   * Skip the active stories phase and continue into the feed phase.
+   * Only meaningful while the StoriesAgent is running; no-op otherwise.
+   */
+  skipToFeed() {
+    if (this.activeScraper) {
+      console.log("\u23ED\uFE0F  Skipping stories phase");
+      this.activeScraper.skipStoriesPhase();
+    }
   }
   stopRun() {
     if (this.activeScraper) {
@@ -43975,8 +44115,14 @@ var RunManager = class _RunManager {
       return;
     }
     this.status = "running";
+    this.offlineDetected = false;
+    this.runAbortController = new AbortController();
     const phases = options?.phases ?? ["stories", "feed"];
     console.log(`\u{1F680} Run started (phases: ${phases.join(", ")})`);
+    this.stopOfflineWatchdog = startOfflineWatchdog(() => {
+      console.log("\u{1F310} Offline watchdog: connectivity lost");
+      this.notifyOffline();
+    });
     const MAX_DURATION_MS = 90 * 60 * 1e3;
     const browserManager = BrowserManager.getInstance();
     let context = null;
@@ -43997,6 +44143,10 @@ var RunManager = class _RunManager {
         this.finishRun();
         return;
       }
+      console.log("\u{1F680} Pre-flight: checking network...");
+      if (!await isOnline()) {
+        throw new Error(OFFLINE_ERROR);
+      }
       console.log("\u{1F680} Launching browser...");
       context = await browserManager.launch();
       console.log("\u{1F680} Validating Instagram session...");
@@ -44004,7 +44154,7 @@ var RunManager = class _RunManager {
       if (!sessionCheck.valid) {
         throw new Error(sessionCheck.reason || "SESSION_EXPIRED");
       }
-      const screenshotsDir = import_path5.default.join(import_electron6.app.getPath("downloads"), "kowalski-debug");
+      const screenshotsDir = import_path5.default.join(import_electron5.app.getPath("userData"), "kowalski-runs");
       const runStart = /* @__PURE__ */ new Date();
       const pad = (n) => n.toString().padStart(2, "0");
       const dateTime = `${runStart.getFullYear()}-${pad(runStart.getMonth() + 1)}-${pad(runStart.getDate())}_${pad(runStart.getHours())}-${pad(runStart.getMinutes())}-${pad(runStart.getSeconds())}`;
@@ -44014,8 +44164,8 @@ var RunManager = class _RunManager {
       import_fs7.default.mkdirSync(rawStoriesDir, { recursive: true });
       import_fs7.default.mkdirSync(rawFeedDir, { recursive: true });
       console.log("\u{1F680} Starting extractor agents...");
-      const storiesExtractor = new Extractor(rawStoriesDir, apiKey);
-      const feedExtractor = new Extractor(rawFeedDir, apiKey);
+      const storiesExtractor = new Extractor(rawStoriesDir, apiKey, this.runAbortController.signal);
+      const feedExtractor = new Extractor(rawFeedDir, apiKey, this.runAbortController.signal);
       this.activeExtractors = [storiesExtractor, feedExtractor];
       const storiesExtractorPromise = storiesExtractor.start();
       const feedExtractorPromise = feedExtractor.start();
@@ -44024,10 +44174,19 @@ var RunManager = class _RunManager {
       this.activeScraper = scraper;
       const session2 = await scraper.browseAndCapture(
         MAX_DURATION_MS / 6e4,
-        { rawDir: import_path5.default.join(sessionDir, "raw"), phases }
+        {
+          rawDir: import_path5.default.join(sessionDir, "raw"),
+          phases,
+          onPhaseChange: (phase, info) => {
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+              this.mainWindow.webContents.send("run-phase", { phase, ...info ?? {} });
+            }
+          }
+        }
       );
       this.activeScraper = null;
       console.log(`\u{1F680} Browsing complete: ${session2.rawScreenshotCount} raw screenshots`);
+      if (this.offlineDetected) throw new Error(OFFLINE_ERROR);
       await browserManager.close();
       context = null;
       console.log("\u{1F680} Waiting for extractor agents...");
@@ -44074,14 +44233,17 @@ var RunManager = class _RunManager {
         extraction: cap.extraction
       }));
       console.log(`\u{1F680} Loaded ${bestCaptures.length} raw screenshots with extractions`);
+      if (!await isOnline()) {
+        throw new Error(OFFLINE_ERROR);
+      }
       console.log("\u{1F680} Generating digest...");
       const digestGenerator = new DigestGeneration(apiKey);
       const analysis = await digestGenerator.generateDigest(bestCaptures, {
         userName: settings.userName || "User",
         location: settings.location || ""
-      });
+      }, this.runAbortController.signal);
       const recordId = (0, import_uuid.v4)();
-      const userDataPath = import_electron6.app.getPath("userData");
+      const userDataPath = import_electron5.app.getPath("userData");
       const recordDir = import_path5.default.join(userDataPath, "analysis_records");
       const imagesDir = import_path5.default.join(recordDir, recordId, "images");
       await import_fs7.default.promises.mkdir(imagesDir, { recursive: true });
@@ -44136,14 +44298,25 @@ var RunManager = class _RunManager {
       if (context) {
         await browserManager.close();
       }
-      this.emitError(`Run failed: ${error.message}`);
+      const creditsDepleted = error?.message === CREDITS_DEPLETED_ERROR;
+      const offline = !creditsDepleted && (this.offlineDetected || error?.message === OFFLINE_ERROR || isNetworkError(error));
+      if (!this.offlineDetected) {
+        if (creditsDepleted) {
+          this.emitError("Please refill your API Balance", "credits");
+        } else if (offline) {
+          this.emitError("Network connection lost", "offline");
+        } else {
+          this.emitError(`Run failed: ${error.message}`, "general");
+        }
+      }
     }
     this.finishRun();
   }
-  emitError(message) {
+  emitError(message, kind = "general") {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send("analysis-error", {
         message,
+        kind,
         canRetry: true
       });
     }
@@ -44151,6 +44324,10 @@ var RunManager = class _RunManager {
   finishRun() {
     this.status = "idle";
     this.activeExtractors = [];
+    if (this.stopOfflineWatchdog) {
+      this.stopOfflineWatchdog();
+      this.stopOfflineWatchdog = null;
+    }
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send("run-complete", {});
     }
@@ -44159,19 +44336,19 @@ var RunManager = class _RunManager {
 
 // src/main/main.ts
 var import_module = require("module");
-import_electron7.app.commandLine.appendSwitch("ignore-certificate-errors");
-import_electron7.app.commandLine.appendSwitch("disable-gpu");
-import_electron7.app.commandLine.appendSwitch("disable-software-rasterizer");
-import_electron7.app.commandLine.appendSwitch("disable-dev-shm-usage");
-import_electron7.app.commandLine.appendSwitch("disable-renderer-backgrounding");
+import_electron6.app.commandLine.appendSwitch("ignore-certificate-errors");
+import_electron6.app.commandLine.appendSwitch("disable-gpu");
+import_electron6.app.commandLine.appendSwitch("disable-software-rasterizer");
+import_electron6.app.commandLine.appendSwitch("disable-dev-shm-usage");
+import_electron6.app.commandLine.appendSwitch("disable-renderer-backgrounding");
 var __filename2 = (0, import_url.fileURLToPath)(__importMetaUrl);
 var __dirname3 = import_path6.default.dirname(__filename2);
 var require2 = (0, import_module.createRequire)(__importMetaUrl);
-import_electron7.app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
+import_electron6.app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 if (require2("electron-squirrel-startup")) {
-  import_electron7.app.quit();
+  import_electron6.app.quit();
 }
-import_electron7.protocol.registerSchemesAsPrivileged([
+import_electron6.protocol.registerSchemesAsPrivileged([
   {
     scheme: "kowalski-local",
     privileges: {
@@ -44186,7 +44363,7 @@ var isQuitting = false;
 var mainWindow = null;
 var SHARED_PARTITION = "persist:instagram_shared";
 var createWindow = () => {
-  mainWindow = new import_electron7.BrowserWindow({
+  mainWindow = new import_electron6.BrowserWindow({
     width: KOWALSKI_VIEWPORT.width,
     height: KOWALSKI_VIEWPORT.height,
     useContentSize: true,
@@ -44203,13 +44380,12 @@ var createWindow = () => {
       preload: import_path6.default.join(__dirname3, "../preload/preload.cjs"),
       webviewTag: true,
       partition: SHARED_PARTITION
-    },
-    icon: import_path6.default.join(__dirname3, "../../build/icon-standard.png")
+    }
+    // No `icon` on macOS: the dock/finder icon comes from the .app bundle's
+    // Contents/Resources/icon.icns, which electron-builder writes from
+    // package.json's `build.mac.icon`. Passing a path here is redundant and
+    // can throw "Failed to load image from path" at runtime.
   });
-  if (process.platform === "darwin") {
-    const iconPath = import_path6.default.join(__dirname3, "../../build/icon-standard.png");
-    import_electron7.app.dock?.setIcon(iconPath);
-  }
   RunManager.getInstance().setMainWindow(mainWindow);
   BrowserManager.getInstance().setMainWindow(mainWindow);
   mainWindow.on("page-title-updated", (e) => {
@@ -44245,7 +44421,7 @@ var createWindow = () => {
     RunManager.getInstance().setMainWindow(null);
   });
 };
-import_electron7.app.on("ready", () => {
+import_electron6.app.on("ready", () => {
   const rendererDistDir = import_path6.default.join(__dirname3, "../../dist");
   const protocolHandler = (request, callback) => {
     const url = new URL(request.url);
@@ -44262,7 +44438,7 @@ import_electron7.app.on("ready", () => {
     }
     const recordId = hostname;
     const filePath = rawPath;
-    const userDataPath2 = import_electron7.app.getPath("userData");
+    const userDataPath2 = import_electron6.app.getPath("userData");
     const fullPath = import_path6.default.join(userDataPath2, "analysis_records", recordId, filePath);
     console.log(`\u{1F4F7} Protocol request: ${request.url}`);
     console.log(`\u{1F4F7} Resolved path: ${fullPath}`);
@@ -44287,9 +44463,9 @@ import_electron7.app.on("ready", () => {
       callback({ error: -6 });
     }
   };
-  import_electron7.protocol.registerFileProtocol("kowalski-local", protocolHandler);
+  import_electron6.protocol.registerFileProtocol("kowalski-local", protocolHandler);
   console.log("\u2705 Registered kowalski-local protocol on default session");
-  import_electron7.session.fromPartition(SHARED_PARTITION).protocol.registerFileProtocol("kowalski-local", protocolHandler);
+  import_electron6.session.fromPartition(SHARED_PARTITION).protocol.registerFileProtocol("kowalski-local", protocolHandler);
   console.log(`\u2705 Registered kowalski-local protocol on partition: ${SHARED_PARTITION}`);
   createWindow();
   console.log("Session persistence enabled.");
@@ -44298,27 +44474,27 @@ import_electron7.app.on("ready", () => {
       console.error("UsageService init failed:", err);
     });
   }, 2e3);
-  import_electron7.globalShortcut.register("CommandOrControl+Shift+H", () => {
+  import_electron6.globalShortcut.register("CommandOrControl+Shift+H", () => {
     console.log("\u{1F680} Run Triggered (Cmd+Shift+H)");
     RunManager.getInstance().startRun();
   });
-  import_electron7.globalShortcut.register("CommandOrControl+Shift+K", () => {
+  import_electron6.globalShortcut.register("CommandOrControl+Shift+K", () => {
     console.log("\u{1F6D1} Stop Triggered (Cmd+Shift+K)");
     RunManager.getInstance().stopRun();
   });
-  import_electron7.globalShortcut.register("CommandOrControl+Shift+S", () => {
+  import_electron6.globalShortcut.register("CommandOrControl+Shift+S", () => {
     console.log("\u{1F4D6} Stories-Only Run Triggered (Cmd+Shift+S)");
     RunManager.getInstance().startRun({ phases: ["stories"] });
   });
-  import_electron7.globalShortcut.register("CommandOrControl+Shift+F", () => {
+  import_electron6.globalShortcut.register("CommandOrControl+Shift+F", () => {
     console.log("\u{1F4F0} Feed-Only Run Triggered (Cmd+Shift+F)");
     RunManager.getInstance().startRun({ phases: ["feed"] });
   });
-  import_electron7.globalShortcut.register("CommandOrControl+Shift+R", () => {
+  import_electron6.globalShortcut.register("CommandOrControl+Shift+R", () => {
     console.log("\u{1F9E0} Reset Session Memory Triggered (Cmd+Shift+R)");
     new SessionMemory().resetMemory();
   });
-  const userDataPath = import_electron7.app.getPath("userData");
+  const userDataPath = import_electron6.app.getPath("userData");
   const recordsPath = import_path6.default.join(userDataPath, "analysis_records");
   if (!import_fs8.default.existsSync(recordsPath)) {
     import_fs8.default.mkdirSync(recordsPath, { recursive: true });
@@ -44326,16 +44502,16 @@ import_electron7.app.on("ready", () => {
   }
   setupIPCHandlers();
 });
-import_electron7.app.on("before-quit", () => {
+import_electron6.app.on("before-quit", () => {
   isQuitting = true;
-  import_electron7.globalShortcut.unregisterAll();
+  import_electron6.globalShortcut.unregisterAll();
   RunManager.getInstance().stopRun();
 });
 function setupIPCHandlers() {
-  import_electron7.ipcMain.handle("reset-session", async () => {
+  import_electron6.ipcMain.handle("reset-session", async () => {
     console.log("\u{1F9F9} Starting session reset...");
     try {
-      const userDataPath = import_electron7.app.getPath("userData");
+      const userDataPath = import_electron6.app.getPath("userData");
       const sessionPath = import_path6.default.join(userDataPath, "session.json");
       if (import_fs8.default.existsSync(sessionPath)) {
         import_fs8.default.unlinkSync(sessionPath);
@@ -44346,13 +44522,13 @@ function setupIPCHandlers() {
       console.error("\u26A0\uFE0F Failed to delete session.json:", e);
     }
     try {
-      await import_electron7.session.defaultSession.clearStorageData();
+      await import_electron6.session.defaultSession.clearStorageData();
       console.log("\u2705 Cleared default session storage");
     } catch (e) {
       console.error("\u26A0\uFE0F Failed to clear default session storage:", e);
     }
     try {
-      await import_electron7.session.fromPartition(SHARED_PARTITION).clearStorageData();
+      await import_electron6.session.fromPartition(SHARED_PARTITION).clearStorageData();
       console.log("\u2705 Cleared shared partition storage");
     } catch (e) {
       console.error("\u26A0\uFE0F Failed to clear shared partition storage:", e);
@@ -44369,7 +44545,7 @@ function setupIPCHandlers() {
       return false;
     }
     try {
-      const userDataPath = import_electron7.app.getPath("userData");
+      const userDataPath = import_electron6.app.getPath("userData");
       const recordsPath = import_path6.default.join(userDataPath, "analysis_records");
       if (import_fs8.default.existsSync(recordsPath)) {
         import_fs8.default.rmSync(recordsPath, { recursive: true, force: true });
@@ -44381,18 +44557,18 @@ function setupIPCHandlers() {
     console.log("\u{1F389} Session reset complete");
     return true;
   });
-  import_electron7.ipcMain.handle("settings:get", async () => {
+  import_electron6.ipcMain.handle("settings:get", async () => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     return store.get("settings") || {};
   });
-  import_electron7.ipcMain.handle("settings:set", async (_event, newSettings) => {
+  import_electron6.ipcMain.handle("settings:set", async (_event, newSettings) => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     store.set("settings", newSettings);
     return true;
   });
-  import_electron7.ipcMain.handle("settings:patch", async (_event, updates) => {
+  import_electron6.ipcMain.handle("settings:patch", async (_event, updates) => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     const current = store.get("settings") || {};
@@ -44400,21 +44576,21 @@ function setupIPCHandlers() {
     store.set("settings", merged);
     return merged;
   });
-  import_electron7.ipcMain.handle("analyses:get", async () => {
+  import_electron6.ipcMain.handle("analyses:get", async () => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     return store.get("analyses") || [];
   });
-  import_electron7.ipcMain.handle("analyses:set", async (_event, analyses) => {
+  import_electron6.ipcMain.handle("analyses:set", async (_event, analyses) => {
     const { default: Store } = await import("electron-store");
     const store = new Store();
     store.set("analyses", analyses);
     return true;
     return true;
   });
-  import_electron7.ipcMain.handle("analyses:get-content", async (_event, id) => {
+  import_electron6.ipcMain.handle("analyses:get-content", async (_event, id) => {
     try {
-      const userDataPath = import_electron7.app.getPath("userData");
+      const userDataPath = import_electron6.app.getPath("userData");
       const filePath = import_path6.default.join(userDataPath, "analysis_records", `${id}.json`);
       if (import_fs8.default.existsSync(filePath)) {
         const raw = import_fs8.default.readFileSync(filePath, "utf-8");
@@ -44426,31 +44602,37 @@ function setupIPCHandlers() {
       return null;
     }
   });
-  import_electron7.ipcMain.handle("run:start", () => {
+  import_electron6.ipcMain.handle("run:start", () => {
     RunManager.getInstance().startRun();
   });
-  import_electron7.ipcMain.handle("run:stop", () => {
+  import_electron6.ipcMain.handle("run:stop", () => {
     RunManager.getInstance().stopRun();
   });
-  import_electron7.ipcMain.handle("run:status", () => {
+  import_electron6.ipcMain.handle("run:skipToFeed", () => {
+    RunManager.getInstance().skipToFeed();
+  });
+  import_electron6.ipcMain.handle("run:status", () => {
     return RunManager.getInstance().getStatus();
   });
-  import_electron7.ipcMain.handle("login:startScreencast", () => {
+  import_electron6.ipcMain.on("network:offline", () => {
+    RunManager.getInstance().notifyOffline();
+  });
+  import_electron6.ipcMain.handle("login:startScreencast", () => {
     BrowserManager.getInstance().startLoginScreencast();
   });
-  import_electron7.ipcMain.handle("login:stopScreencast", () => {
+  import_electron6.ipcMain.handle("login:stopScreencast", () => {
     BrowserManager.getInstance().stopLoginScreencast();
   });
-  import_electron7.ipcMain.on("kowalski:input", (_event, payload) => {
+  import_electron6.ipcMain.on("kowalski:input", (_event, payload) => {
     BrowserManager.getInstance().dispatchInput(payload);
   });
-  import_electron7.ipcMain.on("kowalski:paste", (_event, text) => {
-    const pasteText = text || import_electron7.clipboard.readText();
+  import_electron6.ipcMain.on("kowalski:paste", (_event, text) => {
+    const pasteText = text || import_electron6.clipboard.readText();
     if (pasteText) {
       BrowserManager.getInstance().dispatchInput({ type: "paste", text: pasteText });
     }
   });
-  import_electron7.ipcMain.on("kowalski:copySelection", async () => {
+  import_electron6.ipcMain.on("kowalski:copySelection", async () => {
     try {
       const ctx = BrowserManager.getInstance().getContext();
       if (!ctx) return;
@@ -44459,21 +44641,21 @@ function setupIPCHandlers() {
       if (!page) return;
       const text = await page.evaluate(() => window.getSelection()?.toString() ?? "");
       if (text) {
-        import_electron7.clipboard.writeText(text);
+        import_electron6.clipboard.writeText(text);
       }
     } catch {
     }
   });
-  import_electron7.ipcMain.handle("settings:set-secure", async (_event, { apiKey }) => {
+  import_electron6.ipcMain.handle("settings:set-secure", async (_event, { apiKey }) => {
     return SecureKeyManager.getInstance().setKey(apiKey);
   });
-  import_electron7.ipcMain.handle("settings:check-key-status", async () => {
+  import_electron6.ipcMain.handle("settings:check-key-status", async () => {
     return SecureKeyManager.getInstance().getKeyStatus();
   });
-  import_electron7.ipcMain.handle("settings:get-secure", async () => {
+  import_electron6.ipcMain.handle("settings:get-secure", async () => {
     return SecureKeyManager.getInstance().getKey();
   });
-  import_electron7.ipcMain.handle("settings:validate-api-key", async (_event, { apiKey }) => {
+  import_electron6.ipcMain.handle("settings:validate-api-key", async (_event, { apiKey }) => {
     try {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -44495,15 +44677,15 @@ function setupIPCHandlers() {
       return { valid: false, error: "network_error" };
     }
   });
-  import_electron7.ipcMain.handle("clear-instagram-session", async () => {
+  import_electron6.ipcMain.handle("clear-instagram-session", async () => {
     console.log("\u{1F9F9} Clearing Instagram Session only...");
     try {
-      const userDataPath = import_electron7.app.getPath("userData");
+      const userDataPath = import_electron6.app.getPath("userData");
       const sessionPath = import_path6.default.join(userDataPath, "session.json");
       if (import_fs8.default.existsSync(sessionPath)) {
         import_fs8.default.unlinkSync(sessionPath);
       }
-      await import_electron7.session.fromPartition(SHARED_PARTITION).clearStorageData();
+      await import_electron6.session.fromPartition(SHARED_PARTITION).clearStorageData();
       await BrowserManager.getInstance().clearData();
       return true;
     } catch (e) {
@@ -44511,9 +44693,9 @@ function setupIPCHandlers() {
       return false;
     }
   });
-  import_electron7.ipcMain.handle("check-instagram-session", async () => {
+  import_electron6.ipcMain.handle("check-instagram-session", async () => {
     try {
-      const userDataPath = import_electron7.app.getPath("userData");
+      const userDataPath = import_electron6.app.getPath("userData");
       const persistentContextPath = import_path6.default.join(userDataPath, "kowalski_browser");
       if (!import_fs8.default.existsSync(persistentContextPath)) {
         return { isActive: false, reason: "no_profile" };
@@ -44573,13 +44755,13 @@ function setupIPCHandlers() {
     }
   });
 }
-import_electron7.app.on("window-all-closed", () => {
+import_electron6.app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    import_electron7.app.quit();
+    import_electron6.app.quit();
   }
 });
-import_electron7.app.on("activate", () => {
-  if (import_electron7.BrowserWindow.getAllWindows().length === 0) {
+import_electron6.app.on("activate", () => {
+  if (import_electron6.BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   } else {
     mainWindow?.show();

@@ -20,6 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ModelConfig } from '../../shared/modelConfig.js';
 import { UsageService } from './UsageService.js';
+import { isCreditsDepletedError, CREDITS_DEPLETED_ERROR } from './NetworkMonitor.js';
 import { ExtractionBlock, ExtractionContentType, ExtractionUsefulness, ExtractionSkipReason } from '../../types/instagram.js';
 
 export interface ExtractorStats {
@@ -46,11 +47,13 @@ export class Extractor {
     private failed = 0;
     private tokensUsed = 0;
     private usageService: UsageService;
+    private runSignal?: AbortSignal;
 
-    constructor(rawDir: string, apiKey: string) {
+    constructor(rawDir: string, apiKey: string, runSignal?: AbortSignal) {
         this.rawDir = rawDir;
         this.apiKey = apiKey;
         this.usageService = UsageService.getInstance();
+        this.runSignal = runSignal;
     }
 
     /**
@@ -150,6 +153,12 @@ export class Extractor {
                 console.log(`  🧠 ✓ ${filename}: ${handle} — ${summary}`);
             }
         } catch (error) {
+            // Credit exhaustion must abort the whole run — don't fall back,
+            // don't continue the watcher loop.
+            if (error instanceof Error && error.message === CREDITS_DEPLETED_ERROR) {
+                this.running = false;
+                throw error;
+            }
             // Fail open: write a minimal extraction block so downstream still sees the image
             this.failed++;
             console.warn(`  🧠 ⚠️ ${filename}: extraction failed —`, error);
@@ -211,7 +220,10 @@ export class Extractor {
                                 { type: 'text', text: this.buildExtractionPrompt() }
                             ]
                         }]
-                    })
+                    }),
+                    signal: this.runSignal
+                        ? AbortSignal.any([this.runSignal, AbortSignal.timeout(30_000)])
+                        : AbortSignal.timeout(30_000)
                 });
 
                 if ((response.status === 529 || response.status === 429) && attempt < maxRetries - 1) {
@@ -225,6 +237,10 @@ export class Extractor {
                 }
 
                 if (!response.ok) {
+                    const errText = await response.text().catch(() => '');
+                    if (isCreditsDepletedError(response.status, errText)) {
+                        throw new Error(CREDITS_DEPLETED_ERROR);
+                    }
                     throw new Error(`Extractor LLM HTTP ${response.status}`);
                 }
 
@@ -243,6 +259,11 @@ export class Extractor {
                 const text: string = data.content?.[0]?.text || '';
                 return this.parseExtractionResponse(text);
             } catch (err) {
+                // Credit exhaustion is unrecoverable — re-throw immediately
+                // so it bubbles to RunManager for the UI to handle.
+                if (err instanceof Error && err.message === CREDITS_DEPLETED_ERROR) {
+                    throw err;
+                }
                 if (attempt < maxRetries - 1) {
                     const delay = 5000 * Math.pow(2, attempt);
                     console.warn(`  🧠 ⏳ Extractor LLM network error (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1000).toFixed(1)}s...`);
