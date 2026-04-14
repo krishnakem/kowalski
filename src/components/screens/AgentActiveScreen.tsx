@@ -123,7 +123,7 @@ const AgentActiveScreen = memo(({ onComplete, autoComplete = true }: AgentActive
             border: '1.5px solid rgba(0,0,0,0.15)',
             fontSize: 11, fontWeight: 500, color: '#111',
             letterSpacing: '0.08em', textTransform: 'uppercase' as const,
-            fontFamily: 'system-ui, sans-serif',
+            fontFamily: "'Inter', system-ui, sans-serif",
           }}>
             <div style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,

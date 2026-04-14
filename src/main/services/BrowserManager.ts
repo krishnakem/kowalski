@@ -2,6 +2,15 @@ import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { chromium, BrowserContext, Page, CDPSession } from 'playwright';
+
+// In a packaged app, point Playwright at the Chromium we bundle under
+// Contents/Resources/playwright-browsers. Must run before chromium.launch*()
+// so Playwright's browser-path resolution picks it up. No-op in dev.
+function configurePackagedBrowserPath(): void {
+    if (app.isPackaged && !process.env.PLAYWRIGHT_BROWSERS_PATH) {
+        process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(process.resourcesPath, 'playwright-browsers');
+    }
+}
 import { ChromiumVersionHelper } from './ChromiumVersionHelper.js';
 import { SessionValidationResult } from '../../types/instagram.js';
 import { KOWALSKI_VIEWPORT } from '../../shared/viewportConfig.js';
@@ -53,6 +62,8 @@ export class BrowserManager {
         }
 
         try {
+            configurePackagedBrowserPath();
+
             const userDataPath = app.getPath('userData');
             const persistentContextPath = path.join(userDataPath, 'kowalski_browser');
 
@@ -64,14 +75,22 @@ export class BrowserManager {
             const scrapingViewport = { width: KOWALSKI_VIEWPORT.width, height: KOWALSKI_VIEWPORT.height };
             console.log(`📐 BrowserManager: Viewport ${KOWALSKI_VIEWPORT.width}x${KOWALSKI_VIEWPORT.height}`);
 
-            // Custom executable path for stealth browser
-            const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
+            // Custom executable path for stealth browser.
+            // In packaged mode we rely on Playwright's default discovery via
+            // PLAYWRIGHT_BROWSERS_PATH (set at module load) — it finds the
+            // canonical "Google Chrome for Testing.app" we bundle under
+            // Contents/Resources/playwright-browsers.
             let executablePath = '';
-            if (fs.existsSync(customExecutablePath)) {
-                console.log('🕵️‍♀️ BrowserManager: Using Custom Stealth Browser:', customExecutablePath);
-                executablePath = customExecutablePath;
+            if (!app.isPackaged) {
+                const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
+                if (fs.existsSync(customExecutablePath)) {
+                    console.log('🕵️‍♀️ BrowserManager: Using Custom Stealth Browser:', customExecutablePath);
+                    executablePath = customExecutablePath;
+                } else {
+                    console.warn('⚠️ BrowserManager: Custom browser not found, using Playwright default.');
+                }
             } else {
-                console.warn('⚠️ BrowserManager: Custom browser not found, using Playwright default.');
+                console.log('📦 BrowserManager: Packaged mode — using Playwright default via PLAYWRIGHT_BROWSERS_PATH');
             }
 
             const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;

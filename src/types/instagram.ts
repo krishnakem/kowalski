@@ -184,15 +184,58 @@ export interface AutomationError {
 export type CaptureSource = 'feed' | 'story' | 'profile' | 'carousel';
 
 /**
+ * Structured extraction written by the Extractor agent into each raw image's sidecar.
+ * The digest writer consumes these directly — no second vision pass.
+ */
+export type ExtractionContentType =
+    | 'story'
+    | 'feed_post'
+    | 'story_ad'
+    | 'feed_ad'
+    | 'unreadable';
+
+export type ExtractionUsefulness = 'high' | 'medium' | 'low' | 'skip';
+
+export type ExtractionSkipReason =
+    | 'loading_spinner'
+    | 'duplicate_frame'
+    | 'ad'
+    | 'blank'
+    | 'navigation_chrome'
+    | 'transitional'
+    | null;
+
+export interface ExtractionEntities {
+    people: string[];
+    teams: string[];
+    products: string[];
+    places: string[];
+}
+
+export interface ExtractionBlock {
+    handle: string | null;                  // "@nba" if visible, else null
+    contentType: ExtractionContentType;
+    caption: string | null;                 // Verbatim caption text if visible
+    overlayText: string[];                  // Verbatim overlay strings (scoreboards, banners)
+    entities: ExtractionEntities;
+    numbers: string[];                      // Verbatim scores, stats, prices
+    dates: string[];                        // Verbatim dates ("Apr 12", "Saturday 8pm")
+    narrative: string;                      // 1-3 sentence literal description
+    usefulness: ExtractionUsefulness;
+    skipReason: ExtractionSkipReason;
+}
+
+/**
  * A single captured screenshot during browsing.
  */
 export interface CapturedPost {
     id: number;
-    screenshot: Buffer;           // Raw JPEG image data
+    screenshot: Buffer;           // Raw JPEG image data — kept for UI gallery, never sent to digest API
     source: CaptureSource;
     timestamp: number;            // Unix timestamp of capture
     scrollPosition: number;       // Y scroll position for deduplication
-    filterReason?: string;        // Description from the filter agent (filtered/*.json sidecar)
+    imagePath?: string;           // Absolute path to the source raw/*.jpg
+    extraction?: ExtractionBlock; // Structured extraction from the Extractor agent
 }
 
 /**

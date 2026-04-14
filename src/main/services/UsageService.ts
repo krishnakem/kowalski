@@ -30,10 +30,21 @@ export class UsageService {
         return UsageService.instance;
     }
 
-    // Helper to dynamically load electron-store (ESM)
+    private storeUnavailable = false;
+
+    // Helper to dynamically load electron-store (ESM).
+    // Returns null when running outside an Electron app context (e.g. dev test scripts);
+    // callers must tolerate a null store and skip persistence.
     private async getStore(): Promise<any> {
-        const { default: Store } = await import('electron-store');
-        return new Store();
+        if (this.storeUnavailable) return null;
+        try {
+            const { default: Store } = await import('electron-store');
+            return new Store();
+        } catch (err) {
+            this.storeUnavailable = true;
+            console.warn('💰 UsageService: electron-store unavailable, persistence disabled', err);
+            return null;
+        }
     }
 
     /**
@@ -42,6 +53,7 @@ export class UsageService {
      */
     public async initialize(): Promise<void> {
         const store = await this.getStore();
+        if (!store) return;
         const usage = store.get('usageData') as UsageData;
 
         if (!usage) {
@@ -61,6 +73,7 @@ export class UsageService {
      */
     public async checkMonthlyReset(): Promise<void> {
         const store = await this.getStore();
+        if (!store) return;
         const usage = store.get('usageData') as UsageData;
         if (!usage) return; // Should be handled by initialize
 
@@ -130,6 +143,10 @@ export class UsageService {
             (output * MODEL_RATES.OUTPUT_TOKEN);
 
         const store = await this.getStore();
+        if (!store) {
+            console.log(`💰 Usage Added: $${cost.toFixed(6)} (not persisted — no electron context)`);
+            return cost;
+        }
         const currentData = store.get('usageData') as UsageData;
 
         // Safety initialization if missing

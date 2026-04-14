@@ -20,8 +20,13 @@ export const ModelConfig = {
     // Image tagging — categorize and describe captured screenshots
     tagging: process.env.KOWALSKI_TAGGING_MODEL || 'claude-sonnet-4-6',
 
-    // Batch digest generation — synthesize all captures into a digest
-    digest: process.env.KOWALSKI_DIGEST_MODEL || 'claude-sonnet-4-6',
+    // Per-image structured extraction (Extractor agent) — runs vision once per raw screenshot
+    // and writes the result into the sidecar JSON. Sonnet because small overlay text matters.
+    extraction: process.env.KOWALSKI_EXTRACTION_MODEL || 'claude-sonnet-4-6',
+
+    // Batch digest generation — text-only synthesis from extracted sidecars.
+    // Defaults to Haiku because all visual extraction was done upstream.
+    digest: process.env.KOWALSKI_DIGEST_MODEL || 'claude-haiku-4-5',
 
     // Analysis and insights generation
     analysis: process.env.KOWALSKI_ANALYSIS_MODEL || 'claude-sonnet-4-6',

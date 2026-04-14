@@ -26976,9 +26976,13 @@ var ChromiumVersionHelper = class {
     return "125.0.0.0";
   }
   /**
-   * Gets the Playwright cache directory for the current platform
+   * Gets the Playwright cache directory for the current platform.
+   * In a packaged app, Chromium is bundled under Contents/Resources/playwright-browsers.
    */
   static getPlaywrightCacheDir(userHome) {
+    if (import_electron.app.isPackaged) {
+      return import_path.default.join(process.resourcesPath, "playwright-browsers");
+    }
     if (process.platform === "darwin") {
       return import_path.default.join(userHome, "Library/Caches/ms-playwright");
     } else if (process.platform === "win32") {
@@ -27034,20 +27038,21 @@ var ChromiumVersionHelper = class {
   static getCustomExecutablePath() {
     const userHome = import_electron.app.getPath("home");
     const revision = this.getLatestRevision();
+    const cacheDir = this.getPlaywrightCacheDir(userHome);
     if (process.platform === "darwin") {
       return import_path.default.join(
-        userHome,
-        `Library/Caches/ms-playwright/chromium-${revision}/chrome-mac-arm64/Kowalski.app/Contents/MacOS/Google Chrome for Testing`
+        cacheDir,
+        `chromium-${revision}/chrome-mac-arm64/Kowalski.app/Contents/MacOS/Google Chrome for Testing`
       );
     } else if (process.platform === "win32") {
       return import_path.default.join(
-        userHome,
-        `AppData/Local/ms-playwright/chromium-${revision}/chrome-win/Kowalski.exe`
+        cacheDir,
+        `chromium-${revision}/chrome-win/Kowalski.exe`
       );
     } else {
       return import_path.default.join(
-        userHome,
-        `.cache/ms-playwright/chromium-${revision}/chrome-linux/Kowalski`
+        cacheDir,
+        `chromium-${revision}/chrome-linux/Kowalski`
       );
     }
   }
@@ -27222,6 +27227,11 @@ function codeToVirtualKeyCode(code, key) {
 }
 
 // src/main/services/BrowserManager.ts
+function configurePackagedBrowserPath() {
+  if (import_electron2.app.isPackaged && !process.env.PLAYWRIGHT_BROWSERS_PATH) {
+    process.env.PLAYWRIGHT_BROWSERS_PATH = import_path2.default.join(process.resourcesPath, "playwright-browsers");
+  }
+}
 var GPU_PROFILES = [
   { vendor: "Intel Inc.", renderer: "Intel Iris OpenGL Engine" },
   { vendor: "Intel Inc.", renderer: "Intel HD Graphics 630" },
@@ -27258,19 +27268,24 @@ var BrowserManager = class _BrowserManager {
       await this.close();
     }
     try {
+      configurePackagedBrowserPath();
       const userDataPath = import_electron2.app.getPath("userData");
       const persistentContextPath = import_path2.default.join(userDataPath, "kowalski_browser");
       console.log(`\u{1F680} BrowserManager: Launching headless Persistent Context at: ${persistentContextPath}`);
       const extraArgs = ["--app=https://www.instagram.com/"];
       const scrapingViewport = { width: KOWALSKI_VIEWPORT.width, height: KOWALSKI_VIEWPORT.height };
       console.log(`\u{1F4D0} BrowserManager: Viewport ${KOWALSKI_VIEWPORT.width}x${KOWALSKI_VIEWPORT.height}`);
-      const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
       let executablePath = "";
-      if (import_fs2.default.existsSync(customExecutablePath)) {
-        console.log("\u{1F575}\uFE0F\u200D\u2640\uFE0F BrowserManager: Using Custom Stealth Browser:", customExecutablePath);
-        executablePath = customExecutablePath;
+      if (!import_electron2.app.isPackaged) {
+        const customExecutablePath = ChromiumVersionHelper.getCustomExecutablePath();
+        if (import_fs2.default.existsSync(customExecutablePath)) {
+          console.log("\u{1F575}\uFE0F\u200D\u2640\uFE0F BrowserManager: Using Custom Stealth Browser:", customExecutablePath);
+          executablePath = customExecutablePath;
+        } else {
+          console.warn("\u26A0\uFE0F BrowserManager: Custom browser not found, using Playwright default.");
+        }
       } else {
-        console.warn("\u26A0\uFE0F BrowserManager: Custom browser not found, using Playwright default.");
+        console.log("\u{1F4E6} BrowserManager: Packaged mode \u2014 using Playwright default via PLAYWRIGHT_BROWSERS_PATH");
       }
       const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       this.browserContext = await import_playwright.chromium.launchPersistentContext(persistentContextPath, {
@@ -27743,10 +27758,20 @@ var UsageService = class _UsageService {
     }
     return _UsageService.instance;
   }
-  // Helper to dynamically load electron-store (ESM)
+  storeUnavailable = false;
+  // Helper to dynamically load electron-store (ESM).
+  // Returns null when running outside an Electron app context (e.g. dev test scripts);
+  // callers must tolerate a null store and skip persistence.
   async getStore() {
-    const { default: Store } = await import("electron-store");
-    return new Store();
+    if (this.storeUnavailable) return null;
+    try {
+      const { default: Store } = await import("electron-store");
+      return new Store();
+    } catch (err) {
+      this.storeUnavailable = true;
+      console.warn("\u{1F4B0} UsageService: electron-store unavailable, persistence disabled", err);
+      return null;
+    }
   }
   /**
    * Initializes usage data if not present.
@@ -27754,6 +27779,7 @@ var UsageService = class _UsageService {
    */
   async initialize() {
     const store = await this.getStore();
+    if (!store) return;
     const usage = store.get("usageData");
     if (!usage) {
       const initial = {
@@ -27770,6 +27796,7 @@ var UsageService = class _UsageService {
    */
   async checkMonthlyReset() {
     const store = await this.getStore();
+    if (!store) return;
     const usage = store.get("usageData");
     if (!usage) return;
     const lastDate = new Date(usage.lastResetDate);
@@ -27819,6 +27846,10 @@ var UsageService = class _UsageService {
     const output = usage.output_tokens || 0;
     const cost = regularInput * MODEL_RATES.INPUT_TOKEN + cached * MODEL_RATES.CACHED_INPUT_TOKEN + output * MODEL_RATES.OUTPUT_TOKEN;
     const store = await this.getStore();
+    if (!store) {
+      console.log(`\u{1F4B0} Usage Added: $${cost.toFixed(6)} (not persisted \u2014 no electron context)`);
+      return cost;
+    }
     const currentData = store.get("usageData");
     const currentSpend = currentData?.currentMonthSpend || 0;
     const lastReset = currentData?.lastResetDate || (/* @__PURE__ */ new Date()).toISOString();
@@ -42654,8 +42685,12 @@ var ModelConfig = {
   vision: process.env.KOWALSKI_VISION_MODEL || "claude-sonnet-4-6",
   // Image tagging — categorize and describe captured screenshots
   tagging: process.env.KOWALSKI_TAGGING_MODEL || "claude-sonnet-4-6",
-  // Batch digest generation — synthesize all captures into a digest
-  digest: process.env.KOWALSKI_DIGEST_MODEL || "claude-sonnet-4-6",
+  // Per-image structured extraction (Extractor agent) — runs vision once per raw screenshot
+  // and writes the result into the sidecar JSON. Sonnet because small overlay text matters.
+  extraction: process.env.KOWALSKI_EXTRACTION_MODEL || "claude-sonnet-4-6",
+  // Batch digest generation — text-only synthesis from extracted sidecars.
+  // Defaults to Haiku because all visual extraction was done upstream.
+  digest: process.env.KOWALSKI_DIGEST_MODEL || "claude-haiku-4-5",
   // Analysis and insights generation
   analysis: process.env.KOWALSKI_ANALYSIS_MODEL || "claude-sonnet-4-6"
 };
@@ -43339,6 +43374,13 @@ var DigestGeneration = class {
     if (captures.length === 0) {
       throw new Error("INSUFFICIENT_CONTENT: No screenshots captured");
     }
+    const usable = captures.filter((c2) => {
+      const u = c2.extraction?.usefulness;
+      return u !== "skip";
+    });
+    if (usable.length === 0) {
+      throw new Error("INSUFFICIENT_CONTENT: All captures were marked skip by the extractor");
+    }
     const now = /* @__PURE__ */ new Date();
     const dayName = now.toLocaleDateString("en-US", { weekday: "long" });
     const dateStr = now.toLocaleDateString("en-US", {
@@ -43346,21 +43388,9 @@ var DigestGeneration = class {
       day: "numeric",
       year: "numeric"
     });
-    const imageContents = captures.map((capture) => ({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: "image/jpeg",
-        data: capture.screenshot.toString("base64")
-      }
-    }));
     const systemPrompt = this.buildSystemPrompt();
-    const userPrompt = this.buildUserPrompt(captures, dayName, dateStr);
-    console.log(`\u{1F916} Generating digest from ${captures.length} screenshots...`);
-    const messageContent = [
-      { type: "text", text: userPrompt },
-      ...imageContents
-    ];
+    const userPrompt = this.buildUserPrompt(usable, dayName, dateStr);
+    console.log(`\u{1F916} Generating digest from ${usable.length} extractions (${captures.length - usable.length} skipped)...`);
     const maxRetries = 4;
     let data;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -43376,7 +43406,7 @@ var DigestGeneration = class {
           system: systemPrompt,
           messages: [{
             role: "user",
-            content: messageContent
+            content: userPrompt
           }],
           max_tokens: 16384
         })
@@ -43412,10 +43442,12 @@ var DigestGeneration = class {
     if (!markdown) {
       throw new Error("DIGEST_GENERATION_FAILED: No content in response");
     }
-    return this.buildAnalysisObject(markdown, config, dayName, dateStr, captures);
+    return this.buildAnalysisObject(markdown, config, dayName, dateStr, captures, usable);
   }
   buildSystemPrompt() {
     return `You are the Kowalski digest writer. You compose a single short markdown editorial column summarizing what happened on the Instagram accounts a reader follows. You write like a beat reporter filing a morning column \u2014 not a log parser, not a UI describer.
+
+You receive STRUCTURED EXTRACTIONS, one per captured screenshot. Each extraction was written by an upstream vision agent and contains the handle, content type, caption, overlay text, named entities, verbatim numbers/scores, dates, and a literal narrative. Treat the extractions as ground truth. You do NOT see the images. Do not invent details that are not in the extractions.
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 VOICE
@@ -43427,19 +43459,19 @@ The reader wants to know what happened in the world their accounts cover, NOT wh
 CORE PRINCIPLES
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-1. SYNTHESIZE, DON'T ENUMERATE. Thirty-five frames of a single game become ONE paragraph about the game. Group every item by narrative first, then by account. Never emit one item per captured frame.
+1. SYNTHESIZE, DON'T ENUMERATE. Thirty-five frames of a single game become ONE paragraph about the game. Group every item by narrative first, then by account. Never emit one item per extraction.
 
 2. LEAD WITH THE STORY, NOT THE FORMAT. Never reference the medium. Forbidden words and phrases:
-   "graphic", "infographic", "story card", "story frame", "post modal", "visible", "clearly visible", "posted", "shared a post about", "was featured", "full-screen", "overlay", "screenshot", "frame showing".
+   "graphic", "infographic", "story card", "story frame", "post modal", "visible", "clearly visible", "posted", "shared a post about", "was featured", "full-screen", "overlay", "screenshot", "frame showing", "extraction".
    Do not mention sponsor tags ("presented by Google", "presented by Chase", "presented by Advantant", "presented by DoorDash", "presented by PagerDuty", "presented by AWS") unless the sponsorship itself is the news.
 
-3. BE SPECIFIC OR CUT IT. Every sentence must carry a name, number, score, date, or concrete fact. If the underlying data is vague or partial, CUT the item entirely rather than write around it.
+3. BE SPECIFIC OR CUT IT. Every sentence must carry a name, number, score, date, or concrete fact pulled from the extraction. If the underlying data is vague or partial, CUT the item entirely rather than write around it.
 
 4. NEVER SHOW DATA-QUALITY ARTIFACTS. No "@unknown", no "[unclear]", no "[team]", no raw turn numbers, no timestamps like "22h ago", no "Instagram", no image indices. If a handle didn't resolve from context, drop the item or fold it into a section whose ownership is obvious. The reader should never see scaffolding.
 
 5. LEAD WITH THE BIGGEST STORY. Pick the single most consequential item of the day and make it a "Top Story" with a real headline. Everything else is a shorter section beneath it.
 
-6. USE ACCOUNT NAMES AS SECTION HEADERS. Sections are like "@nba", "@warriors", "@uofmichigan". Lowercase the handle. Never emit per-item "@unknown" labels.
+6. USE ACCOUNT NAMES AS SECTION HEADERS. Sections are like "## @nba", "## @warriors", "## @uofmichigan". Lowercase the handle. Never emit per-item "@unknown" labels.
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 TITLE GENERATION
@@ -43504,17 +43536,17 @@ DON'T
 THE "WOULD A SPORTSWRITER WRITE THIS?" TEST
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-Before any sentence ships, ask: would this appear in a newspaper sports section? If it reads like a screenshot caption, a CMS field, or a debug log \u2014 rewrite or cut.
+Before any sentence ships, ask: would this appear in a newspaper sports section? If it reads like an extraction caption, a CMS field, or a debug log \u2014 rewrite or cut.
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 HANDLE RESOLUTION
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-Many filterReason strings will not name the source account explicitly. Resolve ownership from context:
-  - A "Warriors Instagram story" or "Starting Five lineup" or game scoreboard from the Warriors' tray belongs to @warriors.
-  - "NBA Instagram story" or "NBA post" belongs to @nba.
-  - "uofmichigan" or Michigan campus content belongs to @uofmichigan.
+Each extraction has a handle field, but it may be null. Resolve ownership from context:
+  - Warriors team imagery, Starting Five lineup, or Chase Center scoreboard belongs to @warriors.
   - "NBA Spain" \u2192 @nbaspain. "NBA Indonesia" \u2192 @nbaindonesia.
+  - Generic NBA branding belongs to @nba.
+  - Michigan campus content or "uofmichigan" mentions belong to @uofmichigan.
 If you genuinely cannot place an item with confidence, drop it.
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
@@ -43523,22 +43555,47 @@ OUTPUT
 
 Return ONLY the markdown document. Begin immediately with "# " and the generated title. No JSON, no code fences, no preamble.`;
   }
+  renderExtraction(c2, index) {
+    const e = c2.extraction;
+    if (!e) {
+      return `[${index + 1}] (no extraction available \u2014 image preserved on disk only)`;
+    }
+    const lines = [];
+    const handle = e.handle || "?";
+    lines.push(`[${index + 1}] ${handle} | ${e.contentType} | usefulness=${e.usefulness}`);
+    if (e.caption) lines.push(`  caption: ${truncate(e.caption, 400)}`);
+    if (e.overlayText.length) lines.push(`  overlay: ${e.overlayText.map((s) => `"${s}"`).join(" | ")}`);
+    const ent = e.entities;
+    const entityParts = [];
+    if (ent.people.length) entityParts.push(`people=${ent.people.join(", ")}`);
+    if (ent.teams.length) entityParts.push(`teams=${ent.teams.join(", ")}`);
+    if (ent.places.length) entityParts.push(`places=${ent.places.join(", ")}`);
+    if (ent.products.length) entityParts.push(`products=${ent.products.join(", ")}`);
+    if (entityParts.length) lines.push(`  entities: ${entityParts.join(" | ")}`);
+    if (e.numbers.length) lines.push(`  numbers: ${e.numbers.join(" | ")}`);
+    if (e.dates.length) lines.push(`  dates: ${e.dates.join(" | ")}`);
+    lines.push(`  narrative: ${e.narrative}`);
+    return lines.join("\n");
+  }
   buildUserPrompt(captures, dayName, dateStr) {
     const feedItems = captures.filter((c2) => c2.source === "feed");
     const storyItems = captures.filter((c2) => c2.source === "story");
+    const otherItems = captures.filter((c2) => c2.source !== "feed" && c2.source !== "story");
     const feedCount = feedItems.length;
     const storyCount = storyItems.length;
-    const renderItem = (c2, index) => {
-      const reason = c2.filterReason?.trim() || "(no description available)";
-      return `[${index + 1}] ${reason}`;
-    };
-    const storiesBlock = storyItems.length ? storyItems.map(renderItem).join("\n") : "(none)";
-    const feedBlock = feedItems.length ? feedItems.map(renderItem).join("\n") : "(none)";
+    const storiesBlock = storyItems.length ? storyItems.map((c2, i) => this.renderExtraction(c2, i)).join("\n\n") : "(none)";
+    const feedBlock = feedItems.length ? feedItems.map((c2, i) => this.renderExtraction(c2, i)).join("\n\n") : "(none)";
+    const otherBlock = otherItems.length ? `
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+OTHER (${otherItems.length} total)
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+${otherItems.map((c2, i) => this.renderExtraction(c2, i)).join("\n\n")}
+` : "";
     return `Today is ${dayName}, ${dateStr}.
 
-You have ${captures.length} filtered Instagram captures from this morning's run: ${storyCount} story frames and ${feedCount} feed posts.
+You have ${captures.length} usable Instagram extractions from this morning's run: ${storyCount} story frames and ${feedCount} feed posts.${otherItems.length ? ` (${otherItems.length} additional items.)` : ""}
 
-Each item below is a one-line description written by the upstream filter agent describing what was on the screen. Use these descriptions plus the attached images to determine WHAT happened in the world the reader's accounts cover. Then write the editorial column following the rules in your system prompt.
+Each block below was written by the upstream Extractor \u2014 the only source of truth about what was on screen. Quote numbers, scores, names, and dates verbatim from these extractions. Do not invent details that are not present.
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 STORY FRAMES (chronological, ${storyCount} total)
@@ -43549,22 +43606,17 @@ ${storiesBlock}
 FEED POSTS (chronological, ${feedCount} total)
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 ${feedBlock}
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-ATTACHED IMAGES
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-${captures.length} JPEGs are attached after this message in the same order: stories first (${storyCount}), then feed (${feedCount}). Use them to disambiguate handles, scores, and details, but write about the underlying events \u2014 never about the screens themselves.
-
+${otherBlock}
 Now write the editorial column. Begin immediately with "# " followed by your generated title. No preamble.`;
   }
-  buildAnalysisObject(markdown, config, dayName, dateStr, captures) {
+  buildAnalysisObject(markdown, config, _dayName, _dateStr, allCaptures, usableCaptures) {
     const cleaned = this.stripCodeFences(markdown).trim();
     const titleMatch = cleaned.match(/^#\s+(.+?)\s*$/m);
     const title = titleMatch?.[1]?.trim() || "Today";
-    const storyCount = captures.filter((c2) => c2.source === "story").length;
-    const feedCount = captures.filter((c2) => c2.source === "feed").length;
-    const subtitle = `${storyCount} story frames and ${feedCount} posts reviewed`;
+    const storyCount = usableCaptures.filter((c2) => c2.source === "story").length;
+    const feedCount = usableCaptures.filter((c2) => c2.source === "feed").length;
+    const skippedCount = allCaptures.length - usableCaptures.length;
+    const subtitle = skippedCount > 0 ? `${storyCount} story frames and ${feedCount} posts reviewed (${skippedCount} skipped)` : `${storyCount} story frames and ${feedCount} posts reviewed`;
     console.log(`\u2705 Digest generated: "${title}"`);
     return {
       title,
@@ -43586,47 +43638,57 @@ Now write the editorial column. Begin immediately with "# " followed by your gen
     return fenceMatch ? fenceMatch[1] : text;
   }
 };
+function truncate(s, max) {
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + "\u2026";
+}
 
-// src/main/services/Filterer.ts
+// src/main/services/Extractor.ts
 var fs7 = __toESM(require("fs"), 1);
 var path7 = __toESM(require("path"), 1);
-var Filterer = class {
+var VALID_CONTENT_TYPES = ["story", "feed_post", "story_ad", "feed_ad", "unreadable"];
+var VALID_USEFULNESS = ["high", "medium", "low", "skip"];
+var VALID_SKIP_REASONS = [
+  "loading_spinner",
+  "duplicate_frame",
+  "ad",
+  "blank",
+  "navigation_chrome",
+  "transitional"
+];
+var Extractor = class {
   rawDir;
-  filteredDir;
   apiKey;
   processed = /* @__PURE__ */ new Set();
   running = false;
-  kept = 0;
-  rejected = 0;
+  extracted = 0;
+  skipped = 0;
+  failed = 0;
   tokensUsed = 0;
   usageService;
-  constructor(rawDir, filteredDir, apiKey) {
+  constructor(rawDir, apiKey) {
     this.rawDir = rawDir;
-    this.filteredDir = filteredDir;
     this.apiKey = apiKey;
     this.usageService = UsageService.getInstance();
-    if (!fs7.existsSync(this.filteredDir)) {
-      fs7.mkdirSync(this.filteredDir, { recursive: true });
-    }
   }
   /**
-   * Start the async filter loop. Polls raw/ for new screenshots every 2 seconds.
+   * Start the async extractor loop. Polls raw/ for new screenshots every 2 seconds.
    * Resolves when the Navigator writes done.marker and all remaining files are processed.
    */
   async start() {
     this.running = true;
-    console.log(`\u{1F50D} ScreenshotFilter: watching ${this.rawDir}`);
+    console.log(`\u{1F9E0} Extractor: watching ${this.rawDir}`);
     while (this.running) {
       const files = fs7.readdirSync(this.rawDir).filter((f) => f.endsWith(".jpg") && !this.processed.has(f)).sort();
       for (const file of files) {
         if (!this.running) break;
-        await this.evaluateScreenshot(file);
+        await this.extractOne(file);
         this.processed.add(file);
       }
       if (fs7.existsSync(path7.join(this.rawDir, "done.marker"))) {
         const remaining = fs7.readdirSync(this.rawDir).filter((f) => f.endsWith(".jpg") && !this.processed.has(f)).sort();
         for (const file of remaining) {
-          await this.evaluateScreenshot(file);
+          await this.extractOne(file);
           this.processed.add(file);
         }
         this.running = false;
@@ -43634,69 +43696,87 @@ var Filterer = class {
       }
       await new Promise((resolve2) => setTimeout(resolve2, 2e3));
     }
-    fs7.writeFileSync(path7.join(this.filteredDir, "done.marker"), JSON.stringify({
+    fs7.writeFileSync(path7.join(this.rawDir, "extracted.marker"), JSON.stringify({
       processed: this.processed.size,
-      kept: this.kept,
-      rejected: this.rejected,
+      extracted: this.extracted,
+      skipped: this.skipped,
+      failed: this.failed,
       tokensUsed: this.tokensUsed,
       timestamp: Date.now()
     }));
-    console.log(`\u{1F50D} ScreenshotFilter: done. ${this.kept} kept, ${this.rejected} rejected out of ${this.processed.size} processed.`);
+    console.log(`\u{1F9E0} Extractor: done. ${this.extracted} extracted, ${this.skipped} skipped, ${this.failed} failed out of ${this.processed.size} processed.`);
     return {
       processed: this.processed.size,
-      kept: this.kept,
-      rejected: this.rejected,
+      extracted: this.extracted,
+      skipped: this.skipped,
+      failed: this.failed,
       tokensUsed: this.tokensUsed
     };
   }
-  /** Stop the filter loop early (e.g. user pressed Cmd+Shift+K). */
+  /** Stop the extractor loop early (e.g. user pressed Cmd+Shift+K). */
   stop() {
     this.running = false;
   }
   /**
-   * Evaluate a single screenshot using LLM vision.
-   * If it contains real content, copy it (and its sidecar JSON) to filtered/.
+   * Extract structured content from a single screenshot and merge into its sidecar.
    */
-  async evaluateScreenshot(filename) {
+  async extractOne(filename) {
     const filepath = path7.join(this.rawDir, filename);
-    const buffer = fs7.readFileSync(filepath);
-    const base64 = buffer.toString("base64");
+    const sidecarPath = path7.join(this.rawDir, filename.replace(".jpg", ".json"));
     try {
-      const result = await this.callFilterLLM(base64);
-      if (result.keep) {
-        fs7.copyFileSync(filepath, path7.join(this.filteredDir, filename));
-        const jsonFile = filename.replace(".jpg", ".json");
-        const jsonPath = path7.join(this.rawDir, jsonFile);
-        if (fs7.existsSync(jsonPath)) {
-          const sidecar = JSON.parse(fs7.readFileSync(jsonPath, "utf-8"));
-          sidecar.filterReason = result.reason;
-          fs7.writeFileSync(
-            path7.join(this.filteredDir, jsonFile),
-            JSON.stringify(sidecar)
-          );
+      const buffer = fs7.readFileSync(filepath);
+      const base64 = buffer.toString("base64");
+      const extraction = await this.callExtractorLLM(base64);
+      let sidecar = {};
+      if (fs7.existsSync(sidecarPath)) {
+        try {
+          sidecar = JSON.parse(fs7.readFileSync(sidecarPath, "utf-8"));
+        } catch {
+          sidecar = {};
         }
-        this.kept++;
-        console.log(`  \u{1F50D} \u2705 ${filename}: KEEP \u2014 ${result.reason}`);
+      }
+      sidecar.extraction = extraction;
+      fs7.writeFileSync(sidecarPath, JSON.stringify(sidecar));
+      if (extraction.usefulness === "skip") {
+        this.skipped++;
+        console.log(`  \u{1F9E0} \u2298 ${filename}: SKIP (${extraction.skipReason || "unspecified"})`);
       } else {
-        this.rejected++;
-        console.log(`  \u{1F50D} \u274C ${filename}: REJECT \u2014 ${result.reason}`);
+        this.extracted++;
+        const handle = extraction.handle || "?";
+        const summary = extraction.narrative.length > 80 ? extraction.narrative.slice(0, 77) + "..." : extraction.narrative;
+        console.log(`  \u{1F9E0} \u2713 ${filename}: ${handle} \u2014 ${summary}`);
       }
     } catch (error) {
-      console.warn(`  \u{1F50D} \u26A0\uFE0F ${filename}: filter error, keeping by default \u2014`, error);
-      fs7.copyFileSync(filepath, path7.join(this.filteredDir, filename));
-      const jsonFile = filename.replace(".jpg", ".json");
-      const jsonPath = path7.join(this.rawDir, jsonFile);
-      if (fs7.existsSync(jsonPath)) {
-        fs7.copyFileSync(jsonPath, path7.join(this.filteredDir, jsonFile));
+      this.failed++;
+      console.warn(`  \u{1F9E0} \u26A0\uFE0F ${filename}: extraction failed \u2014`, error);
+      const fallback = {
+        handle: null,
+        contentType: "unreadable",
+        caption: null,
+        overlayText: [],
+        entities: { people: [], teams: [], products: [], places: [] },
+        numbers: [],
+        dates: [],
+        narrative: "Extraction failed; image preserved on disk for manual review.",
+        usefulness: "low",
+        skipReason: null
+      };
+      try {
+        let sidecar = {};
+        if (fs7.existsSync(sidecarPath)) {
+          sidecar = JSON.parse(fs7.readFileSync(sidecarPath, "utf-8"));
+        }
+        sidecar.extraction = fallback;
+        fs7.writeFileSync(sidecarPath, JSON.stringify(sidecar));
+      } catch {
       }
-      this.kept++;
     }
   }
   /**
-   * Call the LLM to decide if a screenshot contains real content.
-   * Uses the tagging model for speed and low cost.
+   * Call the vision LLM to extract structured content.
+   * Uses the dedicated extraction model (Sonnet) — small overlay text demands fidelity.
    */
-  async callFilterLLM(base64Image) {
+  async callExtractorLLM(base64Image) {
     const maxRetries = 4;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -43708,8 +43788,8 @@ var Filterer = class {
             "anthropic-version": "2023-06-01"
           },
           body: JSON.stringify({
-            model: ModelConfig.tagging,
-            max_tokens: 100,
+            model: ModelConfig.extraction,
+            max_tokens: 800,
             messages: [{
               role: "user",
               content: [
@@ -43721,21 +43801,7 @@ var Filterer = class {
                     data: base64Image
                   }
                 },
-                {
-                  type: "text",
-                  text: `You are filtering Instagram browsing screenshots for a digest.
-
-Does this screenshot contain actual Instagram content worth summarizing?
-
-YES if: a post is clearly visible (image with caption), a story frame is showing full-screen, a post modal is open (dark overlay with content centered), carousel content is displayed, a profile page with visible posts.
-
-NO if: this is mid-navigation (home feed scrolling with no post focused), a loading/spinner screen, a search grid showing only tiny thumbnails, a settings/menu page, a login or error screen, mostly UI chrome (sidebar, top bar) with no content, a transitional state between pages, a duplicate of content that looks nearly identical to something you'd expect was just captured (same post, slightly different scroll).
-
-Respond with ONLY a JSON object:
-{"keep": true, "reason": "Post modal open showing a landscape photo with caption"}
-or
-{"keep": false, "reason": "Home feed mid-scroll, no post focused"}`
-                }
+                { type: "text", text: this.buildExtractionPrompt() }
               ]
             }]
           })
@@ -43745,13 +43811,12 @@ or
           const backoff = Math.min(baseDelay * Math.pow(2, attempt), 6e4);
           const jitter = backoff * 0.25 * (Math.random() * 2 - 1);
           const delay = Math.round(backoff + jitter);
-          console.warn(`  \u{1F50D} \u23F3 Filter LLM ${response.status} (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1e3).toFixed(1)}s...`);
+          console.warn(`  \u{1F9E0} \u23F3 Extractor LLM ${response.status} (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1e3).toFixed(1)}s...`);
           await new Promise((resolve2) => setTimeout(resolve2, delay));
           continue;
         }
         if (!response.ok) {
-          console.warn(`  \u{1F50D} \u26A0\uFE0F Filter LLM error (${response.status})`);
-          return { keep: true, reason: `Filter LLM error (${response.status}), keeping by default` };
+          throw new Error(`Extractor LLM HTTP ${response.status}`);
         }
         const data = await response.json();
         if (data.usage) {
@@ -43764,25 +43829,107 @@ or
           });
         }
         const text = data.content?.[0]?.text || "";
-        try {
-          const jsonMatch = text.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]);
-          }
-        } catch {
-        }
-        return { keep: true, reason: "Failed to parse filter response, keeping by default" };
+        return this.parseExtractionResponse(text);
       } catch (err) {
         if (attempt < maxRetries - 1) {
           const delay = 5e3 * Math.pow(2, attempt);
-          console.warn(`  \u{1F50D} \u23F3 Filter LLM network error (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1e3).toFixed(1)}s...`);
+          console.warn(`  \u{1F9E0} \u23F3 Extractor LLM network error (attempt ${attempt + 1}/${maxRetries - 1}). Retrying in ${(delay / 1e3).toFixed(1)}s...`);
           await new Promise((resolve2) => setTimeout(resolve2, delay));
           continue;
         }
         throw err;
       }
     }
-    return { keep: true, reason: "Filter LLM retries exhausted, keeping by default" };
+    throw new Error("Extractor LLM retries exhausted");
+  }
+  parseExtractionResponse(text) {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Extractor returned no JSON");
+    const raw = JSON.parse(jsonMatch[0]);
+    return this.normalizeExtraction(raw);
+  }
+  normalizeExtraction(raw) {
+    const asString = (v) => typeof v === "string" && v.trim() ? v.trim() : null;
+    const asStringArray = (v) => Array.isArray(v) ? v.filter((x2) => typeof x2 === "string" && x2.trim()).map((x2) => x2.trim()) : [];
+    const contentType = VALID_CONTENT_TYPES.includes(raw?.contentType) ? raw.contentType : "unreadable";
+    const usefulness = VALID_USEFULNESS.includes(raw?.usefulness) ? raw.usefulness : "low";
+    let skipReason = null;
+    if (typeof raw?.skipReason === "string" && VALID_SKIP_REASONS.includes(raw.skipReason)) {
+      skipReason = raw.skipReason;
+    }
+    return {
+      handle: asString(raw?.handle),
+      contentType,
+      caption: asString(raw?.caption),
+      overlayText: asStringArray(raw?.overlayText),
+      entities: {
+        people: asStringArray(raw?.entities?.people),
+        teams: asStringArray(raw?.entities?.teams),
+        products: asStringArray(raw?.entities?.products),
+        places: asStringArray(raw?.entities?.places)
+      },
+      numbers: asStringArray(raw?.numbers),
+      dates: asStringArray(raw?.dates),
+      narrative: asString(raw?.narrative) || "(no narrative produced)",
+      usefulness,
+      skipReason
+    };
+  }
+  buildExtractionPrompt() {
+    return `You are the Kowalski Extractor. The screenshot below was captured during automated Instagram browsing. Extract the underlying content into a strict JSON object so a downstream writer can compose an editorial digest WITHOUT seeing the image.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+ABSOLUTE RULES
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+1. VERBATIM ONLY for numbers, scores, handles, names, dates, prices, quotes. Never paraphrase a number, never round a score, never normalize a date format. Copy exactly what is on screen.
+2. NEVER use meta-phrasings: "posted about", "shared a story about", "graphic showing", "image of", "screenshot of", "post about", "story about". Describe the underlying content, not the medium.
+3. If you cannot read a value with confidence, OMIT it. Empty arrays and null fields are correct. Inventing is failure.
+4. Caption text must be copied verbatim from the visible caption area only. Do NOT summarize a caption \u2014 copy it. If the caption is truncated on screen, copy what is visible and stop. If no caption is visible, set caption to null.
+5. Handles must include the leading "@". Lowercase. If no handle is visible AND you cannot infer it from clear branding (team logo, watermark, "Warriors Instagram story"), set handle to null.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+USEFULNESS DECISIONS
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+Set usefulness to "skip" with skipReason when the image is not real content:
+  - "loading_spinner" \u2014 loading state, blank placeholder, partial render
+  - "duplicate_frame" \u2014 looks like a near-duplicate of an adjacent capture (slight scroll, story progress tick)
+  - "ad" \u2014 sponsored/promoted content (paid partnership tags, "Sponsored" labels, in-feed ads)
+  - "blank" \u2014 empty home feed, dark overlay with nothing centered, mid-transition
+  - "navigation_chrome" \u2014 search grid of tiny thumbnails, settings page, profile grid with no content focused, login screen
+  - "transitional" \u2014 mid-scroll with no post focused, mid-swipe between stories
+
+Otherwise set usefulness to "high", "medium", or "low":
+  - "high" \u2014 clear, fact-rich post or story (named people, scores, scene, caption)
+  - "medium" \u2014 readable content but lower fact density (vibe shots, partial info)
+  - "low" \u2014 content is real but unclear handles/details; salvageable only with care
+
+Even when usefulness is "skip", still fill narrative with a short literal description so the operator can audit decisions later.
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+OUTPUT \u2014 STRICT JSON, NO PROSE, NO CODE FENCES
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+{
+  "handle": "@nba" | null,
+  "contentType": "story" | "feed_post" | "story_ad" | "feed_ad" | "unreadable",
+  "caption": "verbatim caption text" | null,
+  "overlayText": ["verbatim overlay strings, one per visually distinct block"],
+  "entities": {
+    "people": ["LeBron James"],
+    "teams": ["Lakers", "Warriors"],
+    "products": [],
+    "places": ["Chase Center"]
+  },
+  "numbers": ["118-112", "LeBron 34 pts", "10-22 FG"],
+  "dates": ["Apr 12", "Saturday 8pm"],
+  "narrative": "1-3 sentences, literal description of what is on screen. Use verbatim scores and names. No meta-phrasing.",
+  "usefulness": "high" | "medium" | "low" | "skip",
+  "skipReason": "loading_spinner" | "duplicate_frame" | "ad" | "blank" | "navigation_chrome" | "transitional" | null
+}
+
+Return ONLY the JSON object. No explanation. No code fences.`;
   }
 };
 
@@ -43795,7 +43942,7 @@ var RunManager = class _RunManager {
   status = "idle";
   // Active run state (for stop support)
   activeScraper = null;
-  activeFilters = [];
+  activeExtractors = [];
   constructor() {
   }
   static getInstance() {
@@ -43815,10 +43962,10 @@ var RunManager = class _RunManager {
       console.log("\u{1F6D1} Stopping active run...");
       this.activeScraper.stop();
     }
-    for (const f of this.activeFilters) {
-      f.stop();
+    for (const e of this.activeExtractors) {
+      e.stop();
     }
-    if (!this.activeScraper && this.activeFilters.length === 0) {
+    if (!this.activeScraper && this.activeExtractors.length === 0) {
       console.log("\u{1F6D1} No active run to stop");
     }
   }
@@ -43864,18 +44011,14 @@ var RunManager = class _RunManager {
       const sessionDir = import_path5.default.join(screenshotsDir, `run_${dateTime}`);
       const rawStoriesDir = import_path5.default.join(sessionDir, "raw", "stories");
       const rawFeedDir = import_path5.default.join(sessionDir, "raw", "feed");
-      const filteredStoriesDir = import_path5.default.join(sessionDir, "filtered", "stories");
-      const filteredFeedDir = import_path5.default.join(sessionDir, "filtered", "feed");
       import_fs7.default.mkdirSync(rawStoriesDir, { recursive: true });
       import_fs7.default.mkdirSync(rawFeedDir, { recursive: true });
-      import_fs7.default.mkdirSync(filteredStoriesDir, { recursive: true });
-      import_fs7.default.mkdirSync(filteredFeedDir, { recursive: true });
-      console.log("\u{1F680} Starting filter agents...");
-      const storiesFilter = new Filterer(rawStoriesDir, filteredStoriesDir, apiKey);
-      const feedFilter = new Filterer(rawFeedDir, filteredFeedDir, apiKey);
-      this.activeFilters = [storiesFilter, feedFilter];
-      const storiesFilterPromise = storiesFilter.start();
-      const feedFilterPromise = feedFilter.start();
+      console.log("\u{1F680} Starting extractor agents...");
+      const storiesExtractor = new Extractor(rawStoriesDir, apiKey);
+      const feedExtractor = new Extractor(rawFeedDir, apiKey);
+      this.activeExtractors = [storiesExtractor, feedExtractor];
+      const storiesExtractorPromise = storiesExtractor.start();
+      const feedExtractorPromise = feedExtractor.start();
       console.log("\u{1F680} Browsing Instagram...");
       const scraper = new Kowalski(context, apiKey, false);
       this.activeScraper = scraper;
@@ -43887,46 +44030,50 @@ var RunManager = class _RunManager {
       console.log(`\u{1F680} Browsing complete: ${session2.rawScreenshotCount} raw screenshots`);
       await browserManager.close();
       context = null;
-      console.log("\u{1F680} Waiting for filter agents...");
-      const [storiesStats, feedStats] = await Promise.all([storiesFilterPromise, feedFilterPromise]);
-      this.activeFilters = [];
-      const totalKept = storiesStats.kept + feedStats.kept;
-      const totalRejected = storiesStats.rejected + feedStats.rejected;
-      console.log(`\u{1F680} Filter complete: ${totalKept} kept, ${totalRejected} rejected`);
-      if (totalKept < 3) {
-        console.warn(`\u{1F680} Very few filtered captures (${totalKept}), digest quality may be low`);
+      console.log("\u{1F680} Waiting for extractor agents...");
+      const [storiesStats, feedStats] = await Promise.all([storiesExtractorPromise, feedExtractorPromise]);
+      this.activeExtractors = [];
+      const totalExtracted = storiesStats.extracted + feedStats.extracted;
+      const totalSkipped = storiesStats.skipped + feedStats.skipped;
+      const totalFailed = storiesStats.failed + feedStats.failed;
+      console.log(`\u{1F680} Extraction complete: ${totalExtracted} usable, ${totalSkipped} skipped, ${totalFailed} failed`);
+      if (totalExtracted < 3) {
+        console.warn(`\u{1F680} Very few usable captures (${totalExtracted}), digest quality may be low`);
       }
-      const loadFiltered = (dir, source) => {
+      const loadCaptured = (dir, source) => {
         if (!import_fs7.default.existsSync(dir)) return [];
         return import_fs7.default.readdirSync(dir).filter((f) => f.endsWith(".jpg")).sort().map((filename) => {
+          const imagePath = import_path5.default.join(dir, filename);
           const jsonPath = import_path5.default.join(dir, filename.replace(".jpg", ".json"));
-          let filterReason;
+          let extraction;
           if (import_fs7.default.existsSync(jsonPath)) {
             try {
               const sidecar = JSON.parse(import_fs7.default.readFileSync(jsonPath, "utf-8"));
-              if (typeof sidecar?.filterReason === "string") {
-                filterReason = sidecar.filterReason;
+              if (sidecar && typeof sidecar.extraction === "object") {
+                extraction = sidecar.extraction;
               }
             } catch {
             }
           }
           return {
-            screenshot: import_fs7.default.readFileSync(import_path5.default.join(dir, filename)),
+            screenshot: import_fs7.default.readFileSync(imagePath),
             source,
-            filterReason
+            imagePath,
+            extraction
           };
         });
       };
-      const allFiltered = [...loadFiltered(filteredStoriesDir, "story"), ...loadFiltered(filteredFeedDir, "feed")];
-      const bestCaptures = allFiltered.map((cap, index) => ({
+      const allCaptured = [...loadCaptured(rawStoriesDir, "story"), ...loadCaptured(rawFeedDir, "feed")];
+      const bestCaptures = allCaptured.map((cap, index) => ({
         id: index + 1,
         screenshot: cap.screenshot,
         source: cap.source,
         timestamp: Date.now(),
         scrollPosition: 0,
-        filterReason: cap.filterReason
+        imagePath: cap.imagePath,
+        extraction: cap.extraction
       }));
-      console.log(`\u{1F680} Loaded ${bestCaptures.length} filtered screenshots`);
+      console.log(`\u{1F680} Loaded ${bestCaptures.length} raw screenshots with extractions`);
       console.log("\u{1F680} Generating digest...");
       const digestGenerator = new DigestGeneration(apiKey);
       const analysis = await digestGenerator.generateDigest(bestCaptures, {
@@ -43982,7 +44129,7 @@ var RunManager = class _RunManager {
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.webContents.send("analysis-ready", metadataRecord);
       }
-      console.log(`\u{1F680} Run complete! Kept: ${totalKept}, Rejected: ${totalRejected}`);
+      console.log(`\u{1F680} Run complete! Extracted: ${totalExtracted}, Skipped: ${totalSkipped}, Failed: ${totalFailed}`);
     } catch (error) {
       console.error("\u{1F680} Run failed:", error.message);
       this.activeScraper = null;
@@ -44003,7 +44150,7 @@ var RunManager = class _RunManager {
   }
   finishRun() {
     this.status = "idle";
-    this.activeFilters = [];
+    this.activeExtractors = [];
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send("run-complete", {});
     }
@@ -44059,7 +44206,7 @@ var createWindow = () => {
     },
     icon: import_path6.default.join(__dirname3, "../../build/icon-standard.png")
   });
-  if (process.platform === "darwin" && process.env.VITE_DEV_SERVER_URL) {
+  if (process.platform === "darwin") {
     const iconPath = import_path6.default.join(__dirname3, "../../build/icon-standard.png");
     import_electron7.app.dock?.setIcon(iconPath);
   }
@@ -44073,9 +44220,9 @@ var createWindow = () => {
     console.log("Creating window with URL:", url);
     mainWindow.loadURL(url);
   } else {
-    const filePath = import_path6.default.join(__dirname3, "../../dist/index.html");
-    console.log("Loading file path:", filePath);
-    mainWindow.loadFile(filePath);
+    const url = "kowalski-local://app/";
+    console.log("Loading renderer via custom scheme:", url);
+    mainWindow.loadURL(url);
   }
   mainWindow.webContents.on("did-finish-load", () => {
     console.log("\u2705 did-finish-load: Main window content loaded successfully.");
@@ -44099,10 +44246,22 @@ var createWindow = () => {
   });
 };
 import_electron7.app.on("ready", () => {
+  const rendererDistDir = import_path6.default.join(__dirname3, "../../dist");
   const protocolHandler = (request, callback) => {
     const url = new URL(request.url);
-    const recordId = url.hostname;
-    const filePath = url.pathname.startsWith("/") ? url.pathname.slice(1) : url.pathname;
+    const hostname = url.hostname;
+    const rawPath = url.pathname.startsWith("/") ? url.pathname.slice(1) : url.pathname;
+    if (hostname === "app") {
+      const candidate = rawPath ? import_path6.default.join(rendererDistDir, rawPath) : import_path6.default.join(rendererDistDir, "index.html");
+      if (import_fs8.default.existsSync(candidate) && import_fs8.default.statSync(candidate).isFile()) {
+        callback({ path: candidate });
+      } else {
+        callback({ path: import_path6.default.join(rendererDistDir, "index.html") });
+      }
+      return;
+    }
+    const recordId = hostname;
+    const filePath = rawPath;
     const userDataPath2 = import_electron7.app.getPath("userData");
     const fullPath = import_path6.default.join(userDataPath2, "analysis_records", recordId, filePath);
     console.log(`\u{1F4F7} Protocol request: ${request.url}`);

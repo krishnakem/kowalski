@@ -114,9 +114,13 @@ export class ChromiumVersionHelper {
     }
 
     /**
-     * Gets the Playwright cache directory for the current platform
+     * Gets the Playwright cache directory for the current platform.
+     * In a packaged app, Chromium is bundled under Contents/Resources/playwright-browsers.
      */
     private static getPlaywrightCacheDir(userHome: string): string {
+        if (app.isPackaged) {
+            return path.join(process.resourcesPath, 'playwright-browsers');
+        }
         if (process.platform === 'darwin') {
             return path.join(userHome, 'Library/Caches/ms-playwright');
         } else if (process.platform === 'win32') {
@@ -187,21 +191,22 @@ export class ChromiumVersionHelper {
     static getCustomExecutablePath(): string {
         const userHome = app.getPath('home');
         const revision = this.getLatestRevision();
+        const cacheDir = this.getPlaywrightCacheDir(userHome);
 
         if (process.platform === 'darwin') {
             return path.join(
-                userHome,
-                `Library/Caches/ms-playwright/chromium-${revision}/chrome-mac-arm64/Kowalski.app/Contents/MacOS/Google Chrome for Testing`
+                cacheDir,
+                `chromium-${revision}/chrome-mac-arm64/Kowalski.app/Contents/MacOS/Google Chrome for Testing`
             );
         } else if (process.platform === 'win32') {
             return path.join(
-                userHome,
-                `AppData/Local/ms-playwright/chromium-${revision}/chrome-win/Kowalski.exe`
+                cacheDir,
+                `chromium-${revision}/chrome-win/Kowalski.exe`
             );
         } else {
             return path.join(
-                userHome,
-                `.cache/ms-playwright/chromium-${revision}/chrome-linux/Kowalski`
+                cacheDir,
+                `chromium-${revision}/chrome-linux/Kowalski`
             );
         }
     }

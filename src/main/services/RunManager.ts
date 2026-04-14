@@ -5,8 +5,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { BrowserManager } from './BrowserManager.js';
 import { Kowalski } from './Kowalski.js';
 import { DigestGeneration } from './DigestGeneration.js';
-import { Filterer } from './Filterer.js';
+import { Extractor } from './Extractor.js';
 import { SecureKeyManager } from './SecureKeyManager.js';
+import { ExtractionBlock } from '../../types/instagram.js';
 
 const __filename = decodeURIComponent(new URL(import.meta.url).pathname);
 const __dirname = path.dirname(__filename);
@@ -20,7 +21,7 @@ export class RunManager {
 
     // Active run state (for stop support)
     private activeScraper: Kowalski | null = null;
-    private activeFilters: Filterer[] = [];
+    private activeExtractors: Extractor[] = [];
 
     private constructor() {}
 
@@ -49,10 +50,10 @@ export class RunManager {
             // step 8 after browseAndCapture returns.
             this.activeScraper.stop();
         }
-        for (const f of this.activeFilters) {
-            f.stop();
+        for (const e of this.activeExtractors) {
+            e.stop();
         }
-        if (!this.activeScraper && this.activeFilters.length === 0) {
+        if (!this.activeScraper && this.activeExtractors.length === 0) {
             console.log('🛑 No active run to stop');
         }
     }
@@ -113,20 +114,17 @@ export class RunManager {
             const sessionDir = path.join(screenshotsDir, `run_${dateTime}`);
             const rawStoriesDir = path.join(sessionDir, 'raw', 'stories');
             const rawFeedDir = path.join(sessionDir, 'raw', 'feed');
-            const filteredStoriesDir = path.join(sessionDir, 'filtered', 'stories');
-            const filteredFeedDir = path.join(sessionDir, 'filtered', 'feed');
             fs.mkdirSync(rawStoriesDir, { recursive: true });
             fs.mkdirSync(rawFeedDir, { recursive: true });
-            fs.mkdirSync(filteredStoriesDir, { recursive: true });
-            fs.mkdirSync(filteredFeedDir, { recursive: true });
 
-            // 6. Start filter agents in background
-            console.log('🚀 Starting filter agents...');
-            const storiesFilter = new Filterer(rawStoriesDir, filteredStoriesDir, apiKey);
-            const feedFilter = new Filterer(rawFeedDir, filteredFeedDir, apiKey);
-            this.activeFilters = [storiesFilter, feedFilter];
-            const storiesFilterPromise = storiesFilter.start();
-            const feedFilterPromise = feedFilter.start();
+            // 6. Start extractor agents in background — one vision call per raw image,
+            // result merged into the existing sidecar JSON in place. No filtered/ dir.
+            console.log('🚀 Starting extractor agents...');
+            const storiesExtractor = new Extractor(rawStoriesDir, apiKey);
+            const feedExtractor = new Extractor(rawFeedDir, apiKey);
+            this.activeExtractors = [storiesExtractor, feedExtractor];
+            const storiesExtractorPromise = storiesExtractor.start();
+            const feedExtractorPromise = feedExtractor.start();
 
             // 7. Browse Instagram
             console.log('🚀 Browsing Instagram...');
@@ -143,55 +141,61 @@ export class RunManager {
             await browserManager.close();
             context = null;
 
-            // 9. Wait for filter agents
-            console.log('🚀 Waiting for filter agents...');
-            const [storiesStats, feedStats] = await Promise.all([storiesFilterPromise, feedFilterPromise]);
-            this.activeFilters = [];
-            const totalKept = storiesStats.kept + feedStats.kept;
-            const totalRejected = storiesStats.rejected + feedStats.rejected;
-            console.log(`🚀 Filter complete: ${totalKept} kept, ${totalRejected} rejected`);
+            // 9. Wait for extractor agents
+            console.log('🚀 Waiting for extractor agents...');
+            const [storiesStats, feedStats] = await Promise.all([storiesExtractorPromise, feedExtractorPromise]);
+            this.activeExtractors = [];
+            const totalExtracted = storiesStats.extracted + feedStats.extracted;
+            const totalSkipped = storiesStats.skipped + feedStats.skipped;
+            const totalFailed = storiesStats.failed + feedStats.failed;
+            console.log(`🚀 Extraction complete: ${totalExtracted} usable, ${totalSkipped} skipped, ${totalFailed} failed`);
 
-            if (totalKept < 3) {
-                console.warn(`🚀 Very few filtered captures (${totalKept}), digest quality may be low`);
+            if (totalExtracted < 3) {
+                console.warn(`🚀 Very few usable captures (${totalExtracted}), digest quality may be low`);
             }
 
-            // 10. Load filtered images + filterReason sidecars
-            const loadFiltered = (dir: string, source: 'story' | 'feed') => {
-                if (!fs.existsSync(dir)) return [] as Array<{ screenshot: Buffer; source: 'story' | 'feed'; filterReason?: string }>;
+            // 10. Load raw images + extraction sidecars. We keep skip-marked items in
+            // memory so the digest prompt can decide what to do; DigestGeneration filters
+            // them out before assembling the prompt.
+            const loadCaptured = (dir: string, source: 'story' | 'feed') => {
+                if (!fs.existsSync(dir)) return [] as Array<{ screenshot: Buffer; source: 'story' | 'feed'; imagePath: string; extraction?: ExtractionBlock }>;
                 return fs.readdirSync(dir)
                     .filter((f: string) => f.endsWith('.jpg'))
                     .sort()
                     .map((filename: string) => {
+                        const imagePath = path.join(dir, filename);
                         const jsonPath = path.join(dir, filename.replace('.jpg', '.json'));
-                        let filterReason: string | undefined;
+                        let extraction: ExtractionBlock | undefined;
                         if (fs.existsSync(jsonPath)) {
                             try {
                                 const sidecar = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
-                                if (typeof sidecar?.filterReason === 'string') {
-                                    filterReason = sidecar.filterReason;
+                                if (sidecar && typeof sidecar.extraction === 'object') {
+                                    extraction = sidecar.extraction as ExtractionBlock;
                                 }
                             } catch {
-                                // ignore malformed sidecar
+                                // ignore malformed sidecar — image still loads
                             }
                         }
                         return {
-                            screenshot: fs.readFileSync(path.join(dir, filename)),
+                            screenshot: fs.readFileSync(imagePath),
                             source,
-                            filterReason
+                            imagePath,
+                            extraction
                         };
                     });
             };
-            const allFiltered = [...loadFiltered(filteredStoriesDir, 'story'), ...loadFiltered(filteredFeedDir, 'feed')];
+            const allCaptured = [...loadCaptured(rawStoriesDir, 'story'), ...loadCaptured(rawFeedDir, 'feed')];
 
-            const bestCaptures = allFiltered.map((cap, index) => ({
+            const bestCaptures = allCaptured.map((cap, index) => ({
                 id: index + 1,
                 screenshot: cap.screenshot,
                 source: cap.source as 'feed' | 'story' | 'profile' | 'carousel',
                 timestamp: Date.now(),
                 scrollPosition: 0,
-                filterReason: cap.filterReason
+                imagePath: cap.imagePath,
+                extraction: cap.extraction
             }));
-            console.log(`🚀 Loaded ${bestCaptures.length} filtered screenshots`);
+            console.log(`🚀 Loaded ${bestCaptures.length} raw screenshots with extractions`);
 
             // 11. Generate digest
             console.log('🚀 Generating digest...');
@@ -265,7 +269,7 @@ export class RunManager {
                 this.mainWindow.webContents.send('analysis-ready', metadataRecord);
             }
 
-            console.log(`🚀 Run complete! Kept: ${totalKept}, Rejected: ${totalRejected}`);
+            console.log(`🚀 Run complete! Extracted: ${totalExtracted}, Skipped: ${totalSkipped}, Failed: ${totalFailed}`);
 
         } catch (error: any) {
             console.error('🚀 Run failed:', error.message);
@@ -292,7 +296,7 @@ export class RunManager {
 
     private finishRun() {
         this.status = 'idle';
-        this.activeFilters = [];
+        this.activeExtractors = [];
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
             this.mainWindow.webContents.send('run-complete', {});
         }

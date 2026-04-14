@@ -78,9 +78,11 @@ const createWindow = () => {
     icon: path.join(__dirname, '../../build/icon-standard.png')
   });
 
-  // macOS Dock Icon (Dev Mode Fix)
-  if (process.platform === 'darwin' && process.env.VITE_DEV_SERVER_URL) {
-    // CRITICAL: Point to the Standard (Apple Grid) icon
+  // macOS Dock Icon — run in dev and packaged. macOS's runtime PNG scaler
+  // produces a sharper Dock icon than the baked .icns slots. The .icns is
+  // built from the same source (icon-standard.png) so the pre-launch icon
+  // LaunchServices paints matches this one — no visible swap.
+  if (process.platform === 'darwin') {
     const iconPath = path.join(__dirname, '../../build/icon-standard.png');
     app.dock?.setIcon(iconPath);
   }
@@ -104,9 +106,11 @@ const createWindow = () => {
     // Open the DevTools.
     // mainWindow.webContents.openDevTools();
   } else {
-    const filePath = path.join(__dirname, '../../dist/index.html');
-    console.log("Loading file path:", filePath);
-    mainWindow.loadFile(filePath);
+    // Use the custom scheme so react-router's BrowserRouter sees a clean
+    // pathname (e.g. "/") rather than a long file:// URL that matches nothing.
+    const url = 'kowalski-local://app/';
+    console.log("Loading renderer via custom scheme:", url);
+    mainWindow.loadURL(url);
   }
 
   // --- DIAGNOSTIC LISTENERS ---
@@ -145,14 +149,33 @@ app.on('ready', () => {
   // Register kowalski-local:// protocol handler for serving local images
   // Maps: kowalski-local://{recordId}/images/{filename} -> {userData}/analysis_records/{recordId}/images/{filename}
 
+  // Path to the built renderer bundle (Vite output). In a packaged app this
+  // is Contents/Resources/app/dist; in dev it's <repo>/dist.
+  const rendererDistDir = path.join(__dirname, '../../dist');
+
   // Define the protocol handler function (reused for both sessions)
   const protocolHandler = (request: Electron.ProtocolRequest, callback: (response: Electron.ProtocolResponse) => void) => {
     const url = new URL(request.url);
+    const hostname = url.hostname;
+    const rawPath = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname;
+
+    // Renderer bundle served via kowalski-local://app/... so react-router
+    // has a clean pathname to match against.
+    if (hostname === 'app') {
+      const candidate = rawPath ? path.join(rendererDistDir, rawPath) : path.join(rendererDistDir, 'index.html');
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        callback({ path: candidate });
+      } else {
+        // SPA fallback — unknown path, hand the router index.html.
+        callback({ path: path.join(rendererDistDir, 'index.html') });
+      }
+      return;
+    }
+
     // URL format: kowalski-local://{recordId}/images/{filename}
     // hostname = recordId, pathname = /images/{filename}
-    const recordId = url.hostname;
-    // Remove leading slash from pathname to avoid path.join issues
-    const filePath = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname;
+    const recordId = hostname;
+    const filePath = rawPath;
 
     const userDataPath = app.getPath('userData');
     const fullPath = path.join(userDataPath, 'analysis_records', recordId, filePath);

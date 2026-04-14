@@ -1,28 +1,16 @@
 /**
- * DigestGeneration — Editorial Digest Writer
+ * DigestGeneration — Editorial Digest Writer (Text-Only)
  *
- * Generates a single markdown editorial column from filtered Instagram screenshots
- * plus their per-image filterReason descriptions. The agent picks the title.
+ * Composes a single markdown editorial column from per-image extractions written by
+ * the Extractor agent. Does NOT re-send screenshots to the vision API — every visual
+ * fact has already been extracted upstream into the sidecar JSON. This is what makes
+ * the Haiku-default model viable.
  */
 
-import { CapturedPost, DigestConfig } from '../../types/instagram.js';
+import { CapturedPost, DigestConfig, ExtractionBlock } from '../../types/instagram.js';
 import { AnalysisObject } from '../../types/analysis.js';
 import { ModelConfig } from '../../shared/modelConfig.js';
 import { UsageService } from './UsageService.js';
-
-interface ImageContent {
-    type: 'image';
-    source: {
-        type: 'base64';
-        media_type: string;
-        data: string;
-    };
-}
-
-interface TextContent {
-    type: 'text';
-    text: string;
-}
 
 export class DigestGeneration {
     private apiKey: string;
@@ -41,6 +29,15 @@ export class DigestGeneration {
             throw new Error('INSUFFICIENT_CONTENT: No screenshots captured');
         }
 
+        const usable = captures.filter(c => {
+            const u = c.extraction?.usefulness;
+            return u !== 'skip';
+        });
+
+        if (usable.length === 0) {
+            throw new Error('INSUFFICIENT_CONTENT: All captures were marked skip by the extractor');
+        }
+
         const now = new Date();
         const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
         const dateStr = now.toLocaleDateString('en-US', {
@@ -49,24 +46,10 @@ export class DigestGeneration {
             year: 'numeric'
         });
 
-        const imageContents: ImageContent[] = captures.map((capture) => ({
-            type: 'image' as const,
-            source: {
-                type: 'base64' as const,
-                media_type: 'image/jpeg',
-                data: capture.screenshot.toString('base64')
-            }
-        }));
-
         const systemPrompt = this.buildSystemPrompt();
-        const userPrompt = this.buildUserPrompt(captures, dayName, dateStr);
+        const userPrompt = this.buildUserPrompt(usable, dayName, dateStr);
 
-        console.log(`🤖 Generating digest from ${captures.length} screenshots...`);
-
-        const messageContent: (TextContent | ImageContent)[] = [
-            { type: 'text', text: userPrompt },
-            ...imageContents
-        ];
+        console.log(`🤖 Generating digest from ${usable.length} extractions (${captures.length - usable.length} skipped)...`);
 
         const maxRetries = 4;
         let data: any;
@@ -84,7 +67,7 @@ export class DigestGeneration {
                     system: systemPrompt,
                     messages: [{
                         role: 'user',
-                        content: messageContent
+                        content: userPrompt
                     }],
                     max_tokens: 16384
                 })
@@ -128,11 +111,13 @@ export class DigestGeneration {
             throw new Error('DIGEST_GENERATION_FAILED: No content in response');
         }
 
-        return this.buildAnalysisObject(markdown, config, dayName, dateStr, captures);
+        return this.buildAnalysisObject(markdown, config, dayName, dateStr, captures, usable);
     }
 
     private buildSystemPrompt(): string {
         return `You are the Kowalski digest writer. You compose a single short markdown editorial column summarizing what happened on the Instagram accounts a reader follows. You write like a beat reporter filing a morning column — not a log parser, not a UI describer.
+
+You receive STRUCTURED EXTRACTIONS, one per captured screenshot. Each extraction was written by an upstream vision agent and contains the handle, content type, caption, overlay text, named entities, verbatim numbers/scores, dates, and a literal narrative. Treat the extractions as ground truth. You do NOT see the images. Do not invent details that are not in the extractions.
 
 ══════════════════════════════════════════
 VOICE
@@ -144,19 +129,19 @@ The reader wants to know what happened in the world their accounts cover, NOT wh
 CORE PRINCIPLES
 ══════════════════════════════════════════
 
-1. SYNTHESIZE, DON'T ENUMERATE. Thirty-five frames of a single game become ONE paragraph about the game. Group every item by narrative first, then by account. Never emit one item per captured frame.
+1. SYNTHESIZE, DON'T ENUMERATE. Thirty-five frames of a single game become ONE paragraph about the game. Group every item by narrative first, then by account. Never emit one item per extraction.
 
 2. LEAD WITH THE STORY, NOT THE FORMAT. Never reference the medium. Forbidden words and phrases:
-   "graphic", "infographic", "story card", "story frame", "post modal", "visible", "clearly visible", "posted", "shared a post about", "was featured", "full-screen", "overlay", "screenshot", "frame showing".
+   "graphic", "infographic", "story card", "story frame", "post modal", "visible", "clearly visible", "posted", "shared a post about", "was featured", "full-screen", "overlay", "screenshot", "frame showing", "extraction".
    Do not mention sponsor tags ("presented by Google", "presented by Chase", "presented by Advantant", "presented by DoorDash", "presented by PagerDuty", "presented by AWS") unless the sponsorship itself is the news.
 
-3. BE SPECIFIC OR CUT IT. Every sentence must carry a name, number, score, date, or concrete fact. If the underlying data is vague or partial, CUT the item entirely rather than write around it.
+3. BE SPECIFIC OR CUT IT. Every sentence must carry a name, number, score, date, or concrete fact pulled from the extraction. If the underlying data is vague or partial, CUT the item entirely rather than write around it.
 
 4. NEVER SHOW DATA-QUALITY ARTIFACTS. No "@unknown", no "[unclear]", no "[team]", no raw turn numbers, no timestamps like "22h ago", no "Instagram", no image indices. If a handle didn't resolve from context, drop the item or fold it into a section whose ownership is obvious. The reader should never see scaffolding.
 
 5. LEAD WITH THE BIGGEST STORY. Pick the single most consequential item of the day and make it a "Top Story" with a real headline. Everything else is a shorter section beneath it.
 
-6. USE ACCOUNT NAMES AS SECTION HEADERS. Sections are like "@nba", "@warriors", "@uofmichigan". Lowercase the handle. Never emit per-item "@unknown" labels.
+6. USE ACCOUNT NAMES AS SECTION HEADERS. Sections are like "## @nba", "## @warriors", "## @uofmichigan". Lowercase the handle. Never emit per-item "@unknown" labels.
 
 ══════════════════════════════════════════
 TITLE GENERATION
@@ -221,17 +206,17 @@ DON'T
 THE "WOULD A SPORTSWRITER WRITE THIS?" TEST
 ══════════════════════════════════════════
 
-Before any sentence ships, ask: would this appear in a newspaper sports section? If it reads like a screenshot caption, a CMS field, or a debug log — rewrite or cut.
+Before any sentence ships, ask: would this appear in a newspaper sports section? If it reads like an extraction caption, a CMS field, or a debug log — rewrite or cut.
 
 ══════════════════════════════════════════
 HANDLE RESOLUTION
 ══════════════════════════════════════════
 
-Many filterReason strings will not name the source account explicitly. Resolve ownership from context:
-  - A "Warriors Instagram story" or "Starting Five lineup" or game scoreboard from the Warriors' tray belongs to @warriors.
-  - "NBA Instagram story" or "NBA post" belongs to @nba.
-  - "uofmichigan" or Michigan campus content belongs to @uofmichigan.
+Each extraction has a handle field, but it may be null. Resolve ownership from context:
+  - Warriors team imagery, Starting Five lineup, or Chase Center scoreboard belongs to @warriors.
   - "NBA Spain" → @nbaspain. "NBA Indonesia" → @nbaindonesia.
+  - Generic NBA branding belongs to @nba.
+  - Michigan campus content or "uofmichigan" mentions belong to @uofmichigan.
 If you genuinely cannot place an item with confidence, drop it.
 
 ══════════════════════════════════════════
@@ -241,6 +226,34 @@ OUTPUT
 Return ONLY the markdown document. Begin immediately with "# " and the generated title. No JSON, no code fences, no preamble.`;
     }
 
+    private renderExtraction(c: CapturedPost, index: number): string {
+        const e: ExtractionBlock | undefined = c.extraction;
+        if (!e) {
+            return `[${index + 1}] (no extraction available — image preserved on disk only)`;
+        }
+
+        const lines: string[] = [];
+        const handle = e.handle || '?';
+        lines.push(`[${index + 1}] ${handle} | ${e.contentType} | usefulness=${e.usefulness}`);
+
+        if (e.caption) lines.push(`  caption: ${truncate(e.caption, 400)}`);
+        if (e.overlayText.length) lines.push(`  overlay: ${e.overlayText.map(s => `"${s}"`).join(' | ')}`);
+
+        const ent = e.entities;
+        const entityParts: string[] = [];
+        if (ent.people.length) entityParts.push(`people=${ent.people.join(', ')}`);
+        if (ent.teams.length) entityParts.push(`teams=${ent.teams.join(', ')}`);
+        if (ent.places.length) entityParts.push(`places=${ent.places.join(', ')}`);
+        if (ent.products.length) entityParts.push(`products=${ent.products.join(', ')}`);
+        if (entityParts.length) lines.push(`  entities: ${entityParts.join(' | ')}`);
+
+        if (e.numbers.length) lines.push(`  numbers: ${e.numbers.join(' | ')}`);
+        if (e.dates.length) lines.push(`  dates: ${e.dates.join(' | ')}`);
+        lines.push(`  narrative: ${e.narrative}`);
+
+        return lines.join('\n');
+    }
+
     private buildUserPrompt(
         captures: CapturedPost[],
         dayName: string,
@@ -248,27 +261,27 @@ Return ONLY the markdown document. Begin immediately with "# " and the generated
     ): string {
         const feedItems = captures.filter(c => c.source === 'feed');
         const storyItems = captures.filter(c => c.source === 'story');
+        // Profile/carousel sources, if any, fall in with feed for prompt purposes.
+        const otherItems = captures.filter(c => c.source !== 'feed' && c.source !== 'story');
 
         const feedCount = feedItems.length;
         const storyCount = storyItems.length;
 
-        const renderItem = (c: CapturedPost, index: number): string => {
-            const reason = c.filterReason?.trim() || '(no description available)';
-            return `[${index + 1}] ${reason}`;
-        };
-
         const storiesBlock = storyItems.length
-            ? storyItems.map(renderItem).join('\n')
+            ? storyItems.map((c, i) => this.renderExtraction(c, i)).join('\n\n')
             : '(none)';
         const feedBlock = feedItems.length
-            ? feedItems.map(renderItem).join('\n')
+            ? feedItems.map((c, i) => this.renderExtraction(c, i)).join('\n\n')
             : '(none)';
+        const otherBlock = otherItems.length
+            ? `\n══════════════════════════════════════════\nOTHER (${otherItems.length} total)\n══════════════════════════════════════════\n${otherItems.map((c, i) => this.renderExtraction(c, i)).join('\n\n')}\n`
+            : '';
 
         return `Today is ${dayName}, ${dateStr}.
 
-You have ${captures.length} filtered Instagram captures from this morning's run: ${storyCount} story frames and ${feedCount} feed posts.
+You have ${captures.length} usable Instagram extractions from this morning's run: ${storyCount} story frames and ${feedCount} feed posts.${otherItems.length ? ` (${otherItems.length} additional items.)` : ''}
 
-Each item below is a one-line description written by the upstream filter agent describing what was on the screen. Use these descriptions plus the attached images to determine WHAT happened in the world the reader's accounts cover. Then write the editorial column following the rules in your system prompt.
+Each block below was written by the upstream Extractor — the only source of truth about what was on screen. Quote numbers, scores, names, and dates verbatim from these extractions. Do not invent details that are not present.
 
 ══════════════════════════════════════════
 STORY FRAMES (chronological, ${storyCount} total)
@@ -279,31 +292,29 @@ ${storiesBlock}
 FEED POSTS (chronological, ${feedCount} total)
 ══════════════════════════════════════════
 ${feedBlock}
-
-══════════════════════════════════════════
-ATTACHED IMAGES
-══════════════════════════════════════════
-
-${captures.length} JPEGs are attached after this message in the same order: stories first (${storyCount}), then feed (${feedCount}). Use them to disambiguate handles, scores, and details, but write about the underlying events — never about the screens themselves.
-
+${otherBlock}
 Now write the editorial column. Begin immediately with "# " followed by your generated title. No preamble.`;
     }
 
     private buildAnalysisObject(
         markdown: string,
         config: DigestConfig,
-        dayName: string,
-        dateStr: string,
-        captures: CapturedPost[]
+        _dayName: string,
+        _dateStr: string,
+        allCaptures: CapturedPost[],
+        usableCaptures: CapturedPost[]
     ): AnalysisObject {
         const cleaned = this.stripCodeFences(markdown).trim();
 
         const titleMatch = cleaned.match(/^#\s+(.+?)\s*$/m);
         const title = titleMatch?.[1]?.trim() || 'Today';
 
-        const storyCount = captures.filter(c => c.source === 'story').length;
-        const feedCount = captures.filter(c => c.source === 'feed').length;
-        const subtitle = `${storyCount} story frames and ${feedCount} posts reviewed`;
+        const storyCount = usableCaptures.filter(c => c.source === 'story').length;
+        const feedCount = usableCaptures.filter(c => c.source === 'feed').length;
+        const skippedCount = allCaptures.length - usableCaptures.length;
+        const subtitle = skippedCount > 0
+            ? `${storyCount} story frames and ${feedCount} posts reviewed (${skippedCount} skipped)`
+            : `${storyCount} story frames and ${feedCount} posts reviewed`;
 
         console.log(`✅ Digest generated: "${title}"`);
 
@@ -326,4 +337,9 @@ Now write the editorial column. Begin immediately with "# " followed by your gen
         const fenceMatch = text.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/);
         return fenceMatch ? fenceMatch[1] : text;
     }
+}
+
+function truncate(s: string, max: number): string {
+    if (s.length <= max) return s;
+    return s.slice(0, max - 1) + '…';
 }
