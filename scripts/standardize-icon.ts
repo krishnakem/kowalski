@@ -28,26 +28,13 @@ async function standardizeIcon() {
         // 2. Resize content to the standard App Icon Box size
         image.resize({ w: TARGET_SIZE, h: TARGET_SIZE });
 
-        // 2b. Flatten the background. The source artwork has a subtle radial
-        // gradient (lighter top-left, darker bottom-right) that reads as
-        // "gloss" and contributes to a soft/blurry perception in the dock.
-        // Average all light pixels to pick a single flat color, then repaint
-        // every light pixel with it. Foreground (dark) pixels are untouched.
+        // 2b. Flatten the background to the app's canvas color (#F9F8F5).
+        // The source artwork has a subtle radial gradient that reads as
+        // "gloss" in the dock; we repaint every light pixel with the exact
+        // background color used by the app window so the dock icon visually
+        // continues into the app surface. Foreground (dark) pixels are untouched.
         const LUMA_THRESHOLD = 128; // pixels above this are considered background
-        let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
-        for (let y = 0; y < TARGET_SIZE; y++) {
-            for (let x = 0; x < TARGET_SIZE; x++) {
-                const c = image.getPixelColor(x, y);
-                const r = (c >>> 24) & 0xFF;
-                const g = (c >>> 16) & 0xFF;
-                const b = (c >>> 8) & 0xFF;
-                const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                if (luma >= LUMA_THRESHOLD) { bgR += r; bgG += g; bgB += b; bgCount++; }
-            }
-        }
-        const flatR = Math.round(bgR / bgCount);
-        const flatG = Math.round(bgG / bgCount);
-        const flatB = Math.round(bgB / bgCount);
+        const flatR = 0xF9, flatG = 0xF8, flatB = 0xF5;
         const flatColor = ((flatR << 24) | (flatG << 16) | (flatB << 8) | 0xFF) >>> 0;
         for (let y = 0; y < TARGET_SIZE; y++) {
             for (let x = 0; x < TARGET_SIZE; x++) {
@@ -59,7 +46,7 @@ async function standardizeIcon() {
                 if (luma >= LUMA_THRESHOLD) image.setPixelColor(flatColor, x, y);
             }
         }
-        console.log(`Flat background: rgb(${flatR}, ${flatG}, ${flatB})`);
+        console.log(`Flat background: rgb(${flatR}, ${flatG}, ${flatB}) — matches app canvas`);
 
         // 3. Create the Shape Mask (Apple Superellipse)
         // We mask the 824x824 content directly
