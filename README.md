@@ -62,10 +62,11 @@ Instagram's terms of service prohibit automated access, and Instagram actively w
 2. **Before first launch, open Terminal and run:**
 
    ```
+   sudo codesign --force --deep --sign - /Applications/Kowalski.app
    xattr -cr /Applications/Kowalski.app
    ```
 
-   macOS marks apps downloaded from the internet as quarantined and — because Kowalski isn't signed with an Apple Developer ID — Gatekeeper will refuse to open it with a misleading "damaged" error. The command above strips the quarantine flag. You only need to run it once.
+   macOS marks apps downloaded from the internet as quarantined and — because Kowalski isn't signed with an Apple Developer ID — Gatekeeper will refuse to open it with a misleading "damaged" error. The first command re-signs the app (and the bundled Chromium inside it) so macOS will spawn its child processes; the second strips the quarantine flag. You only need to run them once.
 
 3. Launch Kowalski from Applications.
 

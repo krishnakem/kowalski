@@ -27285,7 +27285,20 @@ var BrowserManager = class _BrowserManager {
           console.warn("\u26A0\uFE0F BrowserManager: Custom browser not found, using Playwright default.");
         }
       } else {
-        console.log("\u{1F4E6} BrowserManager: Packaged mode \u2014 using Playwright default via PLAYWRIGHT_BROWSERS_PATH");
+        const revision = ChromiumVersionHelper.getLatestRevision();
+        const bundledHeadlessShell = import_path2.default.join(
+          process.resourcesPath,
+          "playwright-browsers",
+          `chromium_headless_shell-${revision}`,
+          "chrome-headless-shell-mac-arm64",
+          "chrome-headless-shell"
+        );
+        if (import_fs2.default.existsSync(bundledHeadlessShell)) {
+          console.log("\u{1F4E6} BrowserManager: Packaged mode \u2014 using bundled headless shell:", bundledHeadlessShell);
+          executablePath = bundledHeadlessShell;
+        } else {
+          console.warn("\u26A0\uFE0F BrowserManager: Bundled headless shell not found at", bundledHeadlessShell);
+        }
       }
       const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       this.browserContext = await import_playwright.chromium.launchPersistentContext(persistentContextPath, {

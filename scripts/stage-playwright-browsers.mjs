@@ -15,24 +15,27 @@ function playwrightCacheDir() {
     return path.join(home, '.cache/ms-playwright');
 }
 
-function findLatestChromiumDir(cacheDir) {
-    if (!fs.existsSync(cacheDir)) return null;
-    const entries = fs.readdirSync(cacheDir)
-        .filter(d => d.startsWith('chromium-') && !d.includes('headless'))
-        .map(d => ({ name: d, rev: parseInt(d.replace('chromium-', ''), 10) }))
-        .filter(e => !Number.isNaN(e.rev))
-        .sort((a, b) => b.rev - a.rev);
-    return entries[0]?.name ?? null;
+// Read the chromium revision the installed playwright-core actually uses.
+// Bundling the WRONG revision (e.g. the highest one in a polluted shared
+// cache) means Playwright won't find its expected browser at runtime and
+// will silently fail to launch.
+function expectedChromiumDir() {
+    const browsersJsonPath = path.join(projectRoot, 'node_modules', 'playwright-core', 'browsers.json');
+    const browsersJson = JSON.parse(fs.readFileSync(browsersJsonPath, 'utf8'));
+    const chromium = browsersJson.browsers.find(b => b.name === 'chromium');
+    if (!chromium) throw new Error('chromium entry not found in playwright-core/browsers.json');
+    return `chromium-${chromium.revision}`;
 }
 
 function ensureChromiumInstalled(cacheDir) {
-    const existing = findLatestChromiumDir(cacheDir);
-    if (existing) return existing;
-    console.log('📥 Installing Playwright Chromium (not found in cache)...');
+    const expected = expectedChromiumDir();
+    if (fs.existsSync(path.join(cacheDir, expected))) return expected;
+    console.log(`📥 Installing Playwright Chromium ${expected} (not in cache)...`);
     execSync('npx playwright install chromium', { stdio: 'inherit' });
-    const after = findLatestChromiumDir(cacheDir);
-    if (!after) throw new Error('Failed to install Playwright Chromium');
-    return after;
+    if (!fs.existsSync(path.join(cacheDir, expected))) {
+        throw new Error(`Expected ${expected} not present after install`);
+    }
+    return expected;
 }
 
 function copyDir(src, dst) {
@@ -58,17 +61,27 @@ function copyDir(src, dst) {
 function main() {
     const cacheDir = playwrightCacheDir();
     const chromiumDirName = ensureChromiumInstalled(cacheDir);
-
-    const src = path.join(cacheDir, chromiumDirName);
-    const dst = path.join(stageRoot, chromiumDirName);
+    // Headless mode uses chrome-headless-shell, a separate binary. Both must
+    // be bundled or `headless: true` launches will fail in production.
+    const headlessShellDirName = chromiumDirName.replace('chromium-', 'chromium_headless_shell-');
 
     if (fs.existsSync(stageRoot)) {
         fs.rmSync(stageRoot, { recursive: true, force: true });
     }
     fs.mkdirSync(stageRoot, { recursive: true });
 
-    console.log(`📦 Staging ${chromiumDirName} → ${path.relative(projectRoot, dst)}`);
-    copyDir(src, dst);
+    for (const dirName of [chromiumDirName, headlessShellDirName]) {
+        const src = path.join(cacheDir, dirName);
+        if (!fs.existsSync(src)) {
+            console.log(`📥 ${dirName} not in cache, running playwright install...`);
+            execSync('npx playwright install chromium', { stdio: 'inherit' });
+            if (!fs.existsSync(src)) throw new Error(`${dirName} still missing after install`);
+        }
+        const dst = path.join(stageRoot, dirName);
+        console.log(`📦 Staging ${dirName} → ${path.relative(projectRoot, dst)}`);
+        copyDir(src, dst);
+    }
+
     console.log('✅ Playwright browsers staged for packaging.');
 }
 

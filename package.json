@@ -65,6 +65,7 @@
     ],
     "buildDependenciesFromSource": true,
     "asar": false,
+    "afterPack": "scripts/sign-app.mjs",
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.productivity",
