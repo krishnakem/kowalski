@@ -59,8 +59,15 @@ Instagram's terms of service prohibit automated access, and Instagram actively w
 ### Install
 
 1. Open the downloaded `.dmg` and drag **Kowalski** into your `Applications` folder.
-2. On first launch, right-click `Kowalski.app` → **Open** → **Open**. This bypasses Gatekeeper for the unsigned build — you only need to do it once.
+2. **Before first launch, open Terminal and run:**
 
+   ```
+   xattr -cr /Applications/Kowalski.app
+   ```
+
+   macOS marks apps downloaded from the internet as quarantined and — because Kowalski isn't signed with an Apple Developer ID — Gatekeeper will refuse to open it with a misleading "damaged" error. The command above strips the quarantine flag. You only need to run it once.
+
+3. Launch Kowalski from Applications.
 
 The app is self-contained — its own Chromium ships inside the bundle, so there's nothing else to install.
 

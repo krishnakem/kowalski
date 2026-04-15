@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "postinstall": "playwright install chromium",
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:compile": "node scripts/build-electron.mjs",
