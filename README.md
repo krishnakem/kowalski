@@ -4,6 +4,10 @@ An AI-powered desktop app that automatically browses your Instagram stories and 
 
 Kowalski runs a real Chromium browser via Playwright, drives it with Claude vision agents that "see" the page through screenshots and act with human-like mouse and scroll, and then synthesises everything it captured into a single readable editorial.
 
+## Demo
+
+https://github.com/user-attachments/assets/cd2cd415-29f4-499d-b649-8f1cbbd39fa8
+
 ## How It Works
 
 Kowalski is built around a three-agent pipeline. Each agent has a single job and they communicate through the filesystem rather than in-memory state, so a stuck or slow stage never blocks the others.
